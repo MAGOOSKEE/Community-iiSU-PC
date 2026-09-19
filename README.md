@@ -12,6 +12,7 @@ Runs iiSU (an Android emulation frontend) inside a Windows-hosted Android VM, pa
 - Your own copy of the iiSU APK
 - Whichever PC emulators you actually want to use (DuckStation, Dolphin, PCSX2, etc.) -- install these yourself
 - A few GB of free disk space and a decent internet connection (first run downloads the Android SDK + a system image)
+- **CPU VIRTUALIZATION MUST BE TURNED ON!** Do this in your bios. 
 
 ## First-time setup
 
