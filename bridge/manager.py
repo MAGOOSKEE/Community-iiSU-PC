@@ -45,7 +45,7 @@ INSTALLER_DIR = PROJECT_ROOT / "installer"
 sys.path.insert(0, str(PROJECT_ROOT))
 from shared import theme
 from shared.avatars import fetch_avatar_bytes, make_circular_photo, make_placeholder_circle
-from shared.emulator_defaults import describe_profile
+from shared.emulator_defaults import build_emulators_map, describe_profile
 from shared.theme import (
     BG, ENTRY_KWARGS, GRADIENT_STOPS, GRAY, GREEN, LISTBOX_KWARGS, PANEL_BG, PANEL_BG_HOVER,
     RED, TEXT, TEXT_DIM, FONT_BODY, FONT_HEADING, FONT_MONO, FONT_TITLE, Card, QueueWriter, draw_gradient_bar,
@@ -586,6 +586,18 @@ class Manager(tk.Tk):
         ttk.Button(btn_row, text="Remove selected", style="Ghost.TButton", command=self._remove_emulator).pack(side="left", padx=(8, 0))
         ttk.Button(btn_row, text="Test selected...", style="Ghost.TButton", command=self._test_emulator_mapping).pack(side="left", padx=(8, 0))
         ttk.Button(btn_row, text="Install Redirector Apps...", style="Ghost.TButton", command=lambda: RedirectorInstallDialog(self)).pack(side="left", padx=(8, 0))
+        ttk.Button(btn_row, text="Restore Defaults", style="Ghost.TButton", command=self._restore_default_emulators).pack(side="left", padx=(8, 0))
+
+    def _restore_default_emulators(self) -> None:
+        if not messagebox.askyesno(
+            "Restore default emulators?",
+            "This replaces every mapping in this list with iiSU-PC's built-in defaults "
+            "(shared/emulator_defaults.py). Any custom or edited mappings you've added "
+            "will be lost. Save afterward to keep the change.",
+        ):
+            return
+        self.config_data["emulators"] = build_emulators_map()
+        self._build_emulators_page()
 
     def _add_emulator(self) -> None:
         dialog = EmulatorDialog(self, "Add emulator mapping")
