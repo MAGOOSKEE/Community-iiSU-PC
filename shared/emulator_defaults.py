@@ -17,22 +17,28 @@ instead, regardless of whether the two projects are related at all (e.g.
 PS2 is stubbed under AetherSX2's package but redirected to PCSX2 on PC --
 there's no Android PCSX2 to begin with).
 
-RETROARCH_BY_EXTENSION: consoles routed through a single shared
-com.retroarch stub, disambiguated by the ROM's file extension the same
-way bridge/launch_bridge.py already does for PS1/Dreamcast. Only
+RETROARCH_BY_EXTENSION: a *fallback* for consoles routed through a single
+shared com.retroarch stub, used only when iiSU doesn't report which core
+it actually launched with (see bridge/launch_bridge.py's
+find_emulator_for_package -- the LIBRETRO intent extra is trusted first
+and unconditionally whenever it's present, since it identifies the
+console directly instead of guessing from the ROM's file extension, which
+can be ambiguous -- .chd is chdman's container for both PS1 and Dreamcast
+-- or just plain missing for a console never explicitly added to this
+list at all, e.g. an arcade/MAME core resolved from a .zip). Only
 extensions that don't collide with another entry in this same map are
-included here -- e.g. Saturn and MAME/arcade are deliberately left out,
-since their extensions (.bin/.cue/.iso/.chd/.zip/.7z) overlap too broadly
-with everything else on this list to disambiguate correctly from the
-extension alone. Getting that right needs resolving the ROM's own console
-folder, not just its extension, which is a bigger change than this list
-is trying to be.
+included here, for the same reason Saturn and MAME/arcade are left out
+entirely: without a reported core to fall back on, their extensions
+(.bin/.cue/.iso/.chd/.zip/.7z) overlap too broadly with everything else
+on this list to guess correctly from the extension alone.
 
-RetroArch itself is launched as retroarch.exe -L <core> <rom>, so pre_args
-includes -L and a core path relative to wherever retroarch.exe is found
-(standard "cores/xxx_libretro.dll" layout) -- this assumes the matching
-core is already installed there, same as RetroArch itself needs to be
-already installed for this to do anything.
+RetroArch itself is launched as retroarch.exe -L <core> -f <rom>, so
+pre_args includes -L and a core path relative to wherever retroarch.exe
+is found (standard "cores/xxx_libretro.dll" layout) -- this assumes the
+matching core is already installed there (launch_bridge.py's
+ensure_retroarch_core downloads a missing one from the libretro buildbot
+automatically), same as RetroArch itself needs to be already installed
+for this to do anything.
 """
 
 from collections import Counter
@@ -68,7 +74,16 @@ STANDALONE_DEFAULTS = [
         "package": "info.cemu.cemu",
         "app_label": "Cemu",
         "exe_names": ["Cemu.exe"],
-        "pre_args": ["-f"],
+        # Confirmed live: bare "-f" errors out with a parameter-parse dialog
+        # ("the argument '<rom path>' for option '--fullscreen' is invalid")
+        # -- this Cemu build's -f/--fullscreen always consumes the next
+        # token as its required on/off value, so a bare trailing rom path
+        # (how every other emulator here takes its rom -- see
+        # launch_bridge.py's `args = [exe, *pre_args, rom_path]`) gets
+        # swallowed as that value instead. Needs an explicit value, and the
+        # rom path needs its own --game flag rather than relying on
+        # position.
+        "pre_args": ["-f", "true", "--game"],
     },
     {
         "console": "3ds",
@@ -143,6 +158,14 @@ STANDALONE_DEFAULTS = [
         "app_label": "RPCS3",
         "exe_names": ["rpcs3.exe"],
         "pre_args": ["--no-gui", "--fullscreen"],
+        # RPCS3's actual CLI order is the opposite of every other
+        # emulator here: "rpcs3.exe <game_path> --no-gui --fullscreen" --
+        # confirmed live, the boot target has to come *before* these
+        # flags or RPCS3 parses neither flag as having a boot target at
+        # all ("Missing command-line arguments! Cannot run no-gui mode
+        # without boot target."). See launch_bridge.py's rom_before_args
+        # handling.
+        "rom_before_args": True,
     },
     {
         "console": "psvita",
@@ -201,6 +224,21 @@ STANDALONE_DEFAULTS = [
         # pattern as the Citra/Azahar and melonDS/melonDualDS slots above.
         "exe_names": ["xenia_canary.exe", "xenia.exe"],
         "pre_args": ["--fullscreen"],
+    },
+    {
+        "console": "steam",
+        "console_label": "Valve Steam (via GameNative)",
+        "package": "app.gamenative",
+        "app_label": "Steam",
+        # exe_names/pre_args are never actually used for this one --
+        # launch_bridge.py special-cases app.gamenative entirely (it
+        # launches via Steam's own steam://rungameid/<id> URI handler, not
+        # a subprocess.Popen'd exe, since the "ROM" here is really just a
+        # Steam App ID). This entry exists only so a stub gets built and
+        # installed for it (see installer/stub_apk.py) and so it shows up
+        # in the Emulators settings table at all.
+        "exe_names": ["steam.exe"],
+        "pre_args": [],
     },
 ]
 
@@ -273,6 +311,23 @@ ANDROID_CORE_NAME_OVERRIDES = {
     "mupen64plus_next_gles2": "mupen64plus_next",
 }
 
+# The reverse of RETROARCH_SAFETY_NET_EXTENSIONS' extension -> console
+# guess, but keyed by the *actual* core RetroArch/iiSU reports launching
+# (via retroarch_core_dll_for_android_core) instead of the ROM's file
+# extension. Needed because some formats are genuinely ambiguous by
+# extension alone -- .chd is chdman's container for both PS1 CDs and
+# Dreamcast GD-ROMs/CDs, but RETROARCH_SAFETY_NET_EXTENSIONS can only
+# point ".chd" at one of them (DuckStation). A Dreamcast game shipped as
+# .chd would silently launch DuckStation instead of Flycast without this
+# override -- confirmed as the cause of "some Dreamcast games won't
+# launch": the LIBRETRO extra (flycast_libretro_android.so) is present
+# and unambiguous even when the extension isn't, so it's checked first
+# and wins outright, the same way an extension safety-net entry already
+# wins outright over the generic by-extension RetroArch guess.
+RETROARCH_CORE_OVERRIDES = {
+    "flycast_libretro.dll": ("dreamcast", ["flycast.exe"], []),
+}
+
 
 def retroarch_core_dll_for_android_core(android_core_filename: str) -> str | None:
     """Translates the Android libretro core .so filename iiSU/RetroArch
@@ -292,16 +347,31 @@ def retroarch_core_dll_for_android_core(android_core_filename: str) -> str | Non
     return f"{core_name}_libretro.dll"
 
 
+def standalone_profile_for_core_dll(core_dll: str) -> dict | None:
+    """The dedicated-emulator profile for a resolved Windows core dll, per
+    RETROARCH_CORE_OVERRIDES, in the same {exe_names, pre_args} shape as
+    any other emulators-map entry -- or None if this core has no dedicated
+    override (the ordinary by-extension guess applies instead)."""
+    override = RETROARCH_CORE_OVERRIDES.get(core_dll)
+    if override is None:
+        return None
+    _console, exe_names, pre_args = override
+    return {"exe_names": exe_names, "pre_args": pre_args}
+
+
 def build_emulators_map() -> dict:
     """Builds the full bridge/config.json "emulators" map from the two
     lists above. Standalone entries with the same package (e.g. GameCube
     and Wii both under Dolphin) collapse into one entry automatically."""
     emulators = {}
     for entry in STANDALONE_DEFAULTS:
-        emulators[entry["package"]] = {
+        profile = {
             "exe_names": entry["exe_names"],
             "pre_args": entry["pre_args"],
         }
+        if entry.get("rom_before_args"):
+            profile["rom_before_args"] = True
+        emulators[entry["package"]] = profile
 
     by_extension = {}
     for ext, (_console, exe_names, pre_args) in RETROARCH_SAFETY_NET_EXTENSIONS.items():

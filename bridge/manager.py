@@ -48,7 +48,7 @@ from shared.avatars import fetch_avatar_bytes, make_circular_photo, make_placeho
 from shared.emulator_defaults import build_emulators_map, describe_profile
 from shared.theme import (
     BG, ENTRY_KWARGS, GRADIENT_STOPS, GRAY, GREEN, LISTBOX_KWARGS, PANEL_BG, PANEL_BG_HOVER,
-    RED, TEXT, TEXT_DIM, FONT_BODY, FONT_HEADING, FONT_MONO, FONT_TITLE, Card, QueueWriter, draw_gradient_bar,
+    RED, TEXT, TEXT_DIM, FONT_BODY, FONT_HEADING, FONT_MONO, FONT_TITLE, Card, QueueWriter, draw_gradient_bar, draw_menu_icon,
 )
 
 sys.path.insert(0, str(INSTALLER_DIR))
@@ -56,6 +56,14 @@ import uninstall as uninstall_cli
 
 RESOLUTION_PRESETS = ["1280 x 720", "1600 x 900", "1920 x 1080", "2560 x 1440", "3840 x 2160"]
 REFRESH_RATE_PRESETS = ["60", "90", "120", "144", "165", "240"]
+GPU_MODE_PRESETS = ["auto", "host", "swiftshader_indirect", "angle_indirect"]
+
+# This project's known-good baseline profile (matches installer/setup_
+# wizard.py's DEFAULT_DISPLAY) -- _autodetect_display scales density
+# relative to this, not to any fixed Android density bucket, since the
+# goal is "looks the same as it does at 1920x1080@240dpi," not matching
+# a real handheld device's physical DPI.
+REFERENCE_DISPLAY = {"width": 1920, "height": 1080, "density": 240}
 MODIFIER_NAMES = ["ctrl", "alt", "shift", "win"]
 
 STATUS_POLL_INTERVAL_MS = 2000
@@ -171,7 +179,8 @@ class Manager(tk.Tk):
             self.pages[key] = page
 
         self.save_bar = tk.Frame(content_col, bg=BG)
-        ttk.Button(self.save_bar, text="Save", style="Accent.TButton", command=self._save_settings).pack(side="right", padx=24, pady=14)
+        self.save_button = ttk.Button(self.save_bar, text="Save", style="Accent.TButton", command=self._save_settings)
+        self.save_button.pack(side="right", padx=24, pady=14)
         self.save_status_label = tk.Label(self.save_bar, text="", bg=BG, fg=GREEN, font=FONT_BODY)
         self.save_status_label.pack(side="left", padx=24, pady=14)
 
@@ -183,7 +192,9 @@ class Manager(tk.Tk):
     def _build_sidebar(self) -> None:
         header = tk.Frame(self.sidebar, bg=PANEL_BG)
         header.pack(fill="x", pady=(16, 10))
-        hamburger = tk.Label(header, text="☰", font=("Segoe UI", 15), bg=PANEL_BG, fg=TEXT, cursor="hand2")
+        hamburger_size = 20
+        hamburger = tk.Canvas(header, width=hamburger_size, height=hamburger_size, bg=PANEL_BG, highlightthickness=0, cursor="hand2")
+        draw_menu_icon(hamburger, hamburger_size, TEXT)
         hamburger.pack(side="left", padx=(16, 10))
         hamburger.bind("<Button-1>", lambda e: self._toggle_sidebar())
         self.sidebar_title_label = tk.Label(header, text="iiSU-PC", font=FONT_HEADING, bg=PANEL_BG, fg=TEXT)
@@ -466,6 +477,27 @@ class Manager(tk.Tk):
                 self.bridge_status_label.config(text="running" if bridge_up else "stopped")
 
         self._refresh_primary_button()
+        self._refresh_save_lock(avd_up, bridge_up)
+
+    def _refresh_save_lock(self, avd_up: bool | None, bridge_up: bool | None) -> None:
+        """Settings apply on the next Start (roms_dir/search_roots/
+        emulators immediately; display/hotkeys/port on the next full
+        restart) -- saving over a config the running instance already
+        loaded from doesn't do anything to what's actually running, and
+        just sets up a confusing mismatch between what the settings pages
+        show and what's really in effect until the next Stop. Locking Save
+        while the VM or bridge is up front-loads that "won't take effect
+        until you restart anyway" into "can't save yet" instead, since the
+        outcome (nothing changes until you Stop and Start again) is the
+        same either way. `is None` (status unknown, e.g. mid-poll or not
+        configured yet) doesn't lock -- only a *confirmed* running state
+        does."""
+        running = bool(avd_up) or bool(bridge_up)
+        self.save_button.config(state="disabled" if running else "normal")
+        if running:
+            self.save_status_label.config(text="Stop iiSU-PC to change settings", fg=RED)
+        elif self.save_status_label.cget("text") == "Stop iiSU-PC to change settings":
+            self.save_status_label.config(text="", fg=GREEN)
 
     # -- Settings pages (ROM Directory / Emulators / Display / Advanced) -------------------------------------------------
 
@@ -692,6 +724,7 @@ class Manager(tk.Tk):
         self.display_height_var = tk.StringVar(value=str(display.get("height", 1080)))
         self.display_density_var = tk.StringVar(value=str(display.get("density", 240)))
         self.display_refresh_var = tk.StringVar(value=str(display.get("refresh_rate", 60)))
+        self.gpu_mode_var = tk.StringVar(value=display.get("gpu_mode", "auto"))
 
         settings_col = tk.Frame(body, bg=BG)
         settings_col.grid(row=1, column=0, sticky="nw", padx=24, pady=(8, 0))
@@ -722,6 +755,17 @@ class Manager(tk.Tk):
         refresh_combo.pack(side="left", padx=(6, 0))
         refresh_combo.bind("<<ComboboxSelected>>", lambda e: self.display_refresh_var.set(refresh_combo.get()))
 
+        tk.Label(settings_col, text="GPU rendering:", bg=BG, fg=TEXT, font=FONT_BODY).grid(row=4, column=0, sticky="w", pady=3)
+        gpu_combo = ttk.Combobox(
+            settings_col, textvariable=self.gpu_mode_var, values=GPU_MODE_PRESETS, state="readonly", width=14, font=FONT_BODY
+        )
+        gpu_combo.grid(row=4, column=1, sticky="w", padx=(8, 0), pady=3)
+        tk.Label(
+            settings_col,
+            text="Try \"host\" or \"swiftshader_indirect\" here if you see screen tearing\nor audio cutting out after tabbing away and back -- a known Android\nEmulator GPU-backend issue on some hardware. \"auto\" is the default.",
+            bg=BG, fg=TEXT_DIM, font=FONT_BODY, justify="left",
+        ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(2, 0))
+
         preview_col = tk.Frame(body, bg=BG)
         preview_col.grid(row=1, column=1, sticky="ne", padx=24, pady=(8, 0))
         tk.Label(preview_col, text="Preview", bg=BG, fg=TEXT_DIM, font=FONT_BODY).pack(anchor="e")
@@ -751,12 +795,6 @@ class Manager(tk.Tk):
         tk.Label(body, text="AVD name:", bg=BG, fg=TEXT, font=FONT_BODY).grid(row=5, column=0, sticky="w", padx=24, pady=(16, 0))
         self.avd_name_var = tk.StringVar(value=self.config_data.get("avd_name", "iisuwin"))
         tk.Entry(body, textvariable=self.avd_name_var, width=20, **ENTRY_KWARGS).grid(row=6, column=0, sticky="w", padx=24, pady=(4, 8))
-
-        ttk.Button(body, text="Apply now (saves + cold-boots the AVD)", style="Accent.TButton", command=self._apply_display).grid(
-            row=7, column=0, columnspan=2, sticky="w", padx=24, pady=(8, 0)
-        )
-        self.display_status_label = tk.Label(body, text="", bg=BG, fg=GRADIENT_STOPS[2], font=FONT_BODY)
-        self.display_status_label.grid(row=8, column=0, columnspan=2, sticky="w", padx=24, pady=(8, 16))
 
     def _apply_resolution_preset(self, event=None) -> None:
         choice = self.resolution_preset_var.get()
@@ -796,12 +834,23 @@ class Manager(tk.Tk):
         self.display_width_var.set(str(width))
         self.display_height_var.set(str(height))
         self.display_refresh_var.set(str(hz))
+        # Density has to scale with resolution, not stay fixed -- this was
+        # previously left completely untouched by Auto-detect. Android's
+        # own UI sizing is density-driven (dp -> px = dp * density/160), so
+        # jumping from this project's 1920x1080 default to e.g. a 4K TV's
+        # 3840x2160 while density stayed at its default 240 quadrupled the
+        # screen's real pixel area under UI elements sized in the same
+        # fixed number of physical pixels -- confirmed live: "ran iiSU at
+        # 4K on my TV, it was tiny as." Windows' own per-monitor DPI
+        # doesn't help here (it reflects the user's Windows text-scaling
+        # preference, not how big Android UI should render on a
+        # console-style fullscreen display) -- scaling density by the same
+        # ratio as the resolution change instead keeps everything the same
+        # apparent size as this project's known-good 1920x1080@240dpi
+        # baseline, just sharper at higher resolutions.
+        density = round(REFERENCE_DISPLAY["density"] * height / REFERENCE_DISPLAY["height"])
+        self.display_density_var.set(str(density))
 
-    def _apply_display(self) -> None:
-        self._save_settings()
-        self.display_status_label.config(text="Cold-booting the AVD, this takes a minute...")
-        self.update_idletasks()
-        subprocess.Popen([sys.executable, str(BRIDGE_DIR / "apply_display.py")], cwd=str(BRIDGE_DIR))
 
     def _build_advanced_page(self) -> None:
         frame = self.pages["advanced"]
@@ -821,12 +870,19 @@ class Manager(tk.Tk):
         tk.Entry(body, textvariable=self.port_var, width=10, **ENTRY_KWARGS).grid(row=4, column=0, sticky="w", padx=24, pady=(4, 8))
 
         self.quit_hotkey_vars = self._build_hotkey_editor(
-            body, row=5, title="Quit-to-frontend hotkey (force-quits the running emulator, returns to iiSU):",
-            initial=self.config_data.get("quit_hotkey", {"modifiers": ["ctrl", "alt"], "key": "q"}),
+            body, row=5, title="Quit key (tap to force-quit the running emulator and return to iiSU):",
+            initial=self.config_data.get("quit_hotkey", {"modifiers": [], "key": "escape"}),
         )
+
+        tk.Label(body, text="Hold the quit key this long to close iiSU and the AVD entirely (seconds):", bg=BG, fg=TEXT, font=FONT_BODY).grid(
+            row=8, column=0, columnspan=2, sticky="w", padx=24, pady=(8, 2)
+        )
+        self.shutdown_hold_seconds_var = tk.StringVar(value=str(self.config_data.get("shutdown_hold_seconds", 5)))
+        tk.Entry(body, textvariable=self.shutdown_hold_seconds_var, width=6, **ENTRY_KWARGS).grid(row=9, column=0, sticky="w", padx=24, pady=(0, 8))
+
         self.shutdown_hotkey_vars = self._build_hotkey_editor(
-            body, row=8, title="Full-shutdown hotkey (closes iiSU and the AVD entirely):",
-            initial=self.config_data.get("shutdown_hotkey", {"modifiers": ["ctrl", "alt"], "key": "x"}),
+            body, row=10, title="Optional separate full-shutdown hotkey (in addition to holding the quit key above -- leave blank for none):",
+            initial=self.config_data.get("shutdown_hotkey") or {"modifiers": [], "key": ""},
         )
 
         tk.Label(
@@ -835,12 +891,12 @@ class Manager(tk.Tk):
             "directory, search folders, and emulator mappings apply on the very next\n"
             "game launch, no restart needed).",
             bg=BG, fg=TEXT_DIM, font=FONT_BODY, justify="left",
-        ).grid(row=11, column=0, sticky="w", padx=24, pady=(8, 8))
+        ).grid(row=13, column=0, sticky="w", padx=24, pady=(8, 8))
 
         self.debug_console_var = tk.BooleanVar(value=self.config_data.get("debug_show_console_windows", False))
         ttk.Checkbutton(
             body, text="Show console windows for the AVD and bridge (debugging)", variable=self.debug_console_var
-        ).grid(row=12, column=0, columnspan=2, sticky="w", padx=24, pady=(0, 4))
+        ).grid(row=14, column=0, columnspan=2, sticky="w", padx=24, pady=(0, 4))
         tk.Label(
             body,
             text="Off by default: the AVD, bridge, and shutdown-hotkey teardown all run without a visible\n"
@@ -850,7 +906,7 @@ class Manager(tk.Tk):
             "Trades away that run's log file, since a process can't sensibly have both. Takes effect on\n"
             "the next Start.",
             bg=BG, fg=TEXT_DIM, font=FONT_BODY, justify="left",
-        ).grid(row=13, column=0, columnspan=2, sticky="w", padx=24, pady=(0, 16))
+        ).grid(row=15, column=0, columnspan=2, sticky="w", padx=24, pady=(0, 16))
 
     def _build_hotkey_editor(self, parent, row: int, title: str, initial: dict) -> dict:
         tk.Label(parent, text=title, bg=BG, fg=TEXT, font=FONT_BODY).grid(row=row, column=0, columnspan=2, sticky="w", padx=24, pady=(4, 2))
@@ -902,6 +958,13 @@ class Manager(tk.Tk):
     def _read_hotkey(hotkey_vars: dict, default_key: str) -> dict:
         return {"modifiers": [name for name, var in hotkey_vars["mods"].items() if var.get()], "key": hotkey_vars["key"].get().strip() or default_key}
 
+    @staticmethod
+    def _read_optional_hotkey(hotkey_vars: dict) -> dict | None:
+        key = hotkey_vars["key"].get().strip()
+        if not key:
+            return None
+        return {"modifiers": [name for name, var in hotkey_vars["mods"].items() if var.get()], "key": key}
+
     def _save_settings(self) -> None:
         original_emulators = self.config_data.get("emulators", {})
         emulators = {}
@@ -928,9 +991,16 @@ class Manager(tk.Tk):
                 "height": int(self.display_height_var.get()),
                 "density": int(self.display_density_var.get()),
                 "refresh_rate": int(self.display_refresh_var.get()),
+                "gpu_mode": self.gpu_mode_var.get(),
             }
         except ValueError:
             messagebox.showerror("Invalid display settings", "Width, height, density, and refresh rate must be numbers.")
+            return
+
+        try:
+            shutdown_hold_seconds = int(self.shutdown_hold_seconds_var.get())
+        except ValueError:
+            messagebox.showerror("Invalid hold duration", "The quit-key hold duration must be a number of seconds.")
             return
 
         self.config_data = {
@@ -942,15 +1012,37 @@ class Manager(tk.Tk):
             "iisu_component": self.config_data.get("iisu_component", "com.iisulauncher/com.iisulauncher.launcher.StartupSafeModeActivity"),
             "avd_name": self.avd_name_var.get().strip() or "iisuwin",
             "display": display,
-            "quit_hotkey": self._read_hotkey(self.quit_hotkey_vars, default_key="q"),
-            "shutdown_hotkey": self._read_hotkey(self.shutdown_hotkey_vars, default_key="x"),
+            "quit_hotkey": self._read_hotkey(self.quit_hotkey_vars, default_key="escape"),
+            "shutdown_hold_seconds": shutdown_hold_seconds,
+            "shutdown_hotkey": self._read_optional_hotkey(self.shutdown_hotkey_vars),
             "usb_passthrough": self.config_data.get("usb_passthrough", []),
             "debug_show_console_windows": self.debug_console_var.get(),
             "emulators": emulators,
         }
         save_config(self.config_data)
+        self._write_avd_display_profile(self.config_data)
         self.save_status_label.config(text=f"Saved to {CONFIG_PATH.name}")
         self.after(3000, lambda: self.save_status_label.config(text=""))
+
+    def _write_avd_display_profile(self, config: dict) -> None:
+        """Writes the chosen resolution/density straight into the AVD's own
+        config.ini -- the actual hardware-profile file emulator.exe reads
+        at boot -- without booting anything to do it, same as onboarding_
+        wizard.py's own copy of this. Now that Save is locked out while
+        the VM is running (see _refresh_save_lock), this only ever runs
+        while it's stopped, so there's nothing live to disturb -- it just
+        needs to be in place before the next Start, which always cold-
+        boots anyway. Best-effort: a failure here just leaves the AVD on
+        its previous profile until this runs again successfully."""
+        import apply_display
+
+        config_ini = apply_display.avd_config_path(config.get("avd_name", "iisuwin"))
+        if not config_ini.is_file():
+            return
+        try:
+            apply_display.update_config_ini(config_ini, config["display"])
+        except OSError as e:
+            print(f"[manager] couldn't write the AVD's display profile ({e})")
 
     # -- Credits page -------------------------------------------------
 

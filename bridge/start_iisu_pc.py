@@ -46,6 +46,7 @@ import boot_overlay
 import sync_library
 import updater
 from bridge_config import ConfigMissingError, load_config
+from launch_bridge import launch_iisu, show_iisu_window
 from portable_sdk import PORTABLE_AVD_HOME, PORTABLE_SDK, disable_quickboot_autosave, ensure_portable_sdk
 
 BRIDGE_SCRIPT = Path(__file__).parent / "launch_bridge.py"
@@ -165,7 +166,9 @@ def build_usb_passthrough_args(usb_passthrough: list[dict]) -> list[str]:
     return args
 
 
-def _launch_once(emulator_exe: Path, avd_name: str, env: dict, usb_passthrough: list[dict], debug_console: bool) -> int | None:
+def _launch_once(
+    emulator_exe: Path, avd_name: str, env: dict, usb_passthrough: list[dict], debug_console: bool, gpu_mode: str
+) -> int | None:
     """One launch attempt. Logged to a real file, not a pipe, by default: a
     pipe's write end would get inherited by this long-lived process and
     never see EOF (the same bug that made `android emulator start` hang),
@@ -178,10 +181,22 @@ def _launch_once(emulator_exe: Path, avd_name: str, env: dict, usb_passthrough: 
     while troubleshooting something a static log doesn't make obvious.
     Trades away emulator.log for that run, since a process can't
     sensibly have both a console showing its output live and that same
-    output redirected to a file."""
+    output redirected to a file.
+
+    gpu_mode is passed as a plain -gpu launch flag rather than written
+    into the AVD's config.ini (see apply_display.py, which still handles
+    width/height/density that way): this AVD always cold-boots on every
+    single start (-no-snapshot, never resumed) regardless of anything
+    changing, so a setting that only affects which GPU backend gets
+    picked for *this* launch doesn't need its own dedicated "cold-boot to
+    apply" cycle the way an actual hardware-profile change (resolution)
+    does -- it just needs to be read fresh from config.json and handed to
+    emulator.exe here, taking effect on the very next normal start like
+    every other config.json setting already does."""
+    args = [str(emulator_exe), "-avd", avd_name, "-no-snapshot", "-gpu", gpu_mode, *build_usb_passthrough_args(usb_passthrough)]
     if debug_console:
         process = subprocess.Popen(
-            [str(emulator_exe), "-avd", avd_name, "-no-snapshot", *build_usb_passthrough_args(usb_passthrough)],
+            args,
             creationflags=subprocess.CREATE_NEW_CONSOLE,
             env=env,
         )
@@ -189,7 +204,7 @@ def _launch_once(emulator_exe: Path, avd_name: str, env: dict, usb_passthrough: 
         log_file = open(EMULATOR_LOG_PATH, "wb")
         try:
             process = subprocess.Popen(
-                [str(emulator_exe), "-avd", avd_name, "-no-snapshot", *build_usb_passthrough_args(usb_passthrough)],
+                args,
                 creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
                 stdin=subprocess.DEVNULL,
                 stdout=log_file,
@@ -223,7 +238,7 @@ def _launch_once(emulator_exe: Path, avd_name: str, env: dict, usb_passthrough: 
     return None
 
 
-def start_avd(avd_name: str, usb_passthrough: list[dict], debug_console: bool = False) -> int | None:
+def start_avd(avd_name: str, usb_passthrough: list[dict], debug_console: bool = False, gpu_mode: str = "auto") -> int | None:
     """Launches the AVD directly (bypassing the buggy `android emulator
     start` wrapper) and returns its PID once it's confirmed running, so the
     stop script can find it reliably even if it later gets reparented.
@@ -256,7 +271,7 @@ def start_avd(avd_name: str, usb_passthrough: list[dict], debug_console: bool = 
     for attempt in range(1, MAX_LAUNCH_ATTEMPTS + 1):
         clear_stale_locks(avd_dir)
         disable_quickboot_autosave(avd_dir)
-        pid = _launch_once(emulator_exe, avd_name, env, usb_passthrough, debug_console)
+        pid = _launch_once(emulator_exe, avd_name, env, usb_passthrough, debug_console, gpu_mode)
         if pid is not None:
             return pid
         diagnose_system_image(avd_dir, env_overrides["ANDROID_SDK_ROOT"])
@@ -315,7 +330,8 @@ def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: b
         print(f"[start] {avd_name} is already running.")
     else:
         print(f"[start] Starting {avd_name}, this can take a minute...")
-        pid = start_avd(avd_name, config.get("usb_passthrough", []), debug_console)
+        gpu_mode = config.get("display", {}).get("gpu_mode", "auto")
+        pid = start_avd(avd_name, config.get("usb_passthrough", []), debug_console, gpu_mode)
         if pid is None:
             sys.exit(1)
         state["emulator_pid"] = pid
@@ -325,7 +341,22 @@ def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: b
     sync_rom_library()
 
     if is_port_open(port):
-        print(f"[start] Bridge is already running on port {port}.")
+        # The bridge being up already doesn't mean iiSU itself is in the
+        # state a fresh launch would leave it in -- it could be minimized,
+        # showing the Android home screen instead of iiSU (backed out at
+        # some point), or just not fullscreen. A brand-new bridge process
+        # always re-launches iiSU and re-applies fullscreen as part of its
+        # own startup (see launch_bridge.main()); doing nothing here in the
+        # "already running" case meant relaunching iiSU-PC while a bridge
+        # was already alive -- whether genuinely left running on purpose,
+        # or a stale one Stop failed to clean up -- was a silent no-op:
+        # exactly the "shortcut sometimes only opens the emulator, not
+        # iiSU, or not fullscreen" symptom, since the shortcut gives no
+        # visible sign anything happened at all when nothing did.
+        print(f"[start] Bridge is already running on port {port} -- bringing iiSU to the foreground...")
+        launch_iisu(config)
+        if config.get("iisu_fullscreen"):
+            show_iisu_window(config)
     else:
         if debug_console:
             print("[start] Starting the launch bridge in a visible console (debug_show_console_windows is on)...")

@@ -65,6 +65,28 @@ def kill_by_name(image_name: str) -> None:
     subprocess.run(["taskkill", "/IM", image_name, "/T", "/F"], capture_output=True, text=True)
 
 
+def kill_by_cmdline_match(needle: str) -> None:
+    """Force-kills any process whose command line contains `needle`, via
+    PowerShell/WMI (wmic itself is deprecated/removed on newer Windows
+    builds). This is the fallback for launch_bridge.py that bridge_pid
+    alone can't cover: start_iisu_pc.py only ever records bridge_pid when
+    *it* started the bridge process -- if it instead found one already
+    running (port already open, e.g. left over from a previous session
+    that didn't get a clean Stop) it skips straight past that assignment,
+    so the freshly-written state file has no bridge_pid at all and this
+    script's PID-based kill above silently has nothing to kill. Matching
+    on "launch_bridge.py" specifically (never a bare python.exe sweep,
+    which would also take down unrelated Python processes on the same
+    PC) makes this self-healing regardless of how state.json got out of
+    sync with what's actually running."""
+    script = (
+        "Get-CimInstance Win32_Process "
+        f"| Where-Object {{ $_.CommandLine -like '*{needle}*' }} "
+        "| ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+    )
+    subprocess.run(["powershell", "-NoProfile", "-Command", script], capture_output=True, text=True)
+
+
 def _remove_path_with_retry(path: Path, attempts: int = 5, delay: float = 1.0) -> None:
     """A process that just got taskkilled doesn't always release its file
     handle the instant it exits -- Windows can hold a lock file for a
@@ -141,7 +163,14 @@ def main() -> None:
     # Fallback sweep in case graceful shutdown didn't finish in time, the
     # state file is stale/missing, or a process got reparented away from
     # the PID we originally tracked (emulator.exe in particular tends to
-    # leave a second shim process behind).
+    # leave a second shim process behind). launch_bridge.py needs its own
+    # cmdline-based sweep rather than a by-name one: state.json can have
+    # no bridge_pid to fall back on at all (see kill_by_cmdline_match),
+    # and it runs as plain python.exe/pythonw.exe, which taskkill by
+    # image name alone can't safely target without also risking unrelated
+    # Python processes on the same PC.
+    print("[stop] sweeping for any orphaned launch_bridge.py process...")
+    kill_by_cmdline_match("launch_bridge.py")
     for image_name in ("emulator.exe", "qemu-system-x86_64.exe"):
         print(f"[stop] sweeping any remaining {image_name}...")
         kill_by_name(image_name)

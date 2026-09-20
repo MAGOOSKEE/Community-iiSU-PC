@@ -176,6 +176,47 @@ def _escape_for_powershell_string(text: str) -> str:
     return text
 
 
+_BALLOON_SCRIPT_TEMPLATE = r"""
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$icon = New-Object System.Windows.Forms.NotifyIcon
+$icon.Icon = [System.Drawing.SystemIcons]::Warning
+$icon.Visible = $true
+$icon.BalloonTipTitle = "%TITLE%"
+$icon.BalloonTipText = "%MESSAGE%"
+$icon.BalloonTipIcon = [System.Windows.Forms.ToolTipIcon]::Warning
+$icon.ShowBalloonTip(8000)
+Start-Sleep -Seconds 9
+$icon.Dispose()
+"""
+
+
+def notify_error(title: str, message: str) -> None:
+    """Best-effort Windows tray balloon notification -- the bridge
+    normally runs with no visible window at all (see manager.py's
+    debug_show_console_windows), so a launch failure (no emulator mapped,
+    executable/rom not found, or an emulator exiting with a non-zero
+    code) would otherwise be visible only in a log file nobody's looking
+    at. Fire-and-forget and detached, same reasoning as show()'s overlay:
+    a notification failing to display is never a reason to fail or delay
+    the launch it's reporting on."""
+    script = (
+        _BALLOON_SCRIPT_TEMPLATE
+        .replace("%TITLE%", _escape_for_powershell_string(title))
+        .replace("%MESSAGE%", _escape_for_powershell_string(message))
+    )
+    try:
+        subprocess.Popen(
+            ["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", script],
+            creationflags=subprocess.CREATE_NO_WINDOW,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError:
+        pass
+
+
 def close(overlay: subprocess.Popen | None) -> None:
     """Forcibly kills the overlay process rather than trying to close its
     window gracefully -- it has no state to lose and no user input to

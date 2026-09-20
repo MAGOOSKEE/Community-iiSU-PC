@@ -76,6 +76,28 @@ def draw_gradient_bar(canvas: tk.Canvas, width: int, height: int) -> None:
         canvas.create_line(x, 0, x, height, fill=f"#{r:02x}{g:02x}{b:02x}")
 
 
+def draw_menu_icon(canvas: tk.Canvas, size: float, color: str) -> None:
+    """Draws Google's Material Symbols "menu" glyph (three equal,
+    evenly-spaced horizontal bars) directly on a canvas, matching that
+    icon's real proportions. tkinter has no built-in way to render a
+    proper icon-font/SVG set like Material Symbols, and this specific
+    glyph has no stylistic detail beyond "three bars" to lose by hand-
+    drawing it -- crisper and more consistent than relying on Segoe UI's
+    rendering of the "☰" Unicode character (which doesn't reliably
+    match the surrounding icon style at all sizes/DPIs), without pulling
+    in Pillow, a bundled icon-font file, or a network fetch for one
+    glyph."""
+    canvas.delete("all")
+    margin = size * 0.17
+    bar_width = size - 2 * margin
+    bar_height = max(size * 0.09, 1.5)
+    for cy in (size * 0.25, size * 0.5, size * 0.75):
+        canvas.create_rectangle(
+            margin, cy - bar_height / 2, margin + bar_width, cy + bar_height / 2,
+            fill=color, outline="",
+        )
+
+
 class Card(tk.Frame):
     """A rounded-ish dark panel echoing iiSU's tile style. tkinter has no
     native rounded-rect widget background, so this approximates it with a

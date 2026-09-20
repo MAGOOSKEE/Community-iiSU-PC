@@ -190,7 +190,39 @@ class SetupApp(tk.Tk):
             self._open_onboarding()
         else:
             self.status_label.config(text=f"Setup failed: {error}", fg=RED)
-            messagebox.showerror("Setup failed", f"{error}\n\nSee the log for details.")
+            if isinstance(error, setup_wizard.VirtualizationError):
+                self._offer_hypervisor_fix(str(error))
+            else:
+                messagebox.showerror("Setup failed", f"{error}\n\nSee the log for details.")
+
+    def _offer_hypervisor_fix(self, message: str) -> None:
+        """VirtualizationError specifically (not every setup failure) means
+        there's a concrete, one-click-away fix worth offering right in the
+        dialog instead of leaving the person to go search for what
+        "Windows Hypervisor Platform" even is. Enabling it needs admin
+        rights and a restart -- both handled by enable_hypervisor_platform()
+        itself (a real UAC prompt, and this never reboots the PC on its
+        own), so this is just the confirm step."""
+        if "Hypervisor Platform" not in message:
+            messagebox.showerror("Setup failed", f"{message}\n\nSee the log for details.")
+            return
+        if messagebox.askyesno(
+            "Enable Windows Hypervisor Platform?",
+            f"{message}\n\nEnable Windows Hypervisor Platform now? This asks Windows for admin "
+            "permission and won't take effect until you restart your PC -- re-run Setup.bat "
+            "after restarting.",
+        ):
+            try:
+                setup_wizard.enable_hypervisor_platform()
+                messagebox.showinfo(
+                    "Enabling...",
+                    "Windows is enabling Hypervisor Platform now (you may see a UAC prompt). "
+                    "Restart your PC once it's done, then re-run Setup.bat.",
+                )
+            except Exception as e:
+                messagebox.showerror("Couldn't enable it automatically", f"{e}\n\nTry enabling \"Windows Hypervisor Platform\" yourself via \"Turn Windows features on or off\".")
+        else:
+            messagebox.showerror("Setup failed", f"{message}\n\nSee the log for details.")
 
     def _show_next_steps(self) -> None:
         self.next_steps_frame.pack(fill="x", padx=20, pady=(0, 18))
