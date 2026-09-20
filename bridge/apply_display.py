@@ -53,6 +53,21 @@ def update_config_ini(path: Path, display: dict) -> None:
         # A clean full-bleed display reads better fullscreen than a phone
         # bezel graphic around a small screen.
         "showDeviceFrame": "no",
+        # "auto" (Android Studio's own default, and this project's default
+        # too -- never changed unless set explicitly in config.json) picks
+        # host GPU passthrough or software rendering per-machine, which is
+        # usually right but not always: GPU-backend renderer resets are a
+        # known category of Android Emulator issue on certain driver/GPU
+        # combos, reported here as occasional screen tearing (and, since
+        # the audio and video paths aren't independent in this emulator,
+        # audio sometimes stopping permanently) after the window loses and
+        # regains focus. Exposed as a real setting (manager.py's Display
+        # page) rather than silently overridden, since forcing "host" or
+        # "swiftshader_indirect" for everyone could just as easily make a
+        # machine where "auto" already correctly picks host acceleration
+        # worse -- this needs trying on the actual affected hardware, not
+        # guessing from here.
+        "hw.gpu.mode": display.get("gpu_mode", "auto"),
     }
 
     lines = path.read_text(encoding="utf-8").splitlines()

@@ -56,6 +56,7 @@ import uninstall as uninstall_cli
 
 RESOLUTION_PRESETS = ["1280 x 720", "1600 x 900", "1920 x 1080", "2560 x 1440", "3840 x 2160"]
 REFRESH_RATE_PRESETS = ["60", "90", "120", "144", "165", "240"]
+GPU_MODE_PRESETS = ["auto", "host", "swiftshader_indirect", "angle_indirect"]
 
 # This project's known-good baseline profile (matches installer/setup_
 # wizard.py's DEFAULT_DISPLAY) -- _autodetect_display scales density
@@ -699,6 +700,7 @@ class Manager(tk.Tk):
         self.display_height_var = tk.StringVar(value=str(display.get("height", 1080)))
         self.display_density_var = tk.StringVar(value=str(display.get("density", 240)))
         self.display_refresh_var = tk.StringVar(value=str(display.get("refresh_rate", 60)))
+        self.gpu_mode_var = tk.StringVar(value=display.get("gpu_mode", "auto"))
 
         settings_col = tk.Frame(body, bg=BG)
         settings_col.grid(row=1, column=0, sticky="nw", padx=24, pady=(8, 0))
@@ -728,6 +730,17 @@ class Manager(tk.Tk):
         refresh_combo = ttk.Combobox(refresh_row, values=REFRESH_RATE_PRESETS, state="readonly", width=5, font=FONT_BODY)
         refresh_combo.pack(side="left", padx=(6, 0))
         refresh_combo.bind("<<ComboboxSelected>>", lambda e: self.display_refresh_var.set(refresh_combo.get()))
+
+        tk.Label(settings_col, text="GPU rendering:", bg=BG, fg=TEXT, font=FONT_BODY).grid(row=4, column=0, sticky="w", pady=3)
+        gpu_combo = ttk.Combobox(
+            settings_col, textvariable=self.gpu_mode_var, values=GPU_MODE_PRESETS, state="readonly", width=14, font=FONT_BODY
+        )
+        gpu_combo.grid(row=4, column=1, sticky="w", padx=(8, 0), pady=3)
+        tk.Label(
+            settings_col,
+            text="Try \"host\" or \"swiftshader_indirect\" here if you see screen tearing\nor audio cutting out after tabbing away and back -- a known Android\nEmulator GPU-backend issue on some hardware. \"auto\" is the default.",
+            bg=BG, fg=TEXT_DIM, font=FONT_BODY, justify="left",
+        ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
         preview_col = tk.Frame(body, bg=BG)
         preview_col.grid(row=1, column=1, sticky="ne", padx=24, pady=(8, 0))
@@ -951,6 +964,7 @@ class Manager(tk.Tk):
                 "height": int(self.display_height_var.get()),
                 "density": int(self.display_density_var.get()),
                 "refresh_rate": int(self.display_refresh_var.get()),
+                "gpu_mode": self.gpu_mode_var.get(),
             }
         except ValueError:
             messagebox.showerror("Invalid display settings", "Width, height, density, and refresh rate must be numbers.")
