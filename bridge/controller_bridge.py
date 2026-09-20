@@ -28,11 +28,24 @@ dashboard" chord on other consoles and isn't used for anything else here,
 and it's the one two-button combo guaranteed available through legacy
 XInput (the Guide/Xbox button itself is deliberately not exposed by
 XInputGetState).
+
+Also separately watches (via the legacy winmm joystick API, not XInput --
+see detect_unmapped_sony_controller) for a DualSense/DS4 that's plugged in
+but NOT already appearing as an XInput device, and opens Steam for you
+when it sees one. There's no documented, stable API to flip Steam's
+"PlayStation Configuration Support" setting programmatically -- it lives
+in Steam's own config.vdf under an internal key that isn't part of any
+public interface and could change or get silently reverted between Steam
+versions, so this deliberately doesn't try to write it directly. Opening
+Steam gets you one click away from Settings -> Controller -> General
+Controller Settings instead, where switching that on is a one-time,
+persistent choice covering every DualSense/DS4 from then on.
 """
 
 import ctypes
 import subprocess
 import time
+from ctypes import wintypes
 
 # XINPUT_GAMEPAD.wButtons bitmask
 XINPUT_GAMEPAD_DPAD_UP = 0x0001
@@ -83,6 +96,95 @@ POLL_HZ = 60
 
 SHUTDOWN_CHORD = XINPUT_GAMEPAD_BACK | XINPUT_GAMEPAD_START
 SHUTDOWN_HOLD_SECONDS = 2.5
+
+SONY_CONTROLLER_CHECK_INTERVAL = 3.0  # seconds -- winmm enumeration, not worth doing at POLL_HZ
+MAXPNAMELEN = 32
+MAX_JOYSTICKOEMVXDNAME = 260
+JOYERR_NOERROR = 0
+SONY_VID = 0x054C
+SONY_PS_CONTROLLER_PIDS = {
+    0x05C4: "DualShock 4",
+    0x09CC: "DualShock 4 (v2)",
+    0x0BA0: "DualShock 4 (wireless dongle)",
+    0x0CE6: "DualSense",
+    0x0DF2: "DualSense Edge",
+}
+
+
+class JoyCapsW(ctypes.Structure):
+    _fields_ = [
+        ("wMid", wintypes.WORD),
+        ("wPid", wintypes.WORD),
+        ("szPname", wintypes.WCHAR * MAXPNAMELEN),
+        ("wXmin", wintypes.UINT), ("wXmax", wintypes.UINT),
+        ("wYmin", wintypes.UINT), ("wYmax", wintypes.UINT),
+        ("wZmin", wintypes.UINT), ("wZmax", wintypes.UINT),
+        ("wNumButtons", wintypes.UINT),
+        ("wPeriodMin", wintypes.UINT), ("wPeriodMax", wintypes.UINT),
+        ("wRmin", wintypes.UINT), ("wRmax", wintypes.UINT),
+        ("wUmin", wintypes.UINT), ("wUmax", wintypes.UINT),
+        ("wVmin", wintypes.UINT), ("wVmax", wintypes.UINT),
+        ("wCaps", wintypes.UINT),
+        ("wMaxAxes", wintypes.UINT), ("wNumAxes", wintypes.UINT), ("wMaxButtons", wintypes.UINT),
+        ("szRegKey", wintypes.WCHAR * MAXPNAMELEN),
+        ("szOEMVxD", wintypes.WCHAR * MAX_JOYSTICKOEMVXDNAME),
+    ]
+
+
+_winmm = ctypes.windll.winmm
+_winmm.joyGetNumDevs.restype = wintypes.UINT
+_winmm.joyGetDevCapsW.argtypes = [ctypes.c_uint, ctypes.POINTER(JoyCapsW), ctypes.c_uint]
+_winmm.joyGetDevCapsW.restype = wintypes.UINT
+
+
+def find_unmapped_sony_controllers() -> list[str]:
+    """Enumerates legacy joystick devices (winmm's joyGetDevCapsW) rather
+    than XInput -- a DualSense/DS4 shows up *here* when it's plugged in
+    directly with nothing translating it, which is exactly the condition
+    worth catching: if it already worked as an XInput device, Steam Input
+    (or DS4Windows, etc.) is already doing that job and there's nothing to
+    fix. Returns the product name of every Sony PlayStation controller
+    found this way (there can be more than one)."""
+    found = []
+    caps = JoyCapsW()
+    for joy_id in range(_winmm.joyGetNumDevs()):
+        if _winmm.joyGetDevCapsW(joy_id, ctypes.byref(caps), ctypes.sizeof(caps)) != JOYERR_NOERROR:
+            continue
+        if caps.wMid == SONY_VID and caps.wPid in SONY_PS_CONTROLLER_PIDS:
+            found.append(SONY_PS_CONTROLLER_PIDS[caps.wPid])
+    return found
+
+
+def find_steam_exe() -> str | None:
+    """Steam's own install path, from the registry key it writes itself on
+    install -- more reliable than guessing a Program Files location, since
+    Steam can be installed anywhere the person chose."""
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam") as key:
+            return winreg.QueryValueEx(key, "SteamExe")[0]
+    except OSError:
+        return None
+
+
+def open_steam_for_controller_setup(controller_name: str) -> None:
+    """Opens Steam -- just the client, no documented way to jump straight
+    to Controller settings (see this module's docstring for why this
+    doesn't try to flip the underlying setting itself) -- so a detected
+    DualSense/DS4 that isn't already working as an XInput device is one
+    click away from being fixed."""
+    steam_exe = find_steam_exe()
+    if steam_exe is None:
+        print(
+            f"[controller] {controller_name} detected, but Steam doesn't appear to be installed -- install it and "
+            "enable \"PlayStation Configuration Support\" under Settings > Controller for it to work with iiSU"
+        )
+        return
+    print(
+        f"[controller] {controller_name} detected -- opening Steam. Enable \"PlayStation Configuration Support\" "
+        "under Settings > Controller > General Controller Settings (one-time, covers every DualSense/DS4 from then on)"
+    )
+    subprocess.Popen([steam_exe], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
 class XinputGamepad(ctypes.Structure):
@@ -141,6 +243,8 @@ class ControllerBridge:
         self._last_repeat: dict[tuple[int, int], float] = {}
         self._shutdown_chord_since: dict[int, float] = {}
         self._shutdown_fired: set[int] = set()
+        self._sony_controller_check_due = 0.0
+        self._sony_controllers_prompted: set[str] = set()
 
     def _ensure_shell(self) -> None:
         if self._adb_shell is None or self._adb_shell.poll() is not None:
@@ -207,6 +311,22 @@ class ControllerBridge:
                     self._send_keyevent(code)
                     self._last_repeat[key] = now
 
+    def _check_sony_controllers(self, now: float) -> None:
+        """Throttled to once every SONY_CONTROLLER_CHECK_INTERVAL -- winmm
+        device enumeration is cheap but pointless to redo at POLL_HZ.
+        Prompts (opens Steam) once per distinct controller name while it
+        stays plugged in and un-translated, forgetting it once it
+        disappears so unplugging and replugging -- or a later session,
+        since this state doesn't persist anywhere -- prompts again if it's
+        still not fixed."""
+        if now < self._sony_controller_check_due:
+            return
+        self._sony_controller_check_due = now + SONY_CONTROLLER_CHECK_INTERVAL
+        found = set(find_unmapped_sony_controllers())
+        for name in found - self._sony_controllers_prompted:
+            open_steam_for_controller_setup(name)
+        self._sony_controllers_prompted = found
+
     def run(self) -> None:
         if _xinput is None:
             print("[controller] XInput not available on this system; controller support disabled")
@@ -215,6 +335,7 @@ class ControllerBridge:
         print(f"[controller] hold Back+Start for {SHUTDOWN_HOLD_SECONDS:.0f}s on any pad to close iiSU and shut down the VM")
         while True:
             now = time.time()
+            self._check_sony_controllers(now)
             game_running = self.is_game_running()
             for slot in range(4):
                 pad = get_gamepad_state(slot)
