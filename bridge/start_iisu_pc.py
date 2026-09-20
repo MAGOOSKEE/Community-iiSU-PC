@@ -46,6 +46,7 @@ import boot_overlay
 import sync_library
 import updater
 from bridge_config import ConfigMissingError, load_config
+from launch_bridge import launch_iisu, show_iisu_window
 from portable_sdk import PORTABLE_AVD_HOME, PORTABLE_SDK, disable_quickboot_autosave, ensure_portable_sdk
 
 BRIDGE_SCRIPT = Path(__file__).parent / "launch_bridge.py"
@@ -325,7 +326,22 @@ def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: b
     sync_rom_library()
 
     if is_port_open(port):
-        print(f"[start] Bridge is already running on port {port}.")
+        # The bridge being up already doesn't mean iiSU itself is in the
+        # state a fresh launch would leave it in -- it could be minimized,
+        # showing the Android home screen instead of iiSU (backed out at
+        # some point), or just not fullscreen. A brand-new bridge process
+        # always re-launches iiSU and re-applies fullscreen as part of its
+        # own startup (see launch_bridge.main()); doing nothing here in the
+        # "already running" case meant relaunching iiSU-PC while a bridge
+        # was already alive -- whether genuinely left running on purpose,
+        # or a stale one Stop failed to clean up -- was a silent no-op:
+        # exactly the "shortcut sometimes only opens the emulator, not
+        # iiSU, or not fullscreen" symptom, since the shortcut gives no
+        # visible sign anything happened at all when nothing did.
+        print(f"[start] Bridge is already running on port {port} -- bringing iiSU to the foreground...")
+        launch_iisu(config)
+        if config.get("iisu_fullscreen"):
+            show_iisu_window(config)
     else:
         if debug_console:
             print("[start] Starting the launch bridge in a visible console (debug_show_console_windows is on)...")
