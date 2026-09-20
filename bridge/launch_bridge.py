@@ -368,26 +368,49 @@ def friendly_emulator_name(executable: Path) -> str:
     return executable.stem
 
 
+def wait_for_boot_completed(timeout: float = 90) -> bool:
+    """Polls sys.boot_completed once a second -- the real signal that
+    Android's own system services have finished starting, unlike
+    is_avd_running()/is_port_open() elsewhere in this codebase, which only
+    confirm the ADB link itself is up. Checked before ever attempting to
+    launch iiSU, so the first am start lands right when the system
+    actually has a chance of being ready, instead of am start itself
+    being the only signal (previously retried blindly every 3s with no
+    readiness check first at all)."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        result = subprocess.run(["adb", "shell", "getprop", "sys.boot_completed"], capture_output=True, text=True)
+        if result.stdout.strip() == "1":
+            return True
+        time.sleep(1)
+    return False
+
+
 def launch_iisu(config: dict) -> None:
     """Starts iiSU's own main activity directly via adb, instead of leaving
     the stock Android home screen showing after boot. iiSU declares both
     LAUNCHER and HOME categories on this activity (it's designed to be a
     home-screen replacement), but isn't necessarily set as this AVD's
     default home app, so this just launches it directly rather than
-    depending on that. Retries for a while since `am start` can fail with a
-    transient "does not exist" error for the better part of a minute right
-    after a cold boot (without a quickboot snapshot, boot_completed can flip
-    to true before the package manager has fully finished resolving
-    components -- confirmed via `dumpsys package`, the activity is
+    depending on that.
+
+    wait_for_boot_completed() covers the slow, unpredictable part of the
+    wait; this loop's own retries cover a narrower, separately-documented
+    edge case on top of that -- `am start` can still fail with a transient
+    "does not exist" error for a while even after boot_completed flips to
+    true, since package manager can still be resolving components at that
+    exact moment (confirmed via `dumpsys package`: the activity is
     genuinely registered, `am start` just tried too early)."""
+    if not wait_for_boot_completed():
+        print("[bridge] sys.boot_completed never reported ready -- trying to launch iiSU anyway")
     component = config.get("iisu_component", DEFAULT_IISU_COMPONENT)
     result = None
-    for _ in range(20):
+    for _ in range(30):
         result = subprocess.run(["adb", "shell", "am", "start", "-n", component], capture_output=True, text=True)
         if result.returncode == 0 and "Error" not in result.stdout:
             set_volume_max()
             return
-        time.sleep(3)
+        time.sleep(1)
     print(f"[bridge] could not launch iiSU ({component}):")
     if result is not None:
         print(f"    {result.stdout.strip()}\n    {result.stderr.strip()}")
