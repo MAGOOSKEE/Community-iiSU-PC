@@ -179,7 +179,8 @@ class Manager(tk.Tk):
             self.pages[key] = page
 
         self.save_bar = tk.Frame(content_col, bg=BG)
-        ttk.Button(self.save_bar, text="Save", style="Accent.TButton", command=self._save_settings).pack(side="right", padx=24, pady=14)
+        self.save_button = ttk.Button(self.save_bar, text="Save", style="Accent.TButton", command=self._save_settings)
+        self.save_button.pack(side="right", padx=24, pady=14)
         self.save_status_label = tk.Label(self.save_bar, text="", bg=BG, fg=GREEN, font=FONT_BODY)
         self.save_status_label.pack(side="left", padx=24, pady=14)
 
@@ -476,6 +477,27 @@ class Manager(tk.Tk):
                 self.bridge_status_label.config(text="running" if bridge_up else "stopped")
 
         self._refresh_primary_button()
+        self._refresh_save_lock(avd_up, bridge_up)
+
+    def _refresh_save_lock(self, avd_up: bool | None, bridge_up: bool | None) -> None:
+        """Settings apply on the next Start (roms_dir/search_roots/
+        emulators immediately; display/hotkeys/port on the next full
+        restart) -- saving over a config the running instance already
+        loaded from doesn't do anything to what's actually running, and
+        just sets up a confusing mismatch between what the settings pages
+        show and what's really in effect until the next Stop. Locking Save
+        while the VM or bridge is up front-loads that "won't take effect
+        until you restart anyway" into "can't save yet" instead, since the
+        outcome (nothing changes until you Stop and Start again) is the
+        same either way. `is None` (status unknown, e.g. mid-poll or not
+        configured yet) doesn't lock -- only a *confirmed* running state
+        does."""
+        running = bool(avd_up) or bool(bridge_up)
+        self.save_button.config(state="disabled" if running else "normal")
+        if running:
+            self.save_status_label.config(text="Stop iiSU-PC to change settings", fg=RED)
+        elif self.save_status_label.cget("text") == "Stop iiSU-PC to change settings":
+            self.save_status_label.config(text="", fg=GREEN)
 
     # -- Settings pages (ROM Directory / Emulators / Display / Advanced) -------------------------------------------------
 
@@ -774,12 +796,6 @@ class Manager(tk.Tk):
         self.avd_name_var = tk.StringVar(value=self.config_data.get("avd_name", "iisuwin"))
         tk.Entry(body, textvariable=self.avd_name_var, width=20, **ENTRY_KWARGS).grid(row=6, column=0, sticky="w", padx=24, pady=(4, 8))
 
-        ttk.Button(body, text="Apply now (saves + cold-boots the AVD)", style="Accent.TButton", command=self._apply_display).grid(
-            row=7, column=0, columnspan=2, sticky="w", padx=24, pady=(8, 0)
-        )
-        self.display_status_label = tk.Label(body, text="", bg=BG, fg=GRADIENT_STOPS[2], font=FONT_BODY)
-        self.display_status_label.grid(row=8, column=0, columnspan=2, sticky="w", padx=24, pady=(8, 16))
-
     def _apply_resolution_preset(self, event=None) -> None:
         choice = self.resolution_preset_var.get()
         if "x" not in choice:
@@ -835,11 +851,6 @@ class Manager(tk.Tk):
         density = round(REFERENCE_DISPLAY["density"] * height / REFERENCE_DISPLAY["height"])
         self.display_density_var.set(str(density))
 
-    def _apply_display(self) -> None:
-        self._save_settings()
-        self.display_status_label.config(text="Cold-booting the AVD, this takes a minute...")
-        self.update_idletasks()
-        subprocess.Popen([sys.executable, str(BRIDGE_DIR / "apply_display.py")], cwd=str(BRIDGE_DIR))
 
     def _build_advanced_page(self) -> None:
         frame = self.pages["advanced"]
@@ -1009,8 +1020,29 @@ class Manager(tk.Tk):
             "emulators": emulators,
         }
         save_config(self.config_data)
+        self._write_avd_display_profile(self.config_data)
         self.save_status_label.config(text=f"Saved to {CONFIG_PATH.name}")
         self.after(3000, lambda: self.save_status_label.config(text=""))
+
+    def _write_avd_display_profile(self, config: dict) -> None:
+        """Writes the chosen resolution/density straight into the AVD's own
+        config.ini -- the actual hardware-profile file emulator.exe reads
+        at boot -- without booting anything to do it, same as onboarding_
+        wizard.py's own copy of this. Now that Save is locked out while
+        the VM is running (see _refresh_save_lock), this only ever runs
+        while it's stopped, so there's nothing live to disturb -- it just
+        needs to be in place before the next Start, which always cold-
+        boots anyway. Best-effort: a failure here just leaves the AVD on
+        its previous profile until this runs again successfully."""
+        import apply_display
+
+        config_ini = apply_display.avd_config_path(config.get("avd_name", "iisuwin"))
+        if not config_ini.is_file():
+            return
+        try:
+            apply_display.update_config_ini(config_ini, config["display"])
+        except OSError as e:
+            print(f"[manager] couldn't write the AVD's display profile ({e})")
 
     # -- Credits page -------------------------------------------------
 
