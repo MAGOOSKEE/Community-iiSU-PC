@@ -390,24 +390,6 @@ def friendly_emulator_name(executable: Path) -> str:
     return executable.stem
 
 
-def wait_for_boot_completed(timeout: float = 90) -> bool:
-    """Polls sys.boot_completed once a second -- the real signal that
-    Android's own system services have finished starting, unlike
-    is_avd_running()/is_port_open() elsewhere in this codebase, which only
-    confirm the ADB link itself is up. Checked before ever attempting to
-    launch iiSU, so the first am start lands right when the system
-    actually has a chance of being ready, instead of am start itself
-    being the only signal (previously retried blindly every 3s with no
-    readiness check first at all)."""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        result = subprocess.run(["adb", "shell", "getprop", "sys.boot_completed"], capture_output=True, text=True)
-        if result.stdout.strip() == "1":
-            return True
-        time.sleep(1)
-    return False
-
-
 def launch_iisu(config: dict) -> None:
     """Starts iiSU's own main activity directly via adb, instead of leaving
     the stock Android home screen showing after boot. iiSU declares both
@@ -416,18 +398,25 @@ def launch_iisu(config: dict) -> None:
     default home app, so this just launches it directly rather than
     depending on that.
 
-    wait_for_boot_completed() covers the slow, unpredictable part of the
-    wait; this loop's own retries cover a narrower, separately-documented
-    edge case on top of that -- `am start` can still fail with a transient
-    "does not exist" error for a while even after boot_completed flips to
-    true, since package manager can still be resolving components at that
-    exact moment (confirmed via `dumpsys package`: the activity is
-    genuinely registered, `am start` just tried too early)."""
-    if not wait_for_boot_completed():
-        print("[bridge] sys.boot_completed never reported ready -- trying to launch iiSU anyway")
+    Retries every second since `am start` can fail with a transient "does
+    not exist" error for a while right after a cold boot -- package
+    manager can still be resolving components even once Android's own
+    home screen is already visible (confirmed via `dumpsys package`: the
+    activity is genuinely registered, `am start` just tried too early).
+
+    Deliberately does NOT gate this on sys.boot_completed first (setup_
+    wizard.py's own separate wait_for_avd() uses that signal, but only for
+    the one-time install boot): boot_completed only flips once *every*
+    system app's BOOT_COMPLETED receiver has finished, which is well
+    after Android's own home screen is already interactive -- gating the
+    first am start attempt on that turned "wait however long it takes for
+    am start to actually succeed" (this loop
+    alone) into "wait for full boot_completed first, THEN start trying,"
+    adding a real, needless delay confirmed live (iiSU sitting on the
+    stock home screen for 1-2 minutes) instead of shortening one."""
     component = config.get("iisu_component", DEFAULT_IISU_COMPONENT)
     result = None
-    for _ in range(30):
+    for _ in range(60):
         result = subprocess.run(["adb", "shell", "am", "start", "-n", component], capture_output=True, text=True)
         if result.returncode == 0 and "Error" not in result.stdout:
             set_volume_max()
