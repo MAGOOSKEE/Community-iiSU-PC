@@ -17,22 +17,28 @@ instead, regardless of whether the two projects are related at all (e.g.
 PS2 is stubbed under AetherSX2's package but redirected to PCSX2 on PC --
 there's no Android PCSX2 to begin with).
 
-RETROARCH_BY_EXTENSION: consoles routed through a single shared
-com.retroarch stub, disambiguated by the ROM's file extension the same
-way bridge/launch_bridge.py already does for PS1/Dreamcast. Only
+RETROARCH_BY_EXTENSION: a *fallback* for consoles routed through a single
+shared com.retroarch stub, used only when iiSU doesn't report which core
+it actually launched with (see bridge/launch_bridge.py's
+find_emulator_for_package -- the LIBRETRO intent extra is trusted first
+and unconditionally whenever it's present, since it identifies the
+console directly instead of guessing from the ROM's file extension, which
+can be ambiguous -- .chd is chdman's container for both PS1 and Dreamcast
+-- or just plain missing for a console never explicitly added to this
+list at all, e.g. an arcade/MAME core resolved from a .zip). Only
 extensions that don't collide with another entry in this same map are
-included here -- e.g. Saturn and MAME/arcade are deliberately left out,
-since their extensions (.bin/.cue/.iso/.chd/.zip/.7z) overlap too broadly
-with everything else on this list to disambiguate correctly from the
-extension alone. Getting that right needs resolving the ROM's own console
-folder, not just its extension, which is a bigger change than this list
-is trying to be.
+included here, for the same reason Saturn and MAME/arcade are left out
+entirely: without a reported core to fall back on, their extensions
+(.bin/.cue/.iso/.chd/.zip/.7z) overlap too broadly with everything else
+on this list to guess correctly from the extension alone.
 
-RetroArch itself is launched as retroarch.exe -L <core> <rom>, so pre_args
-includes -L and a core path relative to wherever retroarch.exe is found
-(standard "cores/xxx_libretro.dll" layout) -- this assumes the matching
-core is already installed there, same as RetroArch itself needs to be
-already installed for this to do anything.
+RetroArch itself is launched as retroarch.exe -L <core> -f <rom>, so
+pre_args includes -L and a core path relative to wherever retroarch.exe
+is found (standard "cores/xxx_libretro.dll" layout) -- this assumes the
+matching core is already installed there (launch_bridge.py's
+ensure_retroarch_core downloads a missing one from the libretro buildbot
+automatically), same as RetroArch itself needs to be already installed
+for this to do anything.
 """
 
 from collections import Counter

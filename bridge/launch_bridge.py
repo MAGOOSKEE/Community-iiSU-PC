@@ -228,74 +228,58 @@ def find_rom(rom_filename: str, roms_dir: Path, cache: dict) -> Path | None:
 
 
 def find_emulator_for_package(package: str, emulators: dict, rom_filename: str | None, android_core: str | None) -> dict | None:
-    """RetroArch (com.retroarch) is a multi-core, multi-console frontend on
-    the Android side -- iiSU reports the same package for it regardless of
-    which system the game actually is, so unlike every other (single-system)
-    package here, its profile can't just be "one PC exe". Its entry is
-    instead a "by_extension" map, normally resolved by the ROM's own file
-    extension to the real dedicated PC emulator for that system.
+    """Every package here (RetroArch aside) is single-system, so the
+    package match alone already tells the whole story -- no guessing from
+    the ROM's extension involved, or needed, for any of those.
 
-    android_core (the intent's LIBRETRO extra, when present) is checked
-    first, but only against RETROARCH_CORE_OVERRIDES -- cores with their
-    own dedicated standalone emulator PC-side. It's the one signal here
-    that identifies the actual console unambiguously regardless of file
-    extension, which matters because extension alone can lie: .chd is
-    chdman's container for both PS1 CDs and Dreamcast GD-ROMs/CDs, so a
-    Dreamcast game shipped as .chd would otherwise hit ".chd"'s PSX/
-    DuckStation safety-net entry below and silently try to launch the
-    wrong emulator entirely (confirmed as the cause of some Dreamcast
-    .chd games failing to launch). This check has to come before the
-    extension safety net for exactly that reason -- an extension-based
-    answer can be wrong in a way the core name isn't.
+    RetroArch (com.retroarch) is the one exception: it's a multi-core,
+    multi-console frontend on the Android side, and iiSU reports that same
+    package for it regardless of which system the game actually is. But
+    iiSU also always reports *which core it actually launched with* --
+    the intent's LIBRETRO extra (android_core) -- and that's a strictly
+    better signal than the ROM's file extension, which can be outright
+    wrong: .chd is chdman's container for both PS1 CDs and Dreamcast GD-
+    ROMs, and plenty of consoles here share .zip/.7z, so guessing the
+    console from extension alone is guessing at something android_core
+    already just told us. android_core is trusted first, unconditionally,
+    whenever it's present -- not just for a curated subset of extensions --
+    which also means any core this project has never explicitly curated
+    (e.g. an arcade/MAME core resolved for a .zip) still gets routed
+    correctly instead of falling through to a guess.
 
-    Next, a ROM extension that already resolves to a dedicated standalone
-    exe (PSX/Dreamcast, via RETROARCH_SAFETY_NET_EXTENSIONS -- recognizable
-    here by NOT being a plain "retroarch.exe" entry) wins, android_core or
-    not: iiSU lists its own bundled RetroArch core as the *first*-priority
-    candidate for both of those consoles even when a dedicated standalone
-    emulator is installed and selected, so trusting android_core beyond the
-    override case above would launch RetroArch-with-a-core instead of the
-    real standalone emulator this project already has a PC-side install
-    for -- confirmed live: a Dreamcast .gdi launched com.retroarch with
-    LIBRETRO=flycast_libretro_android.so even with Flycast picked in iiSU.
-    Running the real standalone emulator instead also sidesteps ever
-    needing that RetroArch core installed at all for these two consoles.
+    A resolved core first checks RETROARCH_CORE_OVERRIDES -- cores with
+    their own dedicated, better-suited standalone emulator PC-side (e.g.
+    Flycast over RetroArch-with-flycast-core for Dreamcast) -- confirmed
+    live as necessary: a Dreamcast .gdi launched com.retroarch with
+    LIBRETRO=flycast_libretro_android.so even with standalone Flycast
+    picked in iiSU. Failing that override, the core is passed straight
+    through to a generic RetroArch launch (-L cores/<core>.dll) -- so
+    long as that core is actually present on the Windows RetroArch
+    install (launch_bridge.ensure_retroarch_core downloads it from the
+    libretro buildbot if it isn't) -- rather than substituted into one of
+    this module's own curated per-extension templates, so this isn't
+    limited to consoles/cores someone has explicitly added here.
 
-    Failing that, android_core again -- this time resolved generically
-    against whatever by_extension template uses "-L" (i.e. an actual
-    RetroArch launch, not a standalone override) -- takes priority over
-    the plain extension guess whenever it resolves to a known Windows
-    core: it's the *actual* core iiSU/RetroArch decided to launch with,
-    which can legitimately differ from this project's own curated default
-    (e.g. a .zip-packaged ROM has no extension the curated map would
-    recognize at all, or the console's default core has since been changed
-    on the Android side). The exe_names/pre_args *shape* still comes from
-    an existing by_extension entry -- only the resolved core filename is
-    substituted in -- so config.json stays the source of truth for how
-    RetroArch itself gets invoked, not a hardcoded literal here."""
+    Only when android_core is missing entirely (or doesn't look like a
+    libretro-android core filename at all) does this fall back to the
+    plain extension-based guess in RETROARCH_BY_EXTENSION/
+    RETROARCH_SAFETY_NET_EXTENSIONS -- a reasonable default for the rare
+    case iiSU doesn't report a core, never the primary mechanism."""
     for prefix, profile in emulators.items():
         if not package.startswith(prefix):
             continue
         if "by_extension" in profile:
             by_ext = profile["by_extension"]
-            ext = Path(rom_filename).suffix.lower() if rom_filename else None
 
             if android_core:
                 core_dll = retroarch_core_dll_for_android_core(android_core)
-                override = standalone_profile_for_core_dll(core_dll) if core_dll else None
-                if override:
-                    return override
+                if core_dll:
+                    override = standalone_profile_for_core_dll(core_dll)
+                    if override:
+                        return override
+                    return {"exe_names": ["retroarch.exe"], "pre_args": ["-L", f"cores/{core_dll}", "-f"]}
 
-            safety_net_entry = by_ext.get(ext) if ext else None
-            if safety_net_entry and safety_net_entry.get("exe_names") != ["retroarch.exe"]:
-                return safety_net_entry
-
-            if android_core:
-                template = next((e for e in by_ext.values() if "-L" in e.get("pre_args", [])), None)
-                if core_dll and template:
-                    pre_args = [f"cores/{core_dll}" if arg.startswith("cores/") else arg for arg in template["pre_args"]]
-                    return {"exe_names": template["exe_names"], "pre_args": pre_args}
-
+            ext = Path(rom_filename).suffix.lower() if rom_filename else None
             return by_ext.get(ext) if ext else None
         return profile
     return None
