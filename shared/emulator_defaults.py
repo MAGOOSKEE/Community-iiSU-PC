@@ -68,7 +68,16 @@ STANDALONE_DEFAULTS = [
         "package": "info.cemu.cemu",
         "app_label": "Cemu",
         "exe_names": ["Cemu.exe"],
-        "pre_args": ["-f"],
+        # Confirmed live: bare "-f" errors out with a parameter-parse dialog
+        # ("the argument '<rom path>' for option '--fullscreen' is invalid")
+        # -- this Cemu build's -f/--fullscreen always consumes the next
+        # token as its required on/off value, so a bare trailing rom path
+        # (how every other emulator here takes its rom -- see
+        # launch_bridge.py's `args = [exe, *pre_args, rom_path]`) gets
+        # swallowed as that value instead. Needs an explicit value, and the
+        # rom path needs its own --game flag rather than relying on
+        # position.
+        "pre_args": ["-f", "true", "--game"],
     },
     {
         "console": "3ds",
