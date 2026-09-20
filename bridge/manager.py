@@ -48,7 +48,7 @@ from shared.avatars import fetch_avatar_bytes, make_circular_photo, make_placeho
 from shared.emulator_defaults import build_emulators_map, describe_profile
 from shared.theme import (
     BG, ENTRY_KWARGS, GRADIENT_STOPS, GRAY, GREEN, LISTBOX_KWARGS, PANEL_BG, PANEL_BG_HOVER,
-    RED, TEXT, TEXT_DIM, FONT_BODY, FONT_HEADING, FONT_MONO, FONT_TITLE, Card, QueueWriter, draw_gradient_bar,
+    RED, TEXT, TEXT_DIM, FONT_BODY, FONT_HEADING, FONT_MONO, FONT_TITLE, Card, QueueWriter, draw_gradient_bar, draw_menu_icon,
 )
 
 sys.path.insert(0, str(INSTALLER_DIR))
@@ -191,7 +191,9 @@ class Manager(tk.Tk):
     def _build_sidebar(self) -> None:
         header = tk.Frame(self.sidebar, bg=PANEL_BG)
         header.pack(fill="x", pady=(16, 10))
-        hamburger = tk.Label(header, text="☰", font=("Segoe UI", 15), bg=PANEL_BG, fg=TEXT, cursor="hand2")
+        hamburger_size = 20
+        hamburger = tk.Canvas(header, width=hamburger_size, height=hamburger_size, bg=PANEL_BG, highlightthickness=0, cursor="hand2")
+        draw_menu_icon(hamburger, hamburger_size, TEXT)
         hamburger.pack(side="left", padx=(16, 10))
         hamburger.bind("<Button-1>", lambda e: self._toggle_sidebar())
         self.sidebar_title_label = tk.Label(header, text="iiSU-PC", font=FONT_HEADING, bg=PANEL_BG, fg=TEXT)
