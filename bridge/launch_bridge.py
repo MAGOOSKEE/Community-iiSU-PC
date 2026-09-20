@@ -101,6 +101,19 @@ HOST = "0.0.0.0"
 INTENT_CMP_RE = re.compile(r"cmp=(\S+)")
 INTENT_DAT_RE = re.compile(r"dat=(\S+)")
 
+# iiSU's own default emulator list routes Steam/GOG/Epic-style entries to
+# GameNative, an Android app that runs Windows PC games under Wine/Box64 --
+# irrelevant here, since this project always has the real thing (Steam
+# itself) available PC-side already. Its launch command
+# (emuladores_default.json's "%PACKAGE%/.MainActivity -a
+# app.gamenative.LAUNCH_GAME -e app_id %GAMENATIVE_APP_ID_INT%") passes the
+# Steam App ID as a plain int Intent extra, not a file path or ClipData URI
+# -- there's no "rom" to find under roms_dir at all, unlike every other
+# entry in config.json's emulators map, so this is handled as its own
+# special case below rather than forced into the exe_names/rom_path shape
+# every other profile uses.
+GAMENATIVE_PACKAGE = "app.gamenative"
+
 # Set to the currently-running emulator Popen while a game is active, so the
 # quit hotkey listener (on its own thread) has something to terminate.
 current_process: subprocess.Popen | None = None
@@ -511,6 +524,30 @@ def hotkey_listener(config: dict) -> None:
             shutdown_everything()
 
 
+def launch_steam_game(app_id: str, config: dict) -> None:
+    """Best-effort, experimental: hands off to the real Steam install on
+    this PC via its "steam://rungameid/<id>" URI, which Steam registers as
+    a URL protocol handler on install -- no need to locate steam.exe under
+    search_roots at all, matching how a person would launch it manually.
+
+    Unlike every other emulator here, this doesn't go through
+    subprocess.Popen: Steam owns the actual launch (and may need to update
+    the game, show its own overlay, etc. first), so there's no child
+    process handle to wait on the way current_process/wait_and_restore_
+    iisu() does for a real subprocess -- iiSU's window is minimized before
+    handing off, but nothing here brings it back automatically once the
+    game exits. Untested against a real GameNative Steam-ROM stub (this
+    project has no way to generate one to test with) -- if Steam doesn't
+    launch at all, the most likely cause is app_id arriving in a format
+    this doesn't expect; check the raw intent dump this prints for what
+    iiSU actually sent."""
+    iisu_hwnd = find_window_by_title(config["iisu_window_title"])
+    if iisu_hwnd is not None:
+        user32.ShowWindow(iisu_hwnd, SW_MINIMIZE)
+    print(f"[bridge] launching Steam app {app_id}...")
+    os.startfile(f"steam://rungameid/{app_id}")
+
+
 def handle_request(raw_intent: str) -> None:
     print(f"[bridge] received: {raw_intent}")
 
@@ -549,6 +586,15 @@ def handle_request(raw_intent: str) -> None:
 
     component = cmp_match.group(1)
     package = component.split("/")[0]
+
+    if package == GAMENATIVE_PACKAGE:
+        app_id = extras.get("app_id")
+        if app_id is None:
+            print("[bridge] GameNative launch with no app_id extra -- can't tell Steam what to run")
+            return
+        launch_steam_game(app_id, config)
+        return
+
     # iiSU passes the ROM file via ClipData (not the plain Intent data URI) at
     # least for single/multi-file discs; Intent.toString() only shows a
     # truncated placeholder for ClipData, so the patched app sends the real

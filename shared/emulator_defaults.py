@@ -211,6 +211,21 @@ STANDALONE_DEFAULTS = [
         "exe_names": ["xenia_canary.exe", "xenia.exe"],
         "pre_args": ["--fullscreen"],
     },
+    {
+        "console": "steam",
+        "console_label": "Valve Steam (via GameNative)",
+        "package": "app.gamenative",
+        "app_label": "Steam",
+        # exe_names/pre_args are never actually used for this one --
+        # launch_bridge.py special-cases app.gamenative entirely (it
+        # launches via Steam's own steam://rungameid/<id> URI handler, not
+        # a subprocess.Popen'd exe, since the "ROM" here is really just a
+        # Steam App ID). This entry exists only so a stub gets built and
+        # installed for it (see installer/stub_apk.py) and so it shows up
+        # in the Emulators settings table at all.
+        "exe_names": ["steam.exe"],
+        "pre_args": [],
+    },
 ]
 
 RETROARCH_PACKAGE = "com.retroarch"
