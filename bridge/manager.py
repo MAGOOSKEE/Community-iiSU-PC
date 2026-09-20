@@ -56,6 +56,13 @@ import uninstall as uninstall_cli
 
 RESOLUTION_PRESETS = ["1280 x 720", "1600 x 900", "1920 x 1080", "2560 x 1440", "3840 x 2160"]
 REFRESH_RATE_PRESETS = ["60", "90", "120", "144", "165", "240"]
+
+# This project's known-good baseline profile (matches installer/setup_
+# wizard.py's DEFAULT_DISPLAY) -- _autodetect_display scales density
+# relative to this, not to any fixed Android density bucket, since the
+# goal is "looks the same as it does at 1920x1080@240dpi," not matching
+# a real handheld device's physical DPI.
+REFERENCE_DISPLAY = {"width": 1920, "height": 1080, "density": 240}
 MODIFIER_NAMES = ["ctrl", "alt", "shift", "win"]
 
 STATUS_POLL_INTERVAL_MS = 2000
@@ -796,6 +803,22 @@ class Manager(tk.Tk):
         self.display_width_var.set(str(width))
         self.display_height_var.set(str(height))
         self.display_refresh_var.set(str(hz))
+        # Density has to scale with resolution, not stay fixed -- this was
+        # previously left completely untouched by Auto-detect. Android's
+        # own UI sizing is density-driven (dp -> px = dp * density/160), so
+        # jumping from this project's 1920x1080 default to e.g. a 4K TV's
+        # 3840x2160 while density stayed at its default 240 quadrupled the
+        # screen's real pixel area under UI elements sized in the same
+        # fixed number of physical pixels -- confirmed live: "ran iiSU at
+        # 4K on my TV, it was tiny as." Windows' own per-monitor DPI
+        # doesn't help here (it reflects the user's Windows text-scaling
+        # preference, not how big Android UI should render on a
+        # console-style fullscreen display) -- scaling density by the same
+        # ratio as the resolution change instead keeps everything the same
+        # apparent size as this project's known-good 1920x1080@240dpi
+        # baseline, just sharper at higher resolutions.
+        density = round(REFERENCE_DISPLAY["density"] * height / REFERENCE_DISPLAY["height"])
+        self.display_density_var.set(str(density))
 
     def _apply_display(self) -> None:
         self._save_settings()
