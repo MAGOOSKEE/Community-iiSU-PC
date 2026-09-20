@@ -562,14 +562,23 @@ def hotkey_listener(config: dict) -> None:
 
 def quit_key_watcher(config: dict) -> None:
     """Polls quit_hotkey's key (default: Escape, no modifiers) via
-    GetAsyncKeyState instead of RegisterHotKey, on its own thread. The same
-    physical key now does two things depending on how long it's held: a
-    quick tap force-quits the running emulator and returns to iiSU (the
-    old quit_hotkey behavior, unchanged), while holding it for
-    shutdown_hold_seconds (default 5) closes iiSU and the AVD entirely --
-    RegisterHotKey can't express "how long has this been held," so this
-    needed its own polling loop rather than reusing hotkey_listener's
-    message-loop mechanism."""
+    GetAsyncKeyState instead of RegisterHotKey, on its own thread.
+
+    A tap's meaning depends on whether an emulator is actually running:
+    with one running, it force-quits it and returns to iiSU (the original
+    quit_hotkey behavior); with none running -- already sitting at iiSU
+    itself -- there's nothing to "quit back to", so it closes iiSU and the
+    AVD entirely instead. This replaced tapping being a no-op with nothing
+    running (proc.terminate() guarded on proc not being None, so a tap did
+    genuinely nothing, confirmed live -- reported as "pressing Escape
+    doesn't close iiSU").
+
+    Holding the key for shutdown_hold_seconds (default 5) also closes
+    iiSU and the AVD entirely, *regardless* of whether an emulator is
+    running -- kept as a way to skip straight to shutdown without
+    quitting back to iiSU first, mid-game. RegisterHotKey can't express
+    "how long has this been held," so this needed its own polling loop
+    rather than reusing hotkey_listener's message-loop mechanism."""
     hotkey_config = config["quit_hotkey"]
     key_name = hotkey_config.get("key", "escape")
     vk = resolve_vk(key_name)
@@ -578,7 +587,10 @@ def quit_key_watcher(config: dict) -> None:
     hold_seconds = config.get("shutdown_hold_seconds", DEFAULT_SHUTDOWN_HOLD_SECONDS)
     label = "+".join([*modifier_names, key_name]).upper()
 
-    print(f"[bridge] tap {label} to force-quit the running emulator; hold it {hold_seconds}s to close iiSU and the AVD entirely")
+    print(
+        f"[bridge] {label}: tap to quit the running emulator (or close iiSU entirely if none is running); "
+        f"hold {hold_seconds}s to close iiSU and the AVD entirely regardless"
+    )
 
     pressed_since: float | None = None
     shutdown_fired = False
@@ -600,6 +612,9 @@ def quit_key_watcher(config: dict) -> None:
                 if proc is not None and proc.poll() is None:
                     print(f"[bridge] {label} tapped, terminating emulator")
                     proc.terminate()
+                else:
+                    print(f"[bridge] {label} tapped with no emulator running -- closing iiSU and the AVD entirely...")
+                    shutdown_everything()
             pressed_since = None
 
 
