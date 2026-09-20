@@ -89,12 +89,40 @@ user32.RegisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int, wintypes.UINT, wi
 user32.RegisterHotKey.restype = wintypes.BOOL
 user32.GetMessageW.argtypes = [ctypes.POINTER(wintypes.MSG), wintypes.HWND, wintypes.UINT, wintypes.UINT]
 user32.GetMessageW.restype = ctypes.c_int
+user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
+user32.GetAsyncKeyState.restype = ctypes.c_short
 
 WM_HOTKEY = 0x0312
-QUIT_HOTKEY_ID = 1
 SHUTDOWN_HOTKEY_ID = 2
 MODIFIER_FLAGS = {"alt": 0x0001, "ctrl": 0x0002, "shift": 0x0004, "win": 0x0008}
 MOD_NOREPEAT = 0x4000
+
+# Virtual-key codes for GetAsyncKeyState, used by quit_key_watcher below --
+# separate from MODIFIER_FLAGS (RegisterHotKey's own bitflags), which
+# don't apply here since polling needs each modifier's actual key code.
+MODIFIER_VK = {"ctrl": 0x11, "alt": 0x12, "shift": 0x10, "win": 0x5B}
+# Named (non-single-character) keys quit_hotkey's "key" can be set to,
+# via manager.py's key-capture UI (Tk keysym, lowercased) -- anything not
+# listed here falls back to ord(key.upper()[0]), which already covers
+# every plain letter/digit key (the only kind this config supported before
+# Escape became the default).
+NAMED_KEY_VK = {
+    "escape": 0x1B, "tab": 0x09, "return": 0x0D, "space": 0x20,
+    "up": 0x26, "down": 0x28, "left": 0x25, "right": 0x27,
+    "delete": 0x2E, "insert": 0x2D, "home": 0x24, "end": 0x23,
+    "prior": 0x21, "next": 0x22,
+    **{f"f{n}": 0x6F + n for n in range(1, 13)},
+}
+KEY_POLL_INTERVAL = 0.03  # seconds -- responsive without busy-looping
+DEFAULT_SHUTDOWN_HOLD_SECONDS = 5
+
+
+def resolve_vk(key: str) -> int:
+    return NAMED_KEY_VK.get(key.lower(), ord(key.upper()[0]) if key else 0)
+
+
+def _is_key_down(vk: int) -> bool:
+    return bool(user32.GetAsyncKeyState(vk) & 0x8000)
 
 HOST = "0.0.0.0"
 
@@ -477,18 +505,25 @@ def shutdown_everything() -> None:
 
 
 def hotkey_listener(config: dict) -> None:
-    """Registers the quit-to-frontend and full-shutdown global hotkeys and
-    dispatches them as they're pressed. Runs on its own thread with its own
-    message loop, since RegisterHotKey delivers WM_HOTKEY via the calling
-    thread's queue."""
-    quit_label = _register_hotkey(config["quit_hotkey"], QUIT_HOTKEY_ID, "quit-to-frontend")
-    if quit_label:
-        print(f"[bridge] {quit_label} will force-quit the running emulator and return to iiSU")
+    """Registers the *optional*, separate full-shutdown hotkey (config.json's
+    "shutdown_hotkey") and dispatches it as it's pressed. Runs on its own
+    thread with its own message loop, since RegisterHotKey delivers
+    WM_HOTKEY via the calling thread's queue.
 
+    quit_hotkey no longer goes through this at all -- see quit_key_watcher,
+    which runs as its own separate thread/mechanism (GetAsyncKeyState
+    polling, not RegisterHotKey) since it now needs to tell a quick tap
+    apart from a multi-second hold, something RegisterHotKey's single
+    fire-once-per-press model has no way to express. shutdown_hotkey stays
+    on the old mechanism as a distinct, independent combo for anyone who
+    wants one in addition to holding quit_hotkey -- it's optional (None
+    skips registration entirely) since a fresh install's default
+    quit_hotkey (Escape) already covers full shutdown via a hold, with no
+    second combo needed."""
     shutdown_hotkey_config = config.get("shutdown_hotkey")
     shutdown_label = _register_hotkey(shutdown_hotkey_config, SHUTDOWN_HOTKEY_ID, "full shutdown") if shutdown_hotkey_config else None
     if shutdown_label:
-        print(f"[bridge] {shutdown_label} will close iiSU and shut down the AVD entirely")
+        print(f"[bridge] {shutdown_label} will also close iiSU and shut down the AVD entirely")
 
     msg = wintypes.MSG()
     while True:
@@ -497,15 +532,52 @@ def hotkey_listener(config: dict) -> None:
             break
         if msg.message != WM_HOTKEY:
             continue
-        if msg.wParam == QUIT_HOTKEY_ID:
-            with current_process_lock:
-                proc = current_process
-            if proc is not None and proc.poll() is None:
-                print("[bridge] quit hotkey pressed, terminating emulator")
-                proc.terminate()
-        elif msg.wParam == SHUTDOWN_HOTKEY_ID:
+        if msg.wParam == SHUTDOWN_HOTKEY_ID:
             print("[bridge] shutdown hotkey pressed, closing iiSU and the AVD...")
             shutdown_everything()
+
+
+def quit_key_watcher(config: dict) -> None:
+    """Polls quit_hotkey's key (default: Escape, no modifiers) via
+    GetAsyncKeyState instead of RegisterHotKey, on its own thread. The same
+    physical key now does two things depending on how long it's held: a
+    quick tap force-quits the running emulator and returns to iiSU (the
+    old quit_hotkey behavior, unchanged), while holding it for
+    shutdown_hold_seconds (default 5) closes iiSU and the AVD entirely --
+    RegisterHotKey can't express "how long has this been held," so this
+    needed its own polling loop rather than reusing hotkey_listener's
+    message-loop mechanism."""
+    hotkey_config = config["quit_hotkey"]
+    key_name = hotkey_config.get("key", "escape")
+    vk = resolve_vk(key_name)
+    modifier_names = hotkey_config.get("modifiers", [])
+    modifier_vks = [MODIFIER_VK[name] for name in modifier_names if name in MODIFIER_VK]
+    hold_seconds = config.get("shutdown_hold_seconds", DEFAULT_SHUTDOWN_HOLD_SECONDS)
+    label = "+".join([*modifier_names, key_name]).upper()
+
+    print(f"[bridge] tap {label} to force-quit the running emulator; hold it {hold_seconds}s to close iiSU and the AVD entirely")
+
+    pressed_since: float | None = None
+    shutdown_fired = False
+    while True:
+        time.sleep(KEY_POLL_INTERVAL)
+        is_down = _is_key_down(vk) and all(_is_key_down(m) for m in modifier_vks)
+        if is_down:
+            if pressed_since is None:
+                pressed_since = time.monotonic()
+                shutdown_fired = False
+            elif not shutdown_fired and time.monotonic() - pressed_since >= hold_seconds:
+                shutdown_fired = True
+                print(f"[bridge] {label} held {hold_seconds}s -- closing iiSU and the AVD entirely...")
+                shutdown_everything()
+        else:
+            if pressed_since is not None and not shutdown_fired:
+                with current_process_lock:
+                    proc = current_process
+                if proc is not None and proc.poll() is None:
+                    print(f"[bridge] {label} tapped, terminating emulator")
+                    proc.terminate()
+            pressed_since = None
 
 
 def launch_steam_game(app_id: str, config: dict) -> None:
@@ -665,6 +737,7 @@ def main() -> None:
         sys.exit(1)
 
     threading.Thread(target=hotkey_listener, args=(config,), daemon=True).start()
+    threading.Thread(target=quit_key_watcher, args=(config,), daemon=True).start()
 
     threading.Thread(target=ControllerBridge(is_game_running, shutdown_everything).run, daemon=True).start()
 

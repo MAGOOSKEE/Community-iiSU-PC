@@ -17,13 +17,11 @@
     "refresh_rate": 144
   },
   "quit_hotkey": {
-    "modifiers": ["ctrl", "alt"],
-    "key": "q"
+    "modifiers": [],
+    "key": "escape"
   },
-  "shutdown_hotkey": {
-    "modifiers": ["ctrl", "alt"],
-    "key": "x"
-  },
+  "shutdown_hold_seconds": 5,
+  "shutdown_hotkey": null,
   "usb_passthrough": [],
   "debug_show_console_windows": false
 }

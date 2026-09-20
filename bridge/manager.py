@@ -857,12 +857,19 @@ class Manager(tk.Tk):
         tk.Entry(body, textvariable=self.port_var, width=10, **ENTRY_KWARGS).grid(row=4, column=0, sticky="w", padx=24, pady=(4, 8))
 
         self.quit_hotkey_vars = self._build_hotkey_editor(
-            body, row=5, title="Quit-to-frontend hotkey (force-quits the running emulator, returns to iiSU):",
-            initial=self.config_data.get("quit_hotkey", {"modifiers": ["ctrl", "alt"], "key": "q"}),
+            body, row=5, title="Quit key (tap to force-quit the running emulator and return to iiSU):",
+            initial=self.config_data.get("quit_hotkey", {"modifiers": [], "key": "escape"}),
         )
+
+        tk.Label(body, text="Hold the quit key this long to close iiSU and the AVD entirely (seconds):", bg=BG, fg=TEXT, font=FONT_BODY).grid(
+            row=8, column=0, columnspan=2, sticky="w", padx=24, pady=(8, 2)
+        )
+        self.shutdown_hold_seconds_var = tk.StringVar(value=str(self.config_data.get("shutdown_hold_seconds", 5)))
+        tk.Entry(body, textvariable=self.shutdown_hold_seconds_var, width=6, **ENTRY_KWARGS).grid(row=9, column=0, sticky="w", padx=24, pady=(0, 8))
+
         self.shutdown_hotkey_vars = self._build_hotkey_editor(
-            body, row=8, title="Full-shutdown hotkey (closes iiSU and the AVD entirely):",
-            initial=self.config_data.get("shutdown_hotkey", {"modifiers": ["ctrl", "alt"], "key": "x"}),
+            body, row=10, title="Optional separate full-shutdown hotkey (in addition to holding the quit key above -- leave blank for none):",
+            initial=self.config_data.get("shutdown_hotkey") or {"modifiers": [], "key": ""},
         )
 
         tk.Label(
@@ -871,12 +878,12 @@ class Manager(tk.Tk):
             "directory, search folders, and emulator mappings apply on the very next\n"
             "game launch, no restart needed).",
             bg=BG, fg=TEXT_DIM, font=FONT_BODY, justify="left",
-        ).grid(row=11, column=0, sticky="w", padx=24, pady=(8, 8))
+        ).grid(row=13, column=0, sticky="w", padx=24, pady=(8, 8))
 
         self.debug_console_var = tk.BooleanVar(value=self.config_data.get("debug_show_console_windows", False))
         ttk.Checkbutton(
             body, text="Show console windows for the AVD and bridge (debugging)", variable=self.debug_console_var
-        ).grid(row=12, column=0, columnspan=2, sticky="w", padx=24, pady=(0, 4))
+        ).grid(row=14, column=0, columnspan=2, sticky="w", padx=24, pady=(0, 4))
         tk.Label(
             body,
             text="Off by default: the AVD, bridge, and shutdown-hotkey teardown all run without a visible\n"
@@ -886,7 +893,7 @@ class Manager(tk.Tk):
             "Trades away that run's log file, since a process can't sensibly have both. Takes effect on\n"
             "the next Start.",
             bg=BG, fg=TEXT_DIM, font=FONT_BODY, justify="left",
-        ).grid(row=13, column=0, columnspan=2, sticky="w", padx=24, pady=(0, 16))
+        ).grid(row=15, column=0, columnspan=2, sticky="w", padx=24, pady=(0, 16))
 
     def _build_hotkey_editor(self, parent, row: int, title: str, initial: dict) -> dict:
         tk.Label(parent, text=title, bg=BG, fg=TEXT, font=FONT_BODY).grid(row=row, column=0, columnspan=2, sticky="w", padx=24, pady=(4, 2))
@@ -938,6 +945,13 @@ class Manager(tk.Tk):
     def _read_hotkey(hotkey_vars: dict, default_key: str) -> dict:
         return {"modifiers": [name for name, var in hotkey_vars["mods"].items() if var.get()], "key": hotkey_vars["key"].get().strip() or default_key}
 
+    @staticmethod
+    def _read_optional_hotkey(hotkey_vars: dict) -> dict | None:
+        key = hotkey_vars["key"].get().strip()
+        if not key:
+            return None
+        return {"modifiers": [name for name, var in hotkey_vars["mods"].items() if var.get()], "key": key}
+
     def _save_settings(self) -> None:
         original_emulators = self.config_data.get("emulators", {})
         emulators = {}
@@ -970,6 +984,12 @@ class Manager(tk.Tk):
             messagebox.showerror("Invalid display settings", "Width, height, density, and refresh rate must be numbers.")
             return
 
+        try:
+            shutdown_hold_seconds = int(self.shutdown_hold_seconds_var.get())
+        except ValueError:
+            messagebox.showerror("Invalid hold duration", "The quit-key hold duration must be a number of seconds.")
+            return
+
         self.config_data = {
             "bridge_port": port,
             "roms_dir": self.roms_dir_var.get().strip(),
@@ -979,8 +999,9 @@ class Manager(tk.Tk):
             "iisu_component": self.config_data.get("iisu_component", "com.iisulauncher/com.iisulauncher.launcher.StartupSafeModeActivity"),
             "avd_name": self.avd_name_var.get().strip() or "iisuwin",
             "display": display,
-            "quit_hotkey": self._read_hotkey(self.quit_hotkey_vars, default_key="q"),
-            "shutdown_hotkey": self._read_hotkey(self.shutdown_hotkey_vars, default_key="x"),
+            "quit_hotkey": self._read_hotkey(self.quit_hotkey_vars, default_key="escape"),
+            "shutdown_hold_seconds": shutdown_hold_seconds,
+            "shutdown_hotkey": self._read_optional_hotkey(self.shutdown_hotkey_vars),
             "usb_passthrough": self.config_data.get("usb_passthrough", []),
             "debug_show_console_windows": self.debug_console_var.get(),
             "emulators": emulators,
