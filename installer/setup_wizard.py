@@ -147,7 +147,7 @@ def ensure_keystore() -> tuple[Path, str]:
     return KEYSTORE_PATH, password
 
 
-def wait_for_avd(avd_name: str, timeout: float) -> bool:
+def wait_for_avd(avd_name: str, timeout: float, process: subprocess.Popen | None = None) -> bool:
     """`adb devices` reporting "device" state only means the ADB link is
     up -- it doesn't mean Android's own system services have finished
     starting. `adb install` needs PackageManagerService specifically,
@@ -155,10 +155,25 @@ def wait_for_avd(avd_name: str, timeout: float) -> bool:
     especially on an AVD's very first-ever cold boot -- it shows up as
     `adb install` failing with "cmd: Can't find service: package" even
     though ADB is already connected. sys.boot_completed is the actual
-    signal that the OS is done starting up."""
+    signal that the OS is done starting up.
+
+    process, when given, is polled every iteration so a crashed emulator
+    is caught in a couple of seconds instead of only after the full
+    timeout: without hardware virtualization at all (no WHPX/Hyper-V, and
+    no software fallback available either), emulator.exe doesn't run
+    slowly -- it exits almost immediately. Waiting out the full multi-
+    minute timeout for that case reports a generic "AVD didn't come up"
+    that reads identically to a merely-slow software-rendered boot, when
+    the actual, more specific and more actionable cause (diagnosable via
+    virtualization_diagnostics() below) was knowable in seconds. The
+    caller distinguishes the two by checking process.poll() itself once
+    this returns False -- still not None means it genuinely just timed
+    out while running; not None means it died."""
     deadline = time.time() + timeout
     connected = False
     while time.time() < deadline:
+        if process is not None and process.poll() is not None:
+            return False
         if not connected:
             result = subprocess.run(["adb", "devices"], capture_output=True, text=True)
             connected = any(line.startswith("emulator-") and "device" in line for line in result.stdout.splitlines())
@@ -170,6 +185,73 @@ def wait_for_avd(avd_name: str, timeout: float) -> bool:
             return True
         time.sleep(2)
     return False
+
+
+def virtualization_diagnostics() -> dict:
+    """Reports the same virtualization state Task Manager's Performance
+    tab shows for "Virtualization: Enabled/Disabled" (Win32_Processor's
+    VirtualizationFirmwareEnabled -- the CPU/BIOS-level VT-x/AMD-V flag),
+    plus whether a hypervisor is actually active right now
+    (Win32_ComputerSystem's HypervisorPresent -- true for Hyper-V, WHPX,
+    or any other hypervisor, whichever is actually providing acceleration
+    -- not tied to one specific named Windows feature). Deliberately not
+    Get-WindowsOptionalFeature: querying installed features' state
+    requires an elevated PowerShell session, and this needs to work from
+    this project's normal, non-admin install/bridge processes. Both False
+    values default to False rather than raising if the query itself fails
+    for any reason (e.g. WMI unavailable) -- this is a diagnostic aid for
+    a *different* failure already in progress, not something that should
+    itself become a second failure."""
+    result = {"cpu_virtualization_enabled": False, "hypervisor_present": False}
+    try:
+        cpu_check = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "(Get-CimInstance Win32_Processor).VirtualizationFirmwareEnabled"],
+            capture_output=True, text=True, timeout=15,
+        )
+        result["cpu_virtualization_enabled"] = cpu_check.stdout.strip().lower() == "true"
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    try:
+        hypervisor_check = subprocess.run(
+            ["powershell", "-NoProfile", "-Command",
+             "(Get-CimInstance Win32_ComputerSystem).HypervisorPresent"],
+            capture_output=True, text=True, timeout=15,
+        )
+        result["hypervisor_present"] = hypervisor_check.stdout.strip().lower() == "true"
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return result
+
+
+def enable_hypervisor_platform() -> None:
+    """Turns on Windows' "Windows Hypervisor Platform" optional feature --
+    what the Android Emulator actually needs on Windows (a lighter-weight
+    ask than enabling full Hyper-V, and compatible with more third-party
+    virtualization software). Requires admin rights: shells out through
+    a UAC elevation prompt (Windows' own consent dialog, not a silent
+    escalation) rather than assuming this process is already elevated.
+    Takes effect only after a restart -- this never reboots the PC
+    itself, since that's a genuinely disruptive action only the person
+    at the keyboard should decide when to do."""
+    subprocess.run(
+        [
+            "powershell", "-NoProfile", "-Command",
+            "Start-Process powershell -Verb RunAs -ArgumentList "
+            "'-NoProfile -Command \"Enable-WindowsOptionalFeature -Online -FeatureName HypervisorPlatform -All -NoRestart\"'",
+        ],
+        check=True,
+    )
+
+
+class VirtualizationError(RuntimeError):
+    """Raised instead of a plain RuntimeError specifically when the AVD
+    boot failure looks like a virtualization problem (the emulator
+    process either crashed almost immediately, or ran the full timeout
+    with Windows' Hypervisor Platform feature confirmed off) -- callers
+    with a GUI (setup_gui.py) can catch this type specifically to offer
+    enable_hypervisor_platform() as an action, rather than just showing
+    the message as inert text."""
 
 
 def is_avd_connected() -> bool:
@@ -211,8 +293,12 @@ def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_a
         finally:
             log_file.close()
 
-    if not wait_for_avd(avd_name, AVD_BOOT_TIMEOUT):
-        print(f"[setup] the AVD did not come up within {AVD_BOOT_TIMEOUT}s on its first boot.")
+    if not wait_for_avd(avd_name, AVD_BOOT_TIMEOUT, process=process):
+        crashed_early = process is not None and process.poll() is not None
+        if crashed_early:
+            print(f"[setup] the emulator process exited on its own (code {process.returncode}) instead of booting.")
+        else:
+            print(f"[setup] the AVD did not come up within {AVD_BOOT_TIMEOUT}s on its first boot.")
         if log_path.is_file():
             print(f"[setup] last lines of {log_path}:")
             for line in log_path.read_text(encoding="utf-8", errors="replace").splitlines()[-25:]:
@@ -222,6 +308,33 @@ def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_a
                 "[setup] no log file to show -- an AVD instance from an earlier attempt is still "
                 "running but never finished booting either. A slow, non-hardware-accelerated boot "
                 "(no Hyper-V/WHPX, or virtualization disabled in BIOS) is the most common cause."
+            )
+
+        diag = virtualization_diagnostics()
+        if crashed_early and not diag["cpu_virtualization_enabled"]:
+            raise VirtualizationError(
+                "The emulator crashed immediately instead of booting, and this PC's CPU virtualization "
+                "(VT-x/AMD-V -- what Task Manager's Performance tab calls \"Virtualization\") is reported "
+                "as disabled. This has to be turned on in your BIOS/UEFI first -- Windows itself can't "
+                "enable it. Re-running Setup.bat resumes from here once it's on."
+            )
+        if crashed_early and not diag["hypervisor_present"]:
+            raise VirtualizationError(
+                "The emulator crashed immediately instead of booting. Your CPU has virtualization enabled, "
+                "but no hypervisor is currently active on this PC -- the Android Emulator needs one "
+                "(Windows Hypervisor Platform, Hyper-V, or a WHPX-compatible equivalent) actually running "
+                "on top of that. Enable Windows Hypervisor Platform below, or install Google's Android "
+                "Emulator Hypervisor Driver instead if you'd rather not (search for it in Android Studio's "
+                "SDK Manager, or google \"Android Emulator Hypervisor Driver\") -- either one fixes this. "
+                "Re-running Setup.bat resumes from here."
+            )
+        if crashed_early:
+            raise VirtualizationError(
+                f"The emulator crashed immediately (code {process.returncode}) instead of booting, even "
+                "though this PC reports both CPU virtualization enabled and a hypervisor already active -- "
+                f"see {log_path.name} above for the actual error (a conflict with another virtualization "
+                "product, like an older VirtualBox/VMware version, is a common cause here). Re-running "
+                "Setup.bat resumes from here."
             )
         raise RuntimeError(
             f"The AVD did not come up within {AVD_BOOT_TIMEOUT}s on its first boot. If your PC doesn't "
