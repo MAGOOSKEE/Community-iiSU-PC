@@ -158,6 +158,14 @@ STANDALONE_DEFAULTS = [
         "app_label": "RPCS3",
         "exe_names": ["rpcs3.exe"],
         "pre_args": ["--no-gui", "--fullscreen"],
+        # RPCS3's actual CLI order is the opposite of every other
+        # emulator here: "rpcs3.exe <game_path> --no-gui --fullscreen" --
+        # confirmed live, the boot target has to come *before* these
+        # flags or RPCS3 parses neither flag as having a boot target at
+        # all ("Missing command-line arguments! Cannot run no-gui mode
+        # without boot target."). See launch_bridge.py's rom_before_args
+        # handling.
+        "rom_before_args": True,
     },
     {
         "console": "psvita",
@@ -357,10 +365,13 @@ def build_emulators_map() -> dict:
     and Wii both under Dolphin) collapse into one entry automatically."""
     emulators = {}
     for entry in STANDALONE_DEFAULTS:
-        emulators[entry["package"]] = {
+        profile = {
             "exe_names": entry["exe_names"],
             "pre_args": entry["pre_args"],
         }
+        if entry.get("rom_before_args"):
+            profile["rom_before_args"] = True
+        emulators[entry["package"]] = profile
 
     by_extension = {}
     for ext, (_console, exe_names, pre_args) in RETROARCH_SAFETY_NET_EXTENSIONS.items():
