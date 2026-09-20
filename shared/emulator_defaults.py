@@ -282,6 +282,23 @@ ANDROID_CORE_NAME_OVERRIDES = {
     "mupen64plus_next_gles2": "mupen64plus_next",
 }
 
+# The reverse of RETROARCH_SAFETY_NET_EXTENSIONS' extension -> console
+# guess, but keyed by the *actual* core RetroArch/iiSU reports launching
+# (via retroarch_core_dll_for_android_core) instead of the ROM's file
+# extension. Needed because some formats are genuinely ambiguous by
+# extension alone -- .chd is chdman's container for both PS1 CDs and
+# Dreamcast GD-ROMs/CDs, but RETROARCH_SAFETY_NET_EXTENSIONS can only
+# point ".chd" at one of them (DuckStation). A Dreamcast game shipped as
+# .chd would silently launch DuckStation instead of Flycast without this
+# override -- confirmed as the cause of "some Dreamcast games won't
+# launch": the LIBRETRO extra (flycast_libretro_android.so) is present
+# and unambiguous even when the extension isn't, so it's checked first
+# and wins outright, the same way an extension safety-net entry already
+# wins outright over the generic by-extension RetroArch guess.
+RETROARCH_CORE_OVERRIDES = {
+    "flycast_libretro.dll": ("dreamcast", ["flycast.exe"], []),
+}
+
 
 def retroarch_core_dll_for_android_core(android_core_filename: str) -> str | None:
     """Translates the Android libretro core .so filename iiSU/RetroArch
@@ -299,6 +316,18 @@ def retroarch_core_dll_for_android_core(android_core_filename: str) -> str | Non
     core_name = android_core_filename.removesuffix("_libretro_android.so")
     core_name = ANDROID_CORE_NAME_OVERRIDES.get(core_name, core_name)
     return f"{core_name}_libretro.dll"
+
+
+def standalone_profile_for_core_dll(core_dll: str) -> dict | None:
+    """The dedicated-emulator profile for a resolved Windows core dll, per
+    RETROARCH_CORE_OVERRIDES, in the same {exe_names, pre_args} shape as
+    any other emulators-map entry -- or None if this core has no dedicated
+    override (the ordinary by-extension guess applies instead)."""
+    override = RETROARCH_CORE_OVERRIDES.get(core_dll)
+    if override is None:
+        return None
+    _console, exe_names, pre_args = override
+    return {"exe_names": exe_names, "pre_args": pre_args}
 
 
 def build_emulators_map() -> dict:
