@@ -126,12 +126,53 @@ def save_path_cache(cache: dict) -> None:
         pass
 
 
+EXECUTABLE_SEARCH_MAX_DEPTH = 4
+ROM_SEARCH_MAX_DEPTH = 3
+
+
+def _find_by_name(root: Path, names: set[str], max_depth: int) -> Path | None:
+    """Breadth-first search for any file in `names` under root, capped at
+    max_depth directory levels below root (root's direct children are
+    depth 0). Replaces Path.rglob(), whose unbounded recursion means one
+    slow, unavoidable round-trip per folder for every folder in the
+    *entire* tree when root lives on a network share (search_roots and
+    roms_dir are both commonly a Windows-mapped X:\\ drive here) --
+    exactly the "takes forever" scan this exists to fix. Emulator installs
+    and this project's curated ROM folders are never more than a few
+    levels deep, so a modest cap avoids wandering into irrelevant,
+    deeply-nested subfolders an rglob can't tell apart from a real match
+    ahead of time -- an emulator's own save states/BIOS/thumbnails/cache
+    dirs, or (worse, since it recurses *into* it for no reason) a
+    multi-gigabyte Xbox 360 title's own .data folder sitting right next to
+    the file actually being searched for. BFS also means a shallower
+    match is always returned over a deeper coincidental same-name file,
+    which rglob's traversal order doesn't guarantee at all."""
+    current = [root]
+    depth = 0
+    while current and depth <= max_depth:
+        next_level = []
+        for directory in current:
+            try:
+                entries = list(os.scandir(directory))
+            except OSError:
+                continue
+            for entry in entries:
+                if entry.name in names and entry.is_file():
+                    return Path(entry.path)
+            for entry in entries:
+                if entry.is_dir():
+                    next_level.append(Path(entry.path))
+        current = next_level
+        depth += 1
+    return None
+
+
 def find_executable(names: list[str], search_roots: list[Path], cache: dict) -> Path | None:
-    """rglob-scanning search_roots (which commonly include all of
-    C:/Program Files) on every single launch is real, avoidable latency --
-    the result almost never changes between launches, so it's cached by
-    exe name and only re-scanned if the cached path stops existing (e.g.
-    the emulator got moved/reinstalled elsewhere).
+    """Scanning search_roots (which commonly include all of C:/Program
+    Files) on every single launch is real, avoidable latency -- the result
+    almost never changes between launches, so it's cached by exe name and
+    only re-scanned if the cached path stops existing (e.g. the emulator
+    got moved/reinstalled elsewhere).
 
     The cache key includes search_roots itself (not just the exe names),
     so editing search_roots in manager.py naturally invalidates the old
@@ -147,11 +188,10 @@ def find_executable(names: list[str], search_roots: list[Path], cache: dict) -> 
     for root in search_roots:
         if not root.is_dir():
             continue
-        for name in names:
-            matches = list(root.rglob(name))
-            if matches:
-                cache["executables"][cache_key] = str(matches[0])
-                return matches[0]
+        match = _find_by_name(root, set(names), EXECUTABLE_SEARCH_MAX_DEPTH)
+        if match:
+            cache["executables"][cache_key] = str(match)
+            return match
     cache["executables"].pop(cache_key, None)
     return None
 
@@ -166,10 +206,10 @@ def find_rom(rom_filename: str, roms_dir: Path, cache: dict) -> Path | None:
 
     if not roms_dir.is_dir():
         return None
-    matches = list(roms_dir.rglob(rom_filename))
-    if matches:
-        cache["roms"][cache_key] = str(matches[0])
-        return matches[0]
+    match = _find_by_name(roms_dir, {rom_filename}, ROM_SEARCH_MAX_DEPTH)
+    if match:
+        cache["roms"][cache_key] = str(match)
+        return match
     cache["roms"].pop(cache_key, None)
     return None
 
