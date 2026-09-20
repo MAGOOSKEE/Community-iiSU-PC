@@ -78,6 +78,7 @@ from winapi import (
 STOP_SCRIPT = Path(__file__).parent / "stop_iisu_pc.py"
 STOP_LOG_PATH = Path(__file__).parent / "stop.log"
 PATH_CACHE_PATH = Path(__file__).parent / ".path_cache.json"
+LAUNCH_LOG_PATH = Path(__file__).parent / "launch_history.log"
 LIBRETRO_CORE_URL = "https://buildbot.libretro.com/nightly/windows/x86_64/latest/{core_dll}.zip"
 
 DETACHED_PROCESS = 0x00000008
@@ -165,6 +166,27 @@ def save_path_cache(cache: dict) -> None:
         PATH_CACHE_PATH.write_text(json.dumps(cache), encoding="utf-8")
     except OSError:
         pass
+
+
+def log_launch(line: str, notify: bool = False, notify_title: str = "iiSU-PC") -> None:
+    """Appends one line to launch_history.log with a timestamp -- every
+    launch attempt gets logged here regardless of outcome, not just
+    failures, so there's always a record to check against ("did this
+    actually try to launch, and with what") rather than only ever finding
+    out about a problem after the fact with nothing to look back on.
+    notify additionally raises a tray balloon (see boot_overlay.
+    notify_error) for anything worth interrupting someone over -- a
+    failure, not a routine successful launch -- since the bridge runs
+    with no visible window normally and a log file nobody's looking at
+    doesn't "make the user aware" of anything by itself."""
+    timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with open(LAUNCH_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(f"[{timestamp}] {line}\n")
+    except OSError:
+        pass
+    if notify:
+        boot_overlay.notify_error(notify_title, line)
 
 
 EXECUTABLE_SEARCH_MAX_DEPTH = 4
@@ -457,16 +479,31 @@ def bring_emulator_to_foreground(pid: int) -> None:
     nudge_focus_with_click(hwnd)
 
 
-def wait_and_restore_iisu(process: subprocess.Popen, config: dict) -> None:
+def wait_and_restore_iisu(process: subprocess.Popen, config: dict, emulator_name: str) -> None:
     """Runs on a background thread: waits for the emulator to close (whether
     normally or via the quit hotkey), then un-hides and refocuses the iiSU
     AVD window, mirroring how the real Android launcher reappears once a
-    game exits."""
+    game exits.
+
+    A non-zero exit code is only a heuristic for "this launch actually
+    failed," not a certainty -- some emulators exit non-zero on a normal
+    quit too -- but it's the only signal available for the class of
+    failure that shows its own error dialog and waits for it to be
+    dismissed rather than crashing outright (confirmed live: RPCS3's
+    missing-boot-target dialog, DuckStation's missing-SBI-file dialog --
+    neither exits until someone clicks through it, so there's no
+    "crashed immediately" moment to catch, only the eventual exit code
+    once they do). Logged either way; only notified when it looks like a
+    real failure, worth interrupting someone over."""
     process.wait()
     with current_process_lock:
         global current_process
         if current_process is process:
             current_process = None
+    if process.returncode not in (0, None):
+        log_launch(f"EXITED: {emulator_name} exited with code {process.returncode} (possible launch error)", notify=True, notify_title=emulator_name)
+    else:
+        log_launch(f"EXITED: {emulator_name} exited normally")
     show_iisu_window(config)
 
 
@@ -684,8 +721,9 @@ def handle_request(raw_intent: str) -> None:
     if package == GAMENATIVE_PACKAGE:
         app_id = extras.get("app_id")
         if app_id is None:
-            print("[bridge] GameNative launch with no app_id extra -- can't tell Steam what to run")
+            log_launch("FAILED: GameNative launch with no app_id extra -- can't tell Steam what to run", notify=True)
             return
+        log_launch(f"LAUNCHED: Steam app {app_id} via GameNative")
         launch_steam_game(app_id, config)
         return
 
@@ -708,7 +746,7 @@ def handle_request(raw_intent: str) -> None:
 
     profile = find_emulator_for_package(package, config["emulators"], rom_filename, extras.get("LIBRETRO"))
     if profile is None:
-        print(f"[bridge] no known PC emulator mapped for package '{package}' (rom '{rom_filename}')")
+        log_launch(f"FAILED: no known PC emulator mapped for package '{package}' (rom '{rom_filename}')", notify=True)
         return
 
     path_cache = load_path_cache()
@@ -716,14 +754,14 @@ def handle_request(raw_intent: str) -> None:
     executable = find_executable(profile["exe_names"], search_roots, path_cache)
     if executable is None:
         save_path_cache(path_cache)
-        print(f"[bridge] none of {profile['exe_names']} found under {search_roots}")
+        log_launch(f"FAILED: none of {profile['exe_names']} found under {search_roots} (rom '{rom_filename}')", notify=True)
         return
 
     rom_path = None
     if rom_filename:
         rom_path = find_rom(rom_filename, roms_dir, path_cache)
         if rom_path is None:
-            print(f"[bridge] rom '{rom_filename}' not found under {roms_dir}")
+            log_launch(f"FAILED: rom '{rom_filename}' not found under {roms_dir}", notify=True, notify_title=friendly_emulator_name(executable))
 
     save_path_cache(path_cache)
 
@@ -762,6 +800,7 @@ def handle_request(raw_intent: str) -> None:
             print("[bridge] could not locate iiSU window to hide")
 
         print(f"[bridge] launching: {args}")
+        log_launch(f"LAUNCHED: {friendly_emulator_name(executable)} -- {args}")
         process = subprocess.Popen(args, cwd=str(executable.parent))
         with current_process_lock:
             global current_process
@@ -770,7 +809,7 @@ def handle_request(raw_intent: str) -> None:
     finally:
         boot_overlay.close(overlay)
     threading.Thread(
-        target=wait_and_restore_iisu, args=(process, config), daemon=True
+        target=wait_and_restore_iisu, args=(process, config, friendly_emulator_name(executable)), daemon=True
     ).start()
 
 
