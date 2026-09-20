@@ -16,7 +16,6 @@ Stdlib only (tkinter), no extra installs.
 """
 
 import json
-import queue
 import sys
 import threading
 import tkinter as tk
@@ -33,7 +32,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from shared import theme
 from shared.theme import (
     BG, ENTRY_KWARGS, GRADIENT_STOPS, GREEN, LISTBOX_KWARGS, PANEL_BG, PANEL_BG_HOVER,
-    RED, TEXT, TEXT_DIM, FONT_BODY, FONT_HEADING, FONT_MONO, FONT_TITLE, Card, QueueWriter, draw_gradient_bar,
+    RED, TEXT, TEXT_DIM, FONT_BODY, FONT_HEADING, FONT_TITLE, Card, draw_gradient_bar,
 )
 from shared.emulator_defaults import all_emulator_exe_names, describe_profile
 
@@ -697,11 +696,6 @@ class OnboardingWizard(tk.Tk):
         self.finish_status_label = tk.Label(self.content, text="", font=FONT_BODY, bg=PANEL_BG, fg=TEXT_DIM, justify="left", wraplength=660, anchor="w")
         self.finish_status_label.pack(anchor="w", fill="x", pady=(16, 8))
 
-        self.finish_log_text = tk.Text(
-            self.content, state="disabled", wrap="word", font=FONT_MONO, bg="#0e0e10", fg="#c9c9ce", relief="flat", padx=8, pady=8, height=7
-        )
-        # Only packed once applying display settings actually starts.
-
     def _missing_emulators_warning(self) -> str:
         """Surfaced here, not just on the Emulator Folders step itself, so
         it's the last thing seen before saving rather than something only
@@ -772,8 +766,6 @@ class OnboardingWizard(tk.Tk):
         return config
 
     def _finish(self) -> None:
-        if self.running_bg_task:
-            return
         ok, message = self._validate_roms()
         if not ok:
             self._show_step(1)
@@ -787,63 +779,48 @@ class OnboardingWizard(tk.Tk):
         self.back_button.config(state="disabled")
         self.next_button.config(state="disabled")
 
-        if not self._display_changed():
-            self.finish_status_label.config(text="Saved. You're all set -- close this and launch iiSU whenever you're ready.", fg=GREEN)
-            self.next_button.config(text="Close", command=self.destroy, state="normal")
-            return
+        # Writes straight into the AVD's own config.ini (no boot needed --
+        # see _write_avd_display_profile) rather than the old behavior of
+        # cold-booting the VM right here to "apply" it: this AVD always
+        # cold-boots on its very first real start regardless (-no-snapshot,
+        # never resumed), so the setting is already going to be in effect
+        # the moment the person starts iiSU-PC themselves -- proving it
+        # here first, unprompted, just meant onboarding finished by
+        # dropping whoever just set this up straight into a live session
+        # instead of letting them start it deliberately, whenever they're
+        # actually ready.
+        if self._display_changed():
+            self._write_avd_display_profile(config)
 
         self.finish_status_label.config(
-            text="Saved. Applying your display settings now -- this cold-boots the VM once, might take a minute...",
-            fg=TEXT_DIM,
+            text=(
+                "Saved. You're all set -- close this and start iiSU-PC yourself whenever you're "
+                "ready (the desktop shortcut, or Manager's Home page). Two things worth double-"
+                "checking before you do: your real ROM library actually needs to be reachable from "
+                "inside the VM at the folder you mapped (this only points at it, nothing gets copied "
+                "in), and any standalone emulators your console mappings rely on need to actually be "
+                "found -- rerun the scan on \"Emulator Folders\" if you're not sure."
+            ),
+            fg=GREEN,
         )
-        self.finish_log_text.pack(fill="both", expand=True, pady=(0, 0))
-        self.running_bg_task = True
-        self.log_queue: queue.Queue = queue.Queue()
-        self.after(100, self._poll_finish_log)
-        threading.Thread(target=self._run_apply_display, daemon=True).start()
+        self.next_button.config(text="Close", command=self.destroy, state="normal")
 
-    def _run_apply_display(self) -> None:
+    def _write_avd_display_profile(self, config: dict) -> None:
+        """Writes the chosen resolution/density straight into the AVD's own
+        config.ini -- the actual hardware-profile file emulator.exe reads
+        at boot -- without booting anything to do it. Best-effort: a
+        failure here just leaves the AVD on its previous profile until
+        manager.py's Display page is used later, never worth blocking
+        onboarding's own completion over."""
         import apply_display
 
-        writer = QueueWriter(self.log_queue)
-        old_stdout = sys.stdout
-        sys.stdout = writer
-        error = None
+        config_ini = apply_display.avd_config_path(config.get("avd_name", "iisuwin"))
+        if not config_ini.is_file():
+            return
         try:
-            apply_display.main()
-        except SystemExit as e:
-            if e.code not in (0, None):
-                error = f"exited with code {e.code}"
-        except Exception as e:  # noqa: BLE001 -- surfaced to the user below, not swallowed
-            error = str(e)
-        finally:
-            sys.stdout = old_stdout
-        self.after(0, self._on_apply_finished, error)
-
-    def _poll_finish_log(self) -> None:
-        try:
-            while True:
-                text = self.log_queue.get_nowait()
-                self.finish_log_text.config(state="normal")
-                self.finish_log_text.insert("end", text)
-                self.finish_log_text.see("end")
-                self.finish_log_text.config(state="disabled")
-        except queue.Empty:
-            pass
-        if self.running_bg_task:
-            self.after(100, self._poll_finish_log)
-
-    def _on_apply_finished(self, error: str | None) -> None:
-        self.running_bg_task = False
-        if error:
-            self.finish_status_label.config(
-                text=f"Display settings were saved, but applying them failed: {error}. "
-                "You can retry from Configure -> Display later.",
-                fg=RED,
-            )
-        else:
-            self.finish_status_label.config(text="All set -- your display is applied and iiSU is running.", fg=GREEN)
-        self.next_button.config(text="Close", command=self.destroy, state="normal")
+            apply_display.update_config_ini(config_ini, config["display"])
+        except OSError as e:
+            print(f"[onboarding] couldn't write the AVD's display profile ({e}) -- it'll get applied next time Display settings are saved")
 
 
 if __name__ == "__main__":
