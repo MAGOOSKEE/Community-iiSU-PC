@@ -38,13 +38,23 @@ A fullscreen overlay (`bridge/boot_overlay.py`) covers the AVD boot and the emul
 
 Inside the VM, `Ctrl+Alt+Q` force-quits the current game and returns to iiSU; `Ctrl+Alt+X` closes iiSU and shuts down the VM entirely (both rebindable in Advanced). Holding **Back+Start** together on a controller for 2.5s does the same full shutdown.
 
+## Windows Apps
+
+The Manager's **Windows Apps** page lets iiSU launch native Windows applications in addition to emulated console games. An entry can launch either an executable (`.exe`) or a registered Windows URI/protocol such as `steam://rungameid/...`.
+
+Each entry is represented in iiSU by an empty `.pcgame` placeholder under the `windows` folder in your configured ROM directory. The real launch information stays in `bridge/windows_apps.json`; the launch bridge intercepts iiSU's request for the placeholder and starts the configured Windows target instead.
+
+Use **Add** for individual programs, or **Steam Library Import** to find installed Steam games and create URI-based entries automatically. Steam entries can use artwork cached by the Manager; this does not modify iiSU's own artwork or SteamGridDB integration.
+
+`windows_apps.json` is local runtime configuration and is intentionally ignored by Git. Executable paths are specific to the PC they were configured on, while URI-based entries are generally more portable. The Windows Apps page also includes import/export and a health check for missing executables, placeholders, and other library inconsistencies.
+
 ## Uninstalling
 
 Open the Manager's **Uninstall** page for a preview of exactly what will be removed and how much space it frees before you confirm. It removes the Android VM and its portable SDK copy, `bridge/config.json`, the signing keystore, and the desktop shortcut. It does not touch your ROM library, your PC emulators, or the iiSU APK you supplied. It also flags `%LOCALAPPDATA%\Android\Sdk`, which the SDK downloader can end up using -- left alone by default since a real Android Studio install would keep its own SDK there too.
 
 ## How it works, briefly
 
-`installer/patch_iisu.py` decompiles your iiSU APK, redirects its ROM-launch code to a small injected class that sends the launch request to `bridge/launch_bridge.py` over a local socket, then rebuilds and signs it. The bridge matches the requested game to a PC emulator (configured in `bridge/config.json`) and launches it directly on Windows.
+`installer/patch_iisu.py` decompiles your iiSU APK, redirects its ROM-launch code to a small injected class that sends the launch request to `bridge/launch_bridge.py` over a local socket, then rebuilds and signs it. The bridge matches normal ROM requests to a PC emulator (configured in `bridge/config.json`). Windows Apps requests are instead matched against `bridge/windows_apps.json` and launched directly as native executables or registered URI/protocol targets.
 
 iiSU also needs to think a real emulator is installed for each console before it'll treat it as playable. Setup installs a placeholder "redirector" app for each one (`installer/stub_apk.py`) that does nothing itself, since the patched launch never reaches it. The Manager's Emulators page has an "Install Redirector Apps..." button to re-run this any time.
 
@@ -69,7 +79,7 @@ installer/
   uninstall.py             removes everything Setup and day-to-day use create
 
 bridge/
-  manager.py               the day-to-day app: Home, all settings, Credits, Uninstall
+  manager.py               day-to-day settings, Windows Apps, Android storage, backup/restore, diagnostics
   iiSU-PC Manager.bat       launches manager.py
   emulator_dialogs.py      dialogs shared by manager.py and onboarding_wizard.py
   onboarding_wizard.py     step-by-step first-run setup
@@ -79,7 +89,7 @@ bridge/
   updater.py               checks for (and, on a git checkout, applies) updates
   boot_overlay.py          fullscreen overlay covering the AVD boot / emulator hand-off
   stop_iisu_pc.py          tears both back down
-  launch_bridge.py         listens for launch requests, runs the PC emulator
+  launch_bridge.py         handles iiSU launches for PC emulators and native Windows apps
   controller_bridge.py     forwards controller input into the AVD
   portable_sdk.py          copies the SDK/AVD into a self-contained folder
   sync_library.py          mirrors your ROM library into the AVD as placeholders
@@ -90,6 +100,8 @@ bridge/
 
 ## If something breaks
 
+- Run the Manager's **Diagnostics** page first for a non-destructive check of the installation, configuration, Android VM/ADB, bridge, Windows Apps, Steam integration, and logs.
+- `bridge/manager_debug.log` and `bridge/bridge_debug.log` preserve Manager and launch-bridge diagnostics, including uncaught Python exceptions that might otherwise disappear when a console closes.
 - `installer/patch_iisu.py`'s patch is anchored on a specific log string in iiSU's code. If iiSU updates and changes it, the patch fails loudly instead of silently producing a broken build.
 - `bridge/emulator.log`, `bridge/bridge.log`, and `bridge/stop.log` cover the AVD, the launch bridge, and shutdown respectively. Open the Manager's Home page (Logs button) to check them.
 - Re-running setup is safe -- it skips anything already done and won't overwrite an existing `config.json`'s settings.
