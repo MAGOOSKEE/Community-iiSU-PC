@@ -36,7 +36,7 @@ Every start checks for updates (`bridge/updater.py`) and re-syncs your ROM libra
 
 A fullscreen overlay (`bridge/boot_overlay.py`) covers the AVD boot and the emulator hand-off, showing what's happening ("Booting iiSU-PC...", "Waiting on DuckStation...") instead of raw desktop. It's off while the debug console checkbox is on.
 
-Inside the VM, `Ctrl+Alt+Q` force-quits the current game and returns to iiSU; `Ctrl+Alt+X` closes iiSU and shuts down the VM entirely (both rebindable in Advanced). Holding **Back+Start** together on a controller for 2.5s does the same full shutdown.
+Inside the VM, tap **Escape** to force-quit the current game and return to iiSU (or close iiSU and shut down the VM entirely if nothing's running); hold it for 5s to always close iiSU and shut down the VM entirely, regardless of what's running (both the key and the hold duration are rebindable in Advanced, along with an optional separate full-shutdown combo). Holding **Back+Start** together on a controller for 2.5s does the same full shutdown.
 
 ## Uninstalling
 
@@ -86,7 +86,13 @@ bridge/
   console_names.py         resolves a ROM folder name to one of iiSU's known consoles
   create_shortcut.py       creates the desktop shortcut
   winapi.py                shared Win32 window-management helpers
+
+tests/                    unit tests for the pure routing/mapping logic (no AVD needed)
 ```
+
+## Running tests
+
+`python -m unittest discover -s tests` runs the unit tests covering the console/emulator routing logic (`shared/emulator_defaults.py`, `bridge/console_names.py`, `bridge/launch_bridge.py`'s `find_emulator_for_package`). Stdlib-only, no AVD or adb needed -- these only check the pure mapping/decision logic, not an actual end-to-end launch.
 
 ## If something breaks
 
