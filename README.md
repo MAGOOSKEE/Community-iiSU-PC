@@ -28,7 +28,14 @@ Once it's done, a short onboarding wizard walks you through your ROM directory, 
 Double-click the **desktop shortcut**, or run **`iiSU-PC Manager.bat`** (in `bridge/`) for the full Manager -- one window, navigated with the hamburger (☰) sidebar:
 
 - **Home** -- AVD/bridge status, Open/Stop, a running status line, and quick buttons to your ROMs folder and logs.
-- **ROM Directory**, **Emulators**, **Display**, **Advanced** -- everything `config.json` holds, saved with one Save button. Emulators has a "Test Selected..." button to check a mapping without starting the AVD. Advanced has a "Show console windows" checkbox for debugging.
+- **ROM Directory** -- configure the host folder containing your ROM library.
+- **Emulators** -- configure PC emulator mappings and search folders, test a selected mapping without starting the AVD, and reinstall iiSU's redirector apps.
+- **Windows Apps** -- manage native Windows applications and URI/protocol launches exposed to iiSU through `.pcgame` placeholders, including Steam library import and health checks.
+- **Android Storage** -- browse and manage the Android VM's shared storage, transfer files and folders, and edit text files over ADB.
+- **Display** -- configure the Android VM's resolution and DPI.
+- **Backup & Restore** -- back up iiSU-PC configuration to a ZIP or safely restore an earlier configuration.
+- **Advanced** -- configure hotkeys and debugging options such as "Show console windows."
+- **Diagnostics** -- run non-destructive checks of iiSU-PC's configuration, Android VM/ADB, bridge, Windows Apps, Steam integration, logs, and related components.
 - **Credits** -- who built this and how (see below).
 - **Uninstall** -- below a divider at the bottom of the sidebar.
 
