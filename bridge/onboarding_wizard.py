@@ -135,8 +135,12 @@ class OnboardingWizard(tk.Tk):
         self._autodetected_display = False
         self.original_avd_display = read_avd_display(self.config_data.get("avd_name", "iisuwin"))
 
-        quit_initial = self.config_data.get("quit_hotkey", {"modifiers": ["ctrl", "alt"], "key": "q"})
-        shutdown_initial = self.config_data.get("shutdown_hotkey", {"modifiers": ["ctrl", "alt"], "key": "x"})
+        quit_initial = self.config_data.get("quit_hotkey") or {"modifiers": ["ctrl", "alt"], "key": "q"}
+        # shutdown_hotkey defaults to None (no separate combo -- holding
+        # quit_hotkey already covers full shutdown), not a missing key, so
+        # .get()'s own default never kicks in for a fresh config and this
+        # would otherwise crash on the None.get() below.
+        shutdown_initial = self.config_data.get("shutdown_hotkey") or {"modifiers": ["ctrl", "alt"], "key": "x"}
         self.quit_mod_vars = {name: tk.BooleanVar(value=name in {m.lower() for m in quit_initial.get("modifiers", [])}) for name in MODIFIER_NAMES}
         self.quit_key_var = tk.StringVar(value=quit_initial.get("key", "q"))
         self.shutdown_mod_vars = {name: tk.BooleanVar(value=name in {m.lower() for m in shutdown_initial.get("modifiers", [])}) for name in MODIFIER_NAMES}
