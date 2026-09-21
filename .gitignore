@@ -24,6 +24,7 @@
 /bridge/windows_apps.json
 /bridge/manager_debug.log
 /bridge/bridge_debug.log
+/bridge/launch_history.log
 /bridge/cache/
 /bridge/restore_safety/
 
