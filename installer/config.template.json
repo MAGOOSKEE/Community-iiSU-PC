@@ -1,0 +1,27 @@
+{
+  "bridge_port": 7737,
+  "roms_dir": "C:/CHANGE-ME/Roms",
+  "search_roots": [
+    "C:/CHANGE-ME/Emulators",
+    "C:/Program Files",
+    "C:/Program Files (x86)"
+  ],
+  "iisu_window_title": "iisuwin",
+  "iisu_fullscreen": true,
+  "iisu_component": "com.iisulauncher/com.iisulauncher.launcher.StartupSafeModeActivity",
+  "avd_name": "iisuwin",
+  "display": {
+    "width": 1920,
+    "height": 1080,
+    "density": 240,
+    "refresh_rate": 144
+  },
+  "quit_hotkey": {
+    "modifiers": [],
+    "key": "escape"
+  },
+  "shutdown_hold_seconds": 5,
+  "shutdown_hotkey": null,
+  "usb_passthrough": [],
+  "debug_show_console_windows": false
+}

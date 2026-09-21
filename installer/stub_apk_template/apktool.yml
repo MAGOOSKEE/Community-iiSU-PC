@@ -1,0 +1,11 @@
+version: 3.0.3
+apkFileName: stub.apk
+usesFramework:
+  ids:
+  - 1
+sdkInfo:
+  minSdkVersion: 24
+  targetSdkVersion: 34
+versionInfo:
+  versionCode: 1
+  versionName: '1.0'
