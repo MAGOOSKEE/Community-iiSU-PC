@@ -33,7 +33,6 @@ Usage:
 """
 
 import shutil
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -94,8 +93,14 @@ def stop_running_instance() -> None:
         stop_iisu_pc.main()
     except Exception as e:
         print(f"[uninstall] couldn't run a clean stop ({e}) -- falling back to a process sweep")
-        subprocess.run(["taskkill", "/IM", "emulator.exe", "/T", "/F"], capture_output=True)
-        subprocess.run(["taskkill", "/IM", "qemu-system-x86_64.exe", "/T", "/F"], capture_output=True)
+        # Matched by command line, not by bare image name -- taskkill /IM
+        # emulator.exe (or qemu-system-x86_64.exe) would also take down an
+        # unrelated Android Studio emulator instance or another qemu-based
+        # tool on the same PC. Every process this project launches runs out
+        # of android-sdk-portable/, which scopes this to just this AVD (see
+        # the matching, normally-used sweep in stop_iisu_pc.py).
+        import stop_iisu_pc
+        stop_iisu_pc.kill_by_cmdline_match("android-sdk-portable")
 
 
 def detect_avd_name() -> str:

@@ -27,6 +27,7 @@ import shutil
 import subprocess
 import sys
 from pathlib import Path
+from xml.sax.saxutils import escape as xml_escape
 
 INSTALLER_DIR = Path(__file__).parent
 
@@ -111,11 +112,16 @@ def _run(args: list[str]) -> subprocess.CompletedProcess:
 
 
 def _manifest_xml(package_name: str, app_label: str) -> str:
-    safe_label = app_label.replace('"', "'")
+    # Full XML-attribute escaping (&/</>/"), not just quotes -- app_label is
+    # only ever one of this project's own hardcoded labels today, but a
+    # future one containing e.g. "&" would otherwise produce a manifest
+    # apktool can't parse.
+    safe_label = xml_escape(app_label, {'"': "&quot;"})
+    safe_package = xml_escape(package_name, {'"': "&quot;"})
     return (
         '<?xml version="1.0" encoding="utf-8"?>\n'
         '<manifest xmlns:android="http://schemas.android.com/apk/res/android"\n'
-        f'    package="{package_name}">\n'
+        f'    package="{safe_package}">\n'
         # Deliberately no android:icon. iiSU's own "Installed Emulators"
         # picker builds its list from a plain PackageManager query
         # (ACTION_MAIN + CATEGORY_LAUNCHER, MATCH_ALL; verified by

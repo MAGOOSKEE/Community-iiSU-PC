@@ -125,7 +125,16 @@ def resolve_vk(key: str) -> int:
 def _is_key_down(vk: int) -> bool:
     return bool(user32.GetAsyncKeyState(vk) & 0x8000)
 
-HOST = "0.0.0.0"
+# Loopback only: the AVD reaches this over its host-loopback alias
+# (10.0.2.2), which is routed to the host's own 127.0.0.1 regardless of
+# which local address this actually binds -- there's no reason for this to
+# be reachable from the LAN. The protocol has no authentication at all
+# (anything that can open the socket can make this launch an arbitrary
+# configured emulator, or hand an arbitrary app_id to Steam's URI handler),
+# so binding 0.0.0.0 would mean any other device on the same network, or a
+# malicious webpage in a browser on this same PC doing DNS rebinding
+# against 127.0.0.1, could reach it too.
+HOST = "127.0.0.1"
 
 INTENT_CMP_RE = re.compile(r"cmp=(\S+)")
 INTENT_DAT_RE = re.compile(r"dat=(\S+)")
@@ -706,6 +715,19 @@ def handle_request(raw_intent: str) -> None:
 
     component = cmp_match.group(1)
     package = component.split("/")[0]
+
+    # Refuse a second launch while one is already tracked, rather than
+    # silently overwriting current_process -- that used to leave the
+    # earlier emulator running but untracked: the quit hotkey and
+    # is_game_running() would only ever see the newest one, so the
+    # original process couldn't be quit through the normal hotkey and
+    # would still be running after what looked like a full shutdown.
+    # Reachable in practice from a double-fired launch (e.g. input lag on
+    # a controller causing two quick selections in iiSU before the first
+    # emulator's window has even appeared).
+    if is_game_running():
+        log_launch(f"IGNORED: launch request for '{package}' while a game is already running", notify=True)
+        return
 
     if package == GAMENATIVE_PACKAGE:
         app_id = extras.get("app_id")

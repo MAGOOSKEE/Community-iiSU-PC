@@ -61,10 +61,6 @@ def kill_tree(pid: int) -> None:
     subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, text=True)
 
 
-def kill_by_name(image_name: str) -> None:
-    subprocess.run(["taskkill", "/IM", image_name, "/T", "/F"], capture_output=True, text=True)
-
-
 def kill_by_cmdline_match(needle: str) -> None:
     """Force-kills any process whose command line contains `needle`, via
     PowerShell/WMI (wmic itself is deprecated/removed on newer Windows
@@ -163,17 +159,19 @@ def main() -> None:
     # Fallback sweep in case graceful shutdown didn't finish in time, the
     # state file is stale/missing, or a process got reparented away from
     # the PID we originally tracked (emulator.exe in particular tends to
-    # leave a second shim process behind). launch_bridge.py needs its own
-    # cmdline-based sweep rather than a by-name one: state.json can have
-    # no bridge_pid to fall back on at all (see kill_by_cmdline_match),
-    # and it runs as plain python.exe/pythonw.exe, which taskkill by
-    # image name alone can't safely target without also risking unrelated
-    # Python processes on the same PC.
+    # leave a second shim process behind). Both sweeps below match on
+    # command line rather than bare image name: state.json can have no
+    # bridge_pid to fall back on at all (see kill_by_cmdline_match), and
+    # taskkill by image name alone can't safely target "emulator.exe" or
+    # "qemu-system-x86_64.exe" without also risking a real Android Studio
+    # emulator instance someone has open for unrelated app development, or
+    # another qemu-based tool entirely (e.g. WSL2) -- every process this
+    # project launches runs out of android-sdk-portable/, which is a
+    # distinctive enough path to scope the sweep to just this AVD.
     print("[stop] sweeping for any orphaned launch_bridge.py process...")
     kill_by_cmdline_match("launch_bridge.py")
-    for image_name in ("emulator.exe", "qemu-system-x86_64.exe"):
-        print(f"[stop] sweeping any remaining {image_name}...")
-        kill_by_name(image_name)
+    print("[stop] sweeping for any remaining emulator/qemu process for this AVD...")
+    kill_by_cmdline_match("android-sdk-portable")
 
     # adb.exe runs as a persistent background server (any `adb` command
     # spawns it if it isn't already running) and never exits on its own
