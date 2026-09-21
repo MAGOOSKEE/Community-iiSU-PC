@@ -20,6 +20,13 @@
 /bridge/.iisu_icon.ico
 /bridge/_icon_extract_tmp/
 
+# Windows Apps / Manager runtime data
+/bridge/windows_apps.json
+/bridge/manager_debug.log
+/bridge/bridge_debug.log
+/bridge/cache/
+/bridge/restore_safety/
+
 # Python
 __pycache__/
 *.pyc
