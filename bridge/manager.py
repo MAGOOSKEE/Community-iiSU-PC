@@ -18,16 +18,139 @@ approach create_shortcut.py already takes for iiSU's own icon.
 """
 
 import json
+import atexit
+import zipfile
+import socket
 import os
 import queue
+import re
 import subprocess
+import tempfile
 import sys
 import threading
 import traceback
+from datetime import datetime
 import tkinter as tk
 import webbrowser
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+
+
+MANAGER_LOG_PATH = Path(__file__).resolve().parent / "manager_debug.log"
+
+
+def _manager_log_write(message: str) -> None:
+    """Append one timestamped diagnostic entry without depending on stdout."""
+    try:
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with MANAGER_LOG_PATH.open("a", encoding="utf-8", errors="replace") as log_file:
+            log_file.write(f"[{timestamp}] {message}\n")
+            log_file.flush()
+    except Exception:
+        pass
+
+
+class _ManagerTee:
+    """Mirror console output to manager_debug.log while preserving the console."""
+    def __init__(self, original, stream_name: str):
+        self.original = original
+        self.stream_name = stream_name
+        self._buffer = ""
+
+    def write(self, data):
+        text = "" if data is None else str(data)
+        try:
+            if self.original is not None:
+                self.original.write(text)
+                self.original.flush()
+        except Exception:
+            pass
+
+        self._buffer += text
+        while "\n" in self._buffer:
+            line, self._buffer = self._buffer.split("\n", 1)
+            if line:
+                _manager_log_write(f"{self.stream_name}: {line}")
+        return len(text)
+
+    def flush(self):
+        try:
+            if self.original is not None:
+                self.original.flush()
+        except Exception:
+            pass
+        if self._buffer:
+            _manager_log_write(f"{self.stream_name}: {self._buffer}")
+            self._buffer = ""
+
+    def isatty(self):
+        try:
+            return bool(self.original and self.original.isatty())
+        except Exception:
+            return False
+
+    def fileno(self):
+        if self.original is None:
+            raise OSError("No underlying console stream")
+        return self.original.fileno()
+
+    @property
+    def encoding(self):
+        return getattr(self.original, "encoding", "utf-8")
+
+
+_ORIGINAL_STDOUT = sys.stdout
+_ORIGINAL_STDERR = sys.stderr
+sys.stdout = _ManagerTee(_ORIGINAL_STDOUT, "STDOUT")
+sys.stderr = _ManagerTee(_ORIGINAL_STDERR, "STDERR")
+
+
+def _manager_uncaught_exception(exc_type, exc_value, exc_tb):
+    try:
+        formatted = "".join(traceback.format_exception(exc_type, exc_value, exc_tb)).rstrip()
+        _manager_log_write("UNCAUGHT EXCEPTION\n" + formatted)
+    finally:
+        try:
+            if _ORIGINAL_STDERR is not None:
+                traceback.print_exception(exc_type, exc_value, exc_tb, file=_ORIGINAL_STDERR)
+        except Exception:
+            pass
+
+
+sys.excepthook = _manager_uncaught_exception
+
+# Python 3.8+: capture uncaught exceptions in worker threads too.
+if hasattr(threading, "excepthook"):
+    def _manager_thread_exception(args):
+        try:
+            formatted = "".join(
+                traceback.format_exception(args.exc_type, args.exc_value, args.exc_traceback)
+            ).rstrip()
+            _manager_log_write(
+                f"UNCAUGHT THREAD EXCEPTION ({getattr(args.thread, 'name', 'unknown')})\n{formatted}"
+            )
+        except Exception:
+            pass
+    threading.excepthook = _manager_thread_exception
+
+
+_manager_log_write("=" * 72)
+_manager_log_write("MANAGER START")
+_manager_log_write(f"Python: {sys.version.replace(chr(10), ' ')}")
+_manager_log_write(f"Executable: {sys.executable}")
+_manager_log_write(f"Manager: {Path(__file__).resolve()}")
+_manager_log_write(f"Working directory: {Path.cwd()}")
+
+def _manager_log_shutdown():
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    except Exception:
+        pass
+    _manager_log_write("MANAGER EXIT (normal interpreter shutdown)")
+
+
+atexit.register(_manager_log_shutdown)
 
 import winapi
 from bridge_config import CONFIG_PATH, load_config
@@ -41,6 +164,7 @@ import stop_iisu_pc
 BRIDGE_DIR = Path(__file__).parent
 PROJECT_ROOT = BRIDGE_DIR.parent
 INSTALLER_DIR = PROJECT_ROOT / "installer"
+WINDOWS_APPS_PATH = BRIDGE_DIR / "windows_apps.json"
 
 sys.path.insert(0, str(PROJECT_ROOT))
 from shared import theme
@@ -72,8 +196,12 @@ NAV_ITEMS = [
     ("home", "\U0001F3E0", "Home"),
     ("roms", "\U0001F4C1", "ROM Directory"),
     ("emulators", "\U0001F3AE", "Emulators"),
+    ("windows_apps", "\U0001FA9F", "Windows Apps"),
+    ("android_storage", "\U0001F4F1", "Android Storage"),
     ("display", "\U0001F5A5", "Display"),
+    ("backup_restore", "\U0001F4BE", "Backup & Restore"),
     ("advanced", "⚙", "Advanced"),
+    ("diagnostics", "\U0001F50D", "Diagnostics"),
     ("credits", "❤", "Credits"),
 ]
 DANGER_NAV_ITEMS = [
@@ -186,6 +314,10 @@ class Manager(tk.Tk):
 
         self._build_home_page()
         self._build_settings_pages()
+        self._build_windows_apps_page()
+        self._build_diagnostics_page()
+        self._build_backup_restore_page()
+        self._build_android_storage_page()
         self._build_credits_page()
         self._build_uninstall_page()
 
@@ -250,6 +382,8 @@ class Manager(tk.Tk):
             self.save_bar.pack_forget()
         if key == "uninstall":
             self._refresh_uninstall_preview()
+        elif key == "android_storage":
+            self._android_storage_refresh()
 
     # -- Home page -------------------------------------------------
 
@@ -706,6 +840,2757 @@ class Manager(tk.Tk):
             lines.append(f"ROM: found at {rom_path}" if rom_path else f"ROM: NOT found under {roms_dir}")
 
         messagebox.showinfo("Test result", "\n".join(lines))
+
+
+    # -- Android Storage -------------------------------------------------
+
+    def _adb_command(self, *args: str, timeout: int = 30, capture: bool = True):
+        """Run adb using the same PATH-based adb setup iiSU-PC already uses."""
+        flags = 0x08000000 if os.name == "nt" else 0
+        kwargs = {
+            "cwd": str(PROJECT_ROOT),
+            "timeout": timeout,
+            "creationflags": flags,
+            "text": True,
+            "encoding": "utf-8",
+            "errors": "replace",
+        }
+        if capture:
+            kwargs.update(stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        bundled_adb = BRIDGE_DIR / "android-sdk-portable" / "sdk" / "platform-tools" / "adb.exe"
+        adb_exe = str(bundled_adb) if bundled_adb.is_file() else "adb"
+        return subprocess.run([adb_exe, *args], **kwargs)
+
+    @staticmethod
+    def _android_remote_quote(value: str) -> str:
+        # Quote one value for Android's /system/bin/sh.
+        # This safely handles spaces and apostrophes.
+        return "'" + str(value).replace("'", "'\\''") + "'"
+
+    def _adb_shell_direct(self, command: str, timeout: int = 30):
+        # Give ADB one complete Android-side command string. This preserves
+        # the quotes embedded by _android_remote_quote instead of splitting
+        # the command again through an extra `sh -c` layer.
+        return self._adb_command("shell", command, timeout=timeout)
+
+    def _android_storage_media_scan(self, remote_path: str) -> None:
+        """Notify Android that an ADB-side shared-storage path changed."""
+        remote_path = str(remote_path).replace("\\", "/")
+        uri = "file://" + remote_path
+        result = self._adb_command(
+            "shell",
+            "am",
+            "broadcast",
+            "-a",
+            "android.intent.action.MEDIA_SCANNER_SCAN_FILE",
+            "-d",
+            uri,
+            timeout=15,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(result.stderr.strip() or "Android media scan failed")
+
+    def _adb_device_ready(self) -> tuple[bool, str]:
+        try:
+            result = self._adb_command("get-state", timeout=5)
+        except FileNotFoundError:
+            return False, "ADB was not found in PATH."
+        except (OSError, subprocess.SubprocessError) as exc:
+            return False, f"ADB error: {exc}"
+        if result.returncode == 0 and result.stdout.strip() == "device":
+            return True, "Android VM connected"
+        detail = (result.stderr or result.stdout).strip()
+        return False, detail or "Android VM is not connected."
+
+    @staticmethod
+    def _android_join(base: str, name: str) -> str:
+        if base == "/":
+            return "/" + name
+        return base.rstrip("/") + "/" + name
+
+    @staticmethod
+    def _android_parent(path: str) -> str:
+        path = path.rstrip("/")
+        if not path or path == "/":
+            return "/"
+        parent = path.rsplit("/", 1)[0]
+        return parent or "/"
+
+
+    def _build_diagnostics_page(self) -> None:
+        frame = self.pages["diagnostics"]
+        self._clear(frame)
+        self._page_header(
+            frame,
+            "Diagnostics",
+            "Run non-destructive checks for iiSU-PC, the Android VM, bridge, Windows Apps, Steam, and logs.",
+        )
+
+        toolbar = tk.Frame(frame, bg=BG)
+        toolbar.pack(fill="x", padx=24, pady=(0, 10))
+        tk.Button(
+            toolbar, text="Run Diagnostics", command=self._run_diagnostics
+        ).pack(side="left")
+        tk.Button(
+            toolbar, text="Open Manager Log",
+            command=lambda: self._diagnostics_open_path(MANAGER_LOG_PATH)
+        ).pack(side="left", padx=(8, 0))
+        tk.Button(
+            toolbar, text="Open Bridge Log",
+            command=lambda: self._diagnostics_open_path(BRIDGE_DIR / "bridge_debug.log")
+        ).pack(side="left", padx=(8, 0))
+
+        self.diagnostics_summary_var = tk.StringVar(
+            value="Diagnostics have not been run yet."
+        )
+        tk.Label(
+            frame, textvariable=self.diagnostics_summary_var,
+            bg=BG, fg=TEXT_DIM, font=FONT_BODY, anchor="w"
+        ).pack(fill="x", padx=24, pady=(0, 8))
+
+        columns = ("status", "check", "details")
+        tree = ttk.Treeview(frame, columns=columns, show="headings", height=18)
+        tree.heading("status", text="Status")
+        tree.heading("check", text="Check")
+        tree.heading("details", text="Details")
+        tree.column("status", width=90, minwidth=80, stretch=False)
+        tree.column("check", width=210, minwidth=160, stretch=False)
+        tree.column("details", width=650, minwidth=300, stretch=True)
+        tree.pack(fill="both", expand=True, padx=24, pady=(0, 24))
+        self.diagnostics_tree = tree
+
+    @staticmethod
+    def _diagnostics_open_path(path: Path) -> None:
+        try:
+            if not path.exists():
+                messagebox.showwarning("Diagnostics", f"Not found:\n{path}")
+                return
+            os.startfile(str(path))
+        except Exception as exc:
+            messagebox.showerror("Diagnostics", f"Couldn't open:\n{path}\n\n{exc}")
+
+    def _diagnostics_add(self, status: str, check: str, details: str) -> None:
+        self.diagnostics_tree.insert("", "end", values=(status, check, details))
+
+    def _run_diagnostics(self) -> None:
+        tree = self.diagnostics_tree
+        for item in tree.get_children():
+            tree.delete(item)
+        self.diagnostics_summary_var.set("Running diagnostics...")
+        self.update_idletasks()
+
+        results: list[tuple[str, str, str]] = []
+
+        def add(status: str, check: str, details: str):
+            results.append((status, check, details))
+
+        root = Path(__file__).resolve().parent
+        config_path = BRIDGE_DIR / "config.json"
+        apps_path = BRIDGE_DIR / "windows_apps.json"
+        adb_path = BRIDGE_DIR / "android-sdk-portable" / "sdk" / "platform-tools" / "adb.exe"
+
+        # 1. Core paths/files.
+        add("OK" if BRIDGE_DIR.is_dir() else "ERROR", "Bridge directory",
+            str(BRIDGE_DIR) if BRIDGE_DIR.is_dir() else f"Missing: {BRIDGE_DIR}")
+        add("OK" if config_path.is_file() else "ERROR", "Bridge config",
+            str(config_path) if config_path.is_file() else "bridge/config.json is missing")
+        add("OK" if apps_path.is_file() else "WARNING", "Windows Apps config",
+            str(apps_path) if apps_path.is_file() else "windows_apps.json is missing")
+        add("OK" if adb_path.is_file() else "ERROR", "Bundled ADB",
+            str(adb_path) if adb_path.is_file() else f"Missing: {adb_path}")
+
+        # 2. JSON validity and bridge settings.
+        config = {}
+        if config_path.is_file():
+            try:
+                config = json.loads(config_path.read_text(encoding="utf-8-sig"))
+                add("OK", "Bridge config JSON", "Valid JSON")
+            except Exception as exc:
+                add("ERROR", "Bridge config JSON", f"Invalid JSON: {exc}")
+
+        if apps_path.is_file():
+            try:
+                apps = json.loads(apps_path.read_text(encoding="utf-8-sig"))
+                if isinstance(apps, dict):
+                    add("OK", "Windows Apps JSON", f"Valid JSON • {len(apps)} entr{'y' if len(apps) == 1 else 'ies'}")
+                else:
+                    add("ERROR", "Windows Apps JSON", "Top-level JSON value is not an object")
+            except Exception as exc:
+                add("ERROR", "Windows Apps JSON", f"Invalid JSON: {exc}")
+
+        bridge_port = config.get("bridge_port", 7737) if isinstance(config, dict) else 7737
+        try:
+            bridge_port = int(bridge_port)
+            if 1 <= bridge_port <= 65535:
+                add("OK", "Bridge port setting", str(bridge_port))
+            else:
+                add("ERROR", "Bridge port setting", f"Invalid port: {bridge_port}")
+        except Exception:
+            add("ERROR", "Bridge port setting", f"Invalid value: {bridge_port!r}")
+
+        roms_dir = config.get("roms_dir") if isinstance(config, dict) else None
+        if roms_dir:
+            rp = Path(roms_dir)
+            add("OK" if rp.is_dir() else "ERROR", "ROMs directory",
+                str(rp) if rp.is_dir() else f"Configured path does not exist: {rp}")
+            windows_roms = rp / "windows"
+            add("OK" if windows_roms.is_dir() else "WARNING", "Windows ROMs folder",
+                str(windows_roms) if windows_roms.is_dir() else f"Not found: {windows_roms}")
+        else:
+            add("WARNING", "ROMs directory", "roms_dir is not configured")
+
+        # 3. ADB + Android shared storage.
+        if adb_path.is_file():
+            try:
+                state = self._adb_command("get-state", timeout=10)
+                state_text = (state.stdout or "").strip()
+                if state.returncode == 0 and state_text == "device":
+                    add("OK", "Android VM / ADB", "Device is connected")
+                    listing = self._adb_shell_direct(
+                        f"ls -ld {self._android_remote_quote('/storage/emulated/0')}",
+                        timeout=10,
+                    )
+                    if listing.returncode == 0:
+                        add("OK", "Android shared storage", "/storage/emulated/0 is accessible")
+                    else:
+                        add("ERROR", "Android shared storage",
+                            (listing.stderr or listing.stdout or "Unable to access shared storage").strip())
+                else:
+                    add("ERROR", "Android VM / ADB",
+                        state_text or (state.stderr or "ADB device is not ready").strip())
+            except Exception as exc:
+                add("ERROR", "Android VM / ADB", str(exc))
+
+        # 4. Bridge listener status. This is informational; Manager need not have bridge running.
+        try:
+            port = int(bridge_port)
+            with socket.create_connection(("127.0.0.1", port), timeout=0.35):
+                add("OK", "Launch Bridge listener", f"Listening on localhost:{port}")
+        except Exception:
+            add("WARNING", "Launch Bridge listener",
+                f"Nothing accepted a connection on localhost:{bridge_port} (normal if the bridge is not running)")
+
+        # 5. Steam library visibility using known Steam roots, without changing anything.
+        steam_roots = [
+            Path(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)")) / "Steam",
+            Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Steam",
+        ]
+        found_steam = next((p for p in steam_roots if p.is_dir()), None)
+        if found_steam:
+            vdf = found_steam / "steamapps" / "libraryfolders.vdf"
+            add("OK", "Steam installation", str(found_steam))
+            add("OK" if vdf.is_file() else "WARNING", "Steam library config",
+                str(vdf) if vdf.is_file() else f"Not found: {vdf}")
+        else:
+            add("WARNING", "Steam installation", "Default Steam installation was not detected")
+
+        # 6. Persistent logs.
+        for label, path in (
+            ("Manager log", MANAGER_LOG_PATH),
+            ("Bridge log", BRIDGE_DIR / "bridge_debug.log"),
+        ):
+            if path.is_file():
+                try:
+                    size = path.stat().st_size
+                    add("OK", label, f"{path} • {size:,} bytes")
+                except Exception:
+                    add("OK", label, str(path))
+            else:
+                add("WARNING", label, f"Not found yet: {path}")
+
+        # 7. Backup safety area, informational only.
+        safety = root / "restore_safety"
+        if safety.is_dir():
+            try:
+                count = sum(1 for p in safety.iterdir() if p.is_dir())
+                add("OK", "Restore safety copies", f"{count} restore safety set(s) • {safety}")
+            except Exception:
+                add("OK", "Restore safety copies", str(safety))
+        else:
+            add("OK", "Restore safety copies", "No restore safety folder yet")
+
+        for row in results:
+            self._diagnostics_add(*row)
+
+        errors = sum(1 for status, _, _ in results if status == "ERROR")
+        warnings = sum(1 for status, _, _ in results if status == "WARNING")
+        oks = sum(1 for status, _, _ in results if status == "OK")
+        self.diagnostics_summary_var.set(
+            f"{oks} OK • {warnings} Warning{'s' if warnings != 1 else ''} • "
+            f"{errors} Error{'s' if errors != 1 else ''}"
+        )
+        _manager_log_write(
+            f"DIAGNOSTICS completed ok={oks} warnings={warnings} errors={errors}"
+        )
+
+    def _backup_restore_candidates(self) -> list[tuple[Path, str]]:
+        """Return safe, user-created/configuration files worth backing up."""
+        candidates: list[tuple[Path, str]] = []
+
+        def add(path: Path, archive_name: str):
+            try:
+                if path.is_file() and not any(p.resolve() == path.resolve() for p, _ in candidates):
+                    candidates.append((path, archive_name))
+            except Exception:
+                pass
+
+        # Core iiSU-PC configuration.
+        add(BRIDGE_DIR / "windows_apps.json", "bridge/windows_apps.json")
+        add(BRIDGE_DIR / "config.json", "bridge/config.json")
+        add(Path(__file__).resolve().parent / "config.json", "config.json")
+
+        # Include common Manager-created JSON configuration if present.
+        root = Path(__file__).resolve().parent
+        for name in (
+            "windows_apps.json",
+            "manager_config.json",
+            "settings.json",
+        ):
+            add(root / name, name)
+
+        return candidates
+
+    def _build_backup_restore_page(self) -> None:
+        frame = self.pages["backup_restore"]
+        self._clear(frame)
+        self._page_header(
+            frame,
+            "Backup & Restore",
+            "Create a portable backup of iiSU-PC configuration, or restore one later.",
+        )
+
+        card = tk.Frame(frame, bg=PANEL_BG, padx=18, pady=18)
+        card.pack(fill="x", padx=24, pady=(0, 14))
+
+        tk.Label(
+            card, text="Configuration Backup", bg=PANEL_BG, fg=TEXT,
+            font=FONT_HEADING, anchor="w"
+        ).pack(fill="x")
+        tk.Label(
+            card,
+            text=(
+                "Backs up detected iiSU-PC configuration such as Windows app mappings "
+                "and bridge settings. ROMs, Android VM storage, caches, logs, executables, "
+                "and Steam game files are intentionally excluded."
+            ),
+            bg=PANEL_BG, fg=TEXT_DIM, font=FONT_BODY,
+            justify="left", wraplength=760, anchor="w",
+        ).pack(fill="x", pady=(6, 14))
+
+        button_row = tk.Frame(card, bg=PANEL_BG)
+        button_row.pack(fill="x")
+        tk.Button(
+            button_row, text="Create Backup...", command=self._create_manager_backup
+        ).pack(side="left", padx=(0, 8))
+        tk.Button(
+            button_row, text="Restore Backup...", command=self._restore_manager_backup
+        ).pack(side="left")
+
+        self.backup_restore_status_var = tk.StringVar(
+            value="Ready. Restore always creates a safety copy of files it replaces."
+        )
+        tk.Label(
+            frame, textvariable=self.backup_restore_status_var,
+            bg=BG, fg=TEXT_DIM, font=FONT_BODY,
+            justify="left", wraplength=800, anchor="w",
+        ).pack(fill="x", padx=24, pady=(4, 0))
+
+    def _create_manager_backup(self) -> None:
+        files = self._backup_restore_candidates()
+        if not files:
+            messagebox.showwarning(
+                "Backup & Restore",
+                "No supported iiSU-PC configuration files were found to back up.",
+            )
+            return
+
+        default_name = "iisu-pc-backup-" + datetime.now().strftime("%Y-%m-%d_%H-%M-%S") + ".zip"
+        destination = filedialog.asksaveasfilename(
+            title="Create iiSU-PC Backup",
+            defaultextension=".zip",
+            initialfile=default_name,
+            filetypes=[("iiSU-PC Backup", "*.zip"), ("ZIP archive", "*.zip")],
+        )
+        if not destination:
+            return
+
+        try:
+            manifest_lines = [
+                "iiSU-PC Manager Backup",
+                "Created: " + datetime.now().isoformat(timespec="seconds"),
+                "Manager: " + str(Path(__file__).resolve()),
+                "",
+                "Files:",
+            ]
+            with zipfile.ZipFile(destination, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+                for path, archive_name in files:
+                    zf.write(path, archive_name)
+                    manifest_lines.append(f"- {archive_name}")
+                zf.writestr("backup_manifest.txt", "\n".join(manifest_lines) + "\n")
+
+            self.backup_restore_status_var.set(
+                f"Backup created: {destination} ({len(files)} configuration file(s))"
+            )
+            _manager_log_write(
+                f"BACKUP created path={destination!r} files={len(files)}"
+            )
+            messagebox.showinfo(
+                "Backup Complete",
+                f"Backed up {len(files)} configuration file(s).\n\n{destination}",
+            )
+        except Exception as exc:
+            _manager_log_write("BACKUP ERROR\n" + traceback.format_exc())
+            messagebox.showerror("Backup & Restore", f"Backup failed:\n{exc}")
+
+    @staticmethod
+    def _backup_safe_member(name: str) -> bool:
+        normalized = name.replace("\\", "/")
+        if normalized.startswith("/") or normalized.startswith("../") or "/../" in normalized:
+            return False
+        allowed = {
+            "bridge/windows_apps.json",
+            "bridge/config.json",
+            "config.json",
+            "windows_apps.json",
+            "manager_config.json",
+            "settings.json",
+        }
+        return normalized in allowed
+
+    def _restore_manager_backup(self) -> None:
+        source = filedialog.askopenfilename(
+            title="Restore iiSU-PC Backup",
+            filetypes=[("iiSU-PC Backup", "*.zip"), ("ZIP archive", "*.zip")],
+        )
+        if not source:
+            return
+
+        root = Path(__file__).resolve().parent
+        restore_map = {
+            "bridge/windows_apps.json": BRIDGE_DIR / "windows_apps.json",
+            "bridge/config.json": BRIDGE_DIR / "config.json",
+            "config.json": root / "config.json",
+            "windows_apps.json": root / "windows_apps.json",
+            "manager_config.json": root / "manager_config.json",
+            "settings.json": root / "settings.json",
+        }
+
+        try:
+            with zipfile.ZipFile(source, "r") as zf:
+                members = [n.replace("\\", "/") for n in zf.namelist()]
+                selected = [n for n in members if self._backup_safe_member(n)]
+                if not selected:
+                    raise RuntimeError(
+                        "This archive does not contain supported iiSU-PC backup files."
+                    )
+
+                # Validate JSON before touching current configuration.
+                payloads: dict[str, bytes] = {}
+                import json
+                for name in selected:
+                    data = zf.read(name)
+                    if name.lower().endswith(".json"):
+                        json.loads(data.decode("utf-8-sig"))
+                    payloads[name] = data
+
+            shown = "\n".join(f"• {name}" for name in selected)
+            if not messagebox.askyesno(
+                "Restore Backup",
+                "Restore these configuration files?\n\n"
+                + shown
+                + "\n\nExisting files will be copied to a timestamped safety folder first.",
+            ):
+                return
+
+            safety_dir = root / "restore_safety" / datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            safety_count = 0
+            for name in selected:
+                target = restore_map[name]
+                if target.is_file():
+                    relative = Path(name)
+                    safety_target = safety_dir / relative
+                    safety_target.parent.mkdir(parents=True, exist_ok=True)
+                    safety_target.write_bytes(target.read_bytes())
+                    safety_count += 1
+
+            restored = 0
+            for name, data in payloads.items():
+                target = restore_map[name]
+                target.parent.mkdir(parents=True, exist_ok=True)
+                temp_target = target.with_name(target.name + ".restore_tmp")
+                temp_target.write_bytes(data)
+                temp_target.replace(target)
+                restored += 1
+
+            self.backup_restore_status_var.set(
+                f"Restored {restored} file(s). Safety copies: {safety_count}."
+            )
+            _manager_log_write(
+                f"RESTORE completed source={source!r} restored={restored} "
+                f"safety_copies={safety_count} safety_dir={str(safety_dir)!r}"
+            )
+            messagebox.showinfo(
+                "Restore Complete",
+                f"Restored {restored} configuration file(s).\n\n"
+                f"Safety copies created: {safety_count}\n"
+                + (f"{safety_dir}\n\n" if safety_count else "\n")
+                + "Restart the Manager/bridge before relying on restored settings.",
+            )
+        except zipfile.BadZipFile:
+            _manager_log_write(f"RESTORE ERROR invalid zip source={source!r}")
+            messagebox.showerror(
+                "Backup & Restore", "That file is not a valid ZIP backup."
+            )
+        except Exception as exc:
+            _manager_log_write("RESTORE ERROR\n" + traceback.format_exc())
+            messagebox.showerror("Backup & Restore", f"Restore failed:\n{exc}")
+
+    def _build_android_storage_page(self) -> None:
+        frame = self.pages["android_storage"]
+        self._clear(frame)
+        self._page_header(
+            frame,
+            "Android Storage",
+            "Browse and transfer files directly between Windows and the iiSU Android VM.",
+        )
+
+        top = tk.Frame(frame, bg=BG)
+        top.pack(fill="x", padx=24, pady=(12, 6))
+        self.android_storage_path_var = tk.StringVar(value="/storage/emulated/0")
+        ttk.Button(top, text="Up", style="Ghost.TButton", command=self._android_storage_up).pack(side="left")
+        path_entry = tk.Entry(top, textvariable=self.android_storage_path_var, **ENTRY_KWARGS)
+        path_entry.pack(side="left", fill="x", expand=True, padx=8, ipady=3)
+        path_entry.bind("<Return>", lambda _e: self._android_storage_refresh())
+        ttk.Button(top, text="Go", style="Ghost.TButton", command=self._android_storage_refresh).pack(side="left")
+        ttk.Button(top, text="Refresh", style="Ghost.TButton", command=self._android_storage_refresh).pack(side="left", padx=(8, 0))
+
+        self.android_storage_status = tk.Label(
+            frame, text="Open this page while the Android VM is running.",
+            bg=BG, fg=TEXT_DIM, font=FONT_BODY, anchor="w",
+        )
+        self.android_storage_status.pack(fill="x", padx=24, pady=(0, 6))
+
+        tree_wrap = tk.Frame(frame, bg=BG)
+        tree_wrap.pack(fill="both", expand=True, padx=24, pady=(0, 6))
+        cols = ("name", "type", "size")
+        self.android_storage_tree = ttk.Treeview(tree_wrap, columns=cols, show="headings", selectmode="extended")
+        self.android_storage_tree.heading("name", text="Name")
+        self.android_storage_tree.heading("type", text="Type")
+        self.android_storage_tree.heading("size", text="Size")
+        self.android_storage_tree.column("name", width=470, anchor="w")
+        self.android_storage_tree.column("type", width=100, anchor="w")
+        self.android_storage_tree.column("size", width=120, anchor="e")
+        scroll = ttk.Scrollbar(tree_wrap, orient="vertical", command=self.android_storage_tree.yview)
+        self.android_storage_tree.configure(yscrollcommand=scroll.set)
+        self.android_storage_tree.pack(side="left", fill="both", expand=True)
+        scroll.pack(side="right", fill="y")
+        self.android_storage_tree.bind("<Double-1>", self._android_storage_open_selected)
+
+        tk.Label(
+            frame,
+            text="Tip: use Upload File / Upload Folder below. Drag-and-drop will be added with a safer backend.",
+            bg=BG, fg=TEXT_DIM, font=FONT_BODY, anchor="w",
+        ).pack(fill="x", padx=24, pady=(0, 8))
+
+        buttons = tk.Frame(frame, bg=BG)
+        buttons.pack(fill="x", padx=24, pady=(0, 16))
+        for label, command in (
+            ("Upload File...", self._android_storage_upload_file),
+            ("Upload Folder...", self._android_storage_upload_folder),
+            ("Download...", self._android_storage_download),
+            ("Edit Text...", self._android_storage_edit_text),
+            ("New Folder...", self._android_storage_new_folder),
+            ("Rename...", self._android_storage_rename),
+            ("Delete", self._android_storage_delete),
+        ):
+            ttk.Button(buttons, text=label, style="Ghost.TButton", command=command).pack(side="left", padx=(0, 8))
+
+    def _android_storage_set_status(self, text: str, error: bool = False) -> None:
+        if hasattr(self, "android_storage_status"):
+            self.android_storage_status.config(text=text, fg=RED if error else TEXT_DIM)
+
+    def _android_storage_refresh(self) -> None:
+        if not hasattr(self, "android_storage_tree"):
+            return
+        path = self.android_storage_path_var.get().strip() or "/storage/emulated/0"
+        if not path.startswith("/"):
+            path = "/" + path
+        self.android_storage_path_var.set(path)
+        self._android_storage_set_status("Loading...")
+        threading.Thread(target=self._android_storage_load_worker, args=(path,), daemon=True).start()
+
+    def _android_storage_load_worker(self, path: str) -> None:
+        ready, detail = self._adb_device_ready()
+        if not ready:
+            self.after(0, self._android_storage_apply_listing, path, None, detail)
+            return
+
+        # Directory listing is intentionally kept on the exact direct-ADB
+        # form already proven to work on this VM. Do not route browsing
+        # through the write-operation shell helper.
+        try:
+            result = self._adb_shell_direct(f"ls -la {self._android_remote_quote(path)}", timeout=15)
+        except Exception as exc:
+            self.after(0, self._android_storage_apply_listing, path, None, str(exc))
+            return
+
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout).strip() or f"Can't open {path}"
+            self.after(0, self._android_storage_apply_listing, path, None, detail)
+            return
+
+        rows = []
+        for line in result.stdout.splitlines():
+            line = line.rstrip()
+            if not line or line.startswith("total "):
+                continue
+
+            # Android `ls -la` columns:
+            # perms links owner group size date time name
+            # maxsplit preserves spaces in filenames in the final field.
+            parts = line.split(None, 7)
+            if len(parts) < 8:
+                continue
+
+            perms, _links, _owner, _group, size_raw, _date, _time, name = parts
+            if name in {".", ".."}:
+                continue
+
+            is_dir = perms.startswith("d")
+            try:
+                size = int(size_raw)
+            except ValueError:
+                size = 0
+            rows.append((name, is_dir, size))
+
+        rows.sort(key=lambda r: (not r[1], r[0].casefold()))
+        self.after(0, self._android_storage_apply_listing, path, rows, "Android VM connected")
+
+    @staticmethod
+    def _format_android_size(size: int) -> str:
+        value = float(size)
+        for unit in ("B", "KB", "MB", "GB", "TB"):
+            if value < 1024 or unit == "TB":
+                return f"{int(value)} {unit}" if unit == "B" else f"{value:.1f} {unit}"
+            value /= 1024
+        return f"{size} B"
+
+    def _android_storage_apply_listing(self, path: str, rows, status: str) -> None:
+        self.android_storage_tree.delete(*self.android_storage_tree.get_children())
+        if rows is None:
+            self._android_storage_set_status(status, True)
+            return
+        self.android_storage_path_var.set(path)
+        for index, (name, is_dir, size) in enumerate(rows):
+            self.android_storage_tree.insert(
+                "", "end", iid=f"android-{index}",
+                values=(name, "Folder" if is_dir else "File", "" if is_dir else self._format_android_size(size)),
+                tags=("dir" if is_dir else "file",),
+            )
+        self._android_storage_set_status(f"{status} • {len(rows)} item(s)")
+
+    def _android_storage_selected(self) -> list[tuple[str, bool]]:
+        result = []
+        for iid in self.android_storage_tree.selection():
+            values = self.android_storage_tree.item(iid, "values")
+            if values:
+                result.append((str(values[0]), str(values[1]) == "Folder"))
+        return result
+
+    def _android_storage_open_selected(self, _event=None) -> None:
+        selected = self._android_storage_selected()
+        if len(selected) != 1 or not selected[0][1]:
+            return
+        self.android_storage_path_var.set(
+            self._android_join(self.android_storage_path_var.get(), selected[0][0])
+        )
+        self._android_storage_refresh()
+
+    def _android_storage_up(self) -> None:
+        self.android_storage_path_var.set(self._android_parent(self.android_storage_path_var.get()))
+        self._android_storage_refresh()
+
+    def _android_storage_run_async(self, description: str, func) -> None:
+        self._android_storage_set_status(description + "...")
+        def worker():
+            try:
+                func()
+            except Exception as exc:
+                self.after(0, lambda: messagebox.showerror("Android Storage", str(exc)))
+            finally:
+                self.after(0, self._android_storage_refresh)
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _android_storage_upload_paths(self, paths: list[str], description: str = "Uploading") -> None:
+        paths = [str(Path(path)) for path in paths if path and Path(path).exists()]
+        if not paths:
+            return
+        dest = self.android_storage_path_var.get()
+        def work():
+            for source in paths:
+                result = self._adb_command("push", source, dest + "/", timeout=900)
+                if result.returncode != 0:
+                    raise RuntimeError(result.stderr.strip() or f"adb push failed for {Path(source).name}")
+            self._android_storage_media_scan(dest)
+        self._android_storage_run_async(description, work)
+
+    def _android_storage_upload_file(self) -> None:
+        source = filedialog.askopenfilename(title="Upload file to Android")
+        if source:
+            self._android_storage_upload_paths([source], "Uploading file")
+
+    def _android_storage_upload_folder(self) -> None:
+        source = filedialog.askdirectory(title="Upload folder to Android")
+        if source:
+            self._android_storage_upload_paths([source], "Uploading folder")
+
+    def _android_storage_download(self) -> None:
+        selected = self._android_storage_selected()
+        if not selected:
+            messagebox.showinfo("Android Storage", "Select one or more files/folders first.")
+            return
+        dest = filedialog.askdirectory(title="Download selected items to...")
+        if not dest:
+            return
+        base = self.android_storage_path_var.get()
+        def work():
+            for name, _is_dir in selected:
+                remote = self._android_join(base, name)
+                result = self._adb_command("pull", remote, dest, timeout=900)
+                if result.returncode != 0:
+                    raise RuntimeError(result.stderr.strip() or f"adb pull failed for {name}")
+        self._android_storage_run_async("Downloading", work)
+
+    def _android_storage_edit_text(self) -> None:
+        selected = self._android_storage_selected()
+        if len(selected) != 1 or selected[0][1]:
+            messagebox.showinfo("Android Storage", "Select exactly one text file to edit.")
+            return
+
+        name = selected[0][0]
+        remote = self._android_join(self.android_storage_path_var.get(), name)
+        result = self._adb_shell_direct(
+            f"cat {self._android_remote_quote(remote)}", timeout=30
+        )
+        if result.returncode != 0:
+            messagebox.showerror(
+                "Android Storage",
+                result.stderr.strip() or f"Couldn't read {name}.",
+            )
+            return
+
+        content = result.stdout
+        if "\x00" in content:
+            messagebox.showerror(
+                "Android Storage",
+                "This file appears to be binary and can't be edited as text.",
+            )
+            return
+        if len(content.encode("utf-8", errors="replace")) > 2 * 1024 * 1024:
+            messagebox.showerror(
+                "Android Storage",
+                "Text editing is limited to files up to 2 MB.",
+            )
+            return
+
+        dialog = tk.Toplevel(self)
+        dialog.title(f"Edit Text - {name}")
+        dialog.geometry("820x600")
+        dialog.minsize(560, 380)
+        dialog.configure(bg=BG)
+        dialog.transient(self)
+
+        tk.Label(
+            dialog, text=remote, bg=BG, fg=TEXT_DIM,
+            font=FONT_BODY, anchor="w"
+        ).pack(fill="x", padx=16, pady=(14, 8))
+
+        wrap = tk.Frame(dialog, bg=BG)
+        wrap.pack(fill="both", expand=True, padx=16)
+        text_widget = tk.Text(
+            wrap, bg=PANEL_BG, fg=TEXT, insertbackground=TEXT,
+            relief="flat", undo=True, wrap="none", font=FONT_MONO,
+        )
+        yscroll = ttk.Scrollbar(wrap, orient="vertical", command=text_widget.yview)
+        xscroll = ttk.Scrollbar(wrap, orient="horizontal", command=text_widget.xview)
+        text_widget.configure(
+            yscrollcommand=yscroll.set, xscrollcommand=xscroll.set
+        )
+        text_widget.grid(row=0, column=0, sticky="nsew")
+        yscroll.grid(row=0, column=1, sticky="ns")
+        xscroll.grid(row=1, column=0, sticky="ew")
+        wrap.grid_rowconfigure(0, weight=1)
+        wrap.grid_columnconfigure(0, weight=1)
+        text_widget.insert("1.0", content)
+
+        row = tk.Frame(dialog, bg=BG)
+        row.pack(fill="x", padx=16, pady=14)
+        status = tk.Label(
+            row, text="UTF-8 text editor", bg=BG, fg=TEXT_DIM, font=FONT_BODY
+        )
+        status.pack(side="left")
+
+        def save_text():
+            data = text_widget.get("1.0", "end-1c")
+            status.config(text="Saving...")
+            dialog.update_idletasks()
+            temp_path = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    "w", encoding="utf-8", newline="", delete=False,
+                    suffix=Path(name).suffix
+                ) as tmp:
+                    tmp.write(data)
+                    temp_path = tmp.name
+
+                result2 = self._adb_command("push", temp_path, remote, timeout=300)
+                if result2.returncode != 0:
+                    raise RuntimeError(
+                        result2.stderr.strip() or "adb push failed"
+                    )
+                self._android_storage_media_scan(
+                    self.android_storage_path_var.get()
+                )
+                status.config(text="Saved")
+                self._android_storage_refresh()
+            except Exception as exc:
+                status.config(text="Save failed")
+                messagebox.showerror("Android Storage", str(exc), parent=dialog)
+            finally:
+                if temp_path:
+                    try:
+                        os.unlink(temp_path)
+                    except OSError:
+                        pass
+
+        ttk.Button(
+            row, text="Close", style="Ghost.TButton", command=dialog.destroy
+        ).pack(side="right")
+        ttk.Button(
+            row, text="Save", style="Accent.TButton", command=save_text
+        ).pack(side="right", padx=(0, 8))
+
+        def save_shortcut(_event):
+            save_text()
+            return "break"
+
+        text_widget.bind("<Control-s>", save_shortcut)
+        text_widget.focus_set()
+
+    def _android_storage_new_folder(self) -> None:
+        name = self._android_storage_prompt("New Folder", "Folder name:")
+        if not name:
+            return
+        remote = self._android_join(self.android_storage_path_var.get(), name)
+        def work():
+            result = self._adb_shell_direct(f"mkdir {self._android_remote_quote(remote)}", timeout=30)
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr.strip() or "mkdir failed")
+            self._android_storage_media_scan(base)
+        self._android_storage_run_async("Creating folder", work)
+
+    def _android_storage_rename(self) -> None:
+        selected = self._android_storage_selected()
+        if len(selected) != 1:
+            messagebox.showinfo("Android Storage", "Select exactly one item to rename.")
+            return
+        old_name, _ = selected[0]
+        new_name = self._android_storage_prompt("Rename", "New name:", old_name)
+        if not new_name or new_name == old_name:
+            return
+        base = self.android_storage_path_var.get()
+        old_remote = self._android_join(base, old_name)
+        # Preserve the current extension for files when the user renames only
+        # the base name. Folders are left exactly as typed.
+        _selected_type = selected[0][1]
+        _is_dir = str(_selected_type).lower() in {"folder", "directory", "dir", "true"}
+        if not _is_dir:
+            _old_suffix = Path(old_name).suffix
+            if _old_suffix and not Path(new_name).suffix:
+                new_name += _old_suffix
+
+        new_remote = self._android_join(base, new_name)
+        def work():
+            result = self._adb_shell_direct(f"mv {self._android_remote_quote(old_remote)} {self._android_remote_quote(new_remote)}", timeout=30)
+            if result.returncode != 0:
+                raise RuntimeError(result.stderr.strip() or "rename failed")
+            self._android_storage_media_scan(base)
+        self._android_storage_run_async("Renaming", work)
+
+    def _android_storage_delete(self) -> None:
+        selected = self._android_storage_selected()
+        if not selected:
+            messagebox.showinfo("Android Storage", "Select one or more items first.")
+            return
+        names = ", ".join(name for name, _ in selected[:5])
+        if len(selected) > 5:
+            names += f" and {len(selected) - 5} more"
+        if not messagebox.askyesno(
+            "Delete from Android?",
+            f"Permanently delete {names} from the VM?\n\nThis cannot be undone.",
+        ):
+            return
+        base = self.android_storage_path_var.get()
+        def work():
+            for name, is_dir in selected:
+                remote = self._android_join(base, name)
+                if is_dir:
+                    result = self._adb_shell_direct(f"rm -rf {self._android_remote_quote(remote)}", timeout=60)
+                else:
+                    result = self._adb_shell_direct(f"rm -f {self._android_remote_quote(remote)}", timeout=30)
+                if result.returncode != 0:
+                    raise RuntimeError(result.stderr.strip() or f"delete failed for {name}")
+            self._android_storage_media_scan(base)
+        self._android_storage_run_async("Deleting", work)
+
+    def _android_storage_prompt(self, title: str, prompt: str, initial: str = "") -> str | None:
+        dialog = tk.Toplevel(self)
+        dialog.title(title)
+        dialog.configure(bg=BG)
+        dialog.resizable(False, False)
+        dialog.transient(self)
+        dialog.grab_set()
+        tk.Label(dialog, text=prompt, bg=BG, fg=TEXT, font=FONT_BODY).pack(anchor="w", padx=16, pady=(14, 4))
+        var = tk.StringVar(value=initial)
+        entry = tk.Entry(dialog, textvariable=var, width=46, **ENTRY_KWARGS)
+        entry.pack(fill="x", padx=16, ipady=3)
+        result = {"value": None}
+        def accept():
+            value = var.get().strip()
+            if not value or "/" in value or value in {".", ".."}:
+                messagebox.showerror(title, "Enter a valid single file/folder name.", parent=dialog)
+                return
+            result["value"] = value
+            dialog.destroy()
+        row = tk.Frame(dialog, bg=BG)
+        row.pack(fill="x", padx=16, pady=14)
+        ttk.Button(row, text="Cancel", style="Ghost.TButton", command=dialog.destroy).pack(side="right")
+        ttk.Button(row, text="OK", style="Accent.TButton", command=accept).pack(side="right", padx=(0, 8))
+        entry.bind("<Return>", lambda _e: accept())
+        entry.bind("<Escape>", lambda _e: dialog.destroy())
+        entry.focus_set()
+        entry.selection_range(0, "end")
+        self.wait_window(dialog)
+        return result["value"]
+
+    # -- Native Windows applications -------------------------------------------------
+
+    def _load_windows_apps(self) -> dict:
+        if not WINDOWS_APPS_PATH.is_file():
+            return {}
+        try:
+            data = json.loads(WINDOWS_APPS_PATH.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            messagebox.showerror("Windows Apps", f"Couldn't read {WINDOWS_APPS_PATH.name}:\n\n{e}")
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    def _save_windows_apps(self, apps: dict) -> bool:
+        try:
+            WINDOWS_APPS_PATH.write_text(json.dumps(apps, indent=2) + "\n", encoding="utf-8")
+            return True
+        except OSError as e:
+            messagebox.showerror("Windows Apps", f"Couldn't save {WINDOWS_APPS_PATH.name}:\n\n{e}")
+            return False
+
+    def _windows_rom_dir(self, show_error: bool = True) -> Path | None:
+        raw = self.config_data.get("roms_dir", "")
+        if not raw:
+            if show_error:
+                messagebox.showerror("Windows Apps", "Set your ROM directory first.")
+            return None
+        return Path(raw) / "windows"
+
+    @staticmethod
+    def _safe_pcgame_name(name: str) -> str | None:
+        name = name.strip()
+        if not name or name in {".", ".."}:
+            return None
+        if any(ch in name for ch in '<>:"/\\|?*'):
+            return None
+        return name
+
+    @staticmethod
+    def _safe_steam_pcgame_name(name: str) -> str:
+        """Make a Steam title safe as a Windows/.pcgame filename."""
+        cleaned = re.sub(r'[<>:"/\\|?*]+', ' - ', name)
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip(' .')
+        return cleaned or "Steam Game"
+
+    @staticmethod
+    def _unique_windows_app_name(base: str, apps: dict) -> str:
+        """Return a collision-free app/placeholder name."""
+        if base not in apps:
+            return base
+        number = 2
+        while f"{base} ({number})" in apps:
+            number += 1
+        return f"{base} ({number})"
+
+    @staticmethod
+    def _valid_uri(uri: str) -> bool:
+        return bool(re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://\S+$", uri.strip()))
+
+    @staticmethod
+    def _steam_app_id(value: str) -> str | None:
+        """Accept an App ID, Steam protocol URI, or Steam store URL."""
+        value = value.strip()
+        if value.isdigit():
+            return value
+
+        patterns = (
+            r"^steam://(?:run|rungameid)/(\d+)(?:[/?#].*)?$",
+            r"^https?://(?:store\.)?steampowered\.com/app/(\d+)(?:[/?#].*)?$",
+            r"^https?://steamcommunity\.com/app/(\d+)(?:[/?#].*)?$",
+        )
+        for pattern in patterns:
+            match = re.match(pattern, value, re.IGNORECASE)
+            if match:
+                return match.group(1)
+        return None
+
+    @staticmethod
+    def _is_steam_uri(uri: str) -> bool:
+        return bool(re.match(r"^steam://(?:run|rungameid)/\d+(?:[/?#].*)?$", uri.strip(), re.IGNORECASE))
+
+    @staticmethod
+    def _parse_steam_vdf_strings(text: str) -> dict[str, str]:
+        """Small VDF reader for the flat key/value data we need from Steam files."""
+        return {m.group(1): m.group(2).replace(r"\\", "\\") for m in re.finditer(r'"([^"]+)"\s*"([^"]*)"', text)}
+
+    def _steam_library_paths(self) -> list[Path]:
+        """Find Steam plus every configured library folder without requiring Steam APIs."""
+        candidates: list[Path] = []
+        env_candidates = [
+            os.environ.get("PROGRAMFILES(X86)", ""),
+            os.environ.get("PROGRAMFILES", ""),
+            os.environ.get("LOCALAPPDATA", ""),
+        ]
+        for base in env_candidates:
+            if base:
+                candidates.extend([Path(base) / "Steam", Path(base) / "steam"])
+        # Common registry locations are useful when Steam lives somewhere non-default.
+        try:
+            import winreg
+            for root, key_name in (
+                (winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam"),
+                (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Valve\Steam"),
+                (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Valve\Steam"),
+            ):
+                try:
+                    with winreg.OpenKey(root, key_name) as key:
+                        for value_name in ("SteamPath", "InstallPath"):
+                            try:
+                                value, _ = winreg.QueryValueEx(key, value_name)
+                                if value:
+                                    candidates.append(Path(str(value)))
+                            except OSError:
+                                pass
+                except OSError:
+                    pass
+        except Exception:
+            pass
+
+        steam_root = next((p for p in candidates if (p / "steamapps").is_dir()), None)
+        if steam_root is None:
+            return []
+
+        libraries = [steam_root]
+        vdf = steam_root / "steamapps" / "libraryfolders.vdf"
+        if vdf.is_file():
+            try:
+                raw = vdf.read_text(encoding="utf-8", errors="ignore")
+                for match in re.finditer(r'"path"\s*"([^"]+)"', raw):
+                    path = Path(match.group(1).replace(r"\\", "\\"))
+                    if (path / "steamapps").is_dir():
+                        libraries.append(path)
+            except OSError:
+                pass
+
+        unique: list[Path] = []
+        seen: set[str] = set()
+        for path in libraries:
+            key = str(path.resolve()).casefold()
+            if key not in seen:
+                seen.add(key)
+                unique.append(path)
+        return unique
+
+    def _installed_steam_games(self) -> list[dict]:
+        games: list[dict] = []
+        seen: set[str] = set()
+        for library in self._steam_library_paths():
+            steamapps = library / "steamapps"
+            for manifest in steamapps.glob("appmanifest_*.acf"):
+                try:
+                    fields = self._parse_steam_vdf_strings(
+                        manifest.read_text(encoding="utf-8", errors="ignore")
+                    )
+                except OSError:
+                    continue
+                appid = fields.get("appid") or manifest.stem.removeprefix("appmanifest_")
+                name = fields.get("name")
+                installdir = fields.get("installdir", "")
+                if not appid.isdigit() or not name or appid in seen:
+                    continue
+                seen.add(appid)
+                games.append({
+                    "appid": appid,
+                    "name": name,
+                    "library": str(library),
+                    "install_dir": str(steamapps / "common" / installdir) if installdir else "",
+                })
+        return sorted(games, key=lambda g: g["name"].casefold())
+
+    def _installed_steam_ids(self) -> set[str]:
+        """Return App IDs currently represented by local Steam manifests."""
+        return {game["appid"] for game in self._installed_steam_games()}
+
+    def _steam_ids_already_added(self) -> set[str]:
+        ids: set[str] = set()
+        for entry in self._load_windows_apps().values():
+            if isinstance(entry, dict) and str(entry.get("type", "executable")).lower() == "uri":
+                appid = self._steam_app_id(str(entry.get("uri", "")))
+                if appid:
+                    ids.add(appid)
+        return ids
+
+    def _steam_artwork_cache_file(self, appid: str) -> Path:
+        return BRIDGE_DIR / "cache" / "steam_artwork" / f"{appid}.jpg"
+
+    def _ensure_added_at(self, entry: dict) -> dict:
+        entry = dict(entry)
+        entry.setdefault("added_at", __import__("datetime").datetime.now().astimezone().isoformat(timespec="seconds"))
+        return entry
+
+    def _windows_app_sort_key(self, name: str, entry: dict):
+        column = getattr(self, "_windows_apps_sort_column", "name")
+        if column == "type":
+            return self._windows_app_display_type(entry).casefold()
+        if column == "status":
+            return self._windows_app_status(name, entry).casefold()
+        if column == "added":
+            return str(entry.get("added_at", "")) if isinstance(entry, dict) else ""
+        return name.casefold()
+
+    def _sort_windows_apps(self, column: str) -> None:
+        if getattr(self, "_windows_apps_sort_column", "name") == column:
+            self._windows_apps_sort_reverse = not getattr(self, "_windows_apps_sort_reverse", False)
+        else:
+            self._windows_apps_sort_column = column
+            self._windows_apps_sort_reverse = False
+        self._refresh_windows_apps_tree()
+
+    def _load_cached_windows_artwork(self, item_id: str, appid: str) -> None:
+        cache_file = self._steam_artwork_cache_file(appid)
+        if not cache_file.is_file():
+            return
+        try:
+            from PIL import Image, ImageTk
+            image = Image.open(cache_file).convert("RGB")
+            image.thumbnail((72, 27))
+            photo = ImageTk.PhotoImage(image)
+        except Exception:
+            return
+        if not hasattr(self, "_windows_apps_images"):
+            self._windows_apps_images = {}
+        self._windows_apps_images[item_id] = photo
+        if self.windows_apps_tree.exists(item_id):
+            self.windows_apps_tree.item(item_id, image=photo)
+
+    def _show_windows_apps_context_menu(self, event) -> None:
+        row = self.windows_apps_tree.identify_row(event.y)
+        if row and row not in self.windows_apps_tree.selection():
+            self.windows_apps_tree.selection_set(row)
+        menu = tk.Menu(self, tearoff=False)
+        menu.add_command(label="Launch / Test", command=self._test_windows_app)
+        menu.add_command(label="Edit...", command=self._edit_windows_app)
+        menu.add_command(label="Duplicate...", command=self._duplicate_windows_app)
+        menu.add_separator()
+        menu.add_command(label="Open Location / Copy URI", command=self._windows_app_open_or_copy)
+        menu.add_command(label="Repair Placeholders", command=self._repair_selected_windows_apps)
+        menu.add_separator()
+        menu.add_command(label="Remove Selected", command=self._remove_windows_app)
+        menu.tk_popup(event.x_root, event.y_root)
+
+    def _repair_selected_windows_apps(self) -> None:
+        selected = list(self.windows_apps_tree.selection())
+        if not selected:
+            messagebox.showinfo("Nothing selected", "Select one or more applications first.")
+            return
+        windows_dir = self._windows_rom_dir()
+        if windows_dir is None:
+            return
+        try:
+            windows_dir.mkdir(parents=True, exist_ok=True)
+            repaired = 0
+            for name in selected:
+                placeholder = windows_dir / f"{name}.pcgame"
+                if not placeholder.exists():
+                    placeholder.touch()
+                    repaired += 1
+        except OSError as e:
+            messagebox.showerror("Repair failed", str(e))
+            return
+        self._refresh_windows_apps_tree()
+        messagebox.showinfo("Repair complete", f"Recreated {repaired} missing placeholder(s).")
+
+    def _export_windows_apps(self) -> None:
+        apps = self._load_windows_apps()
+        if not apps:
+            messagebox.showinfo("Export", "There are no Windows Apps to export.")
+            return
+        path = filedialog.asksaveasfilename(
+            title="Export Windows Apps", defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+            initialfile="windows_apps_export.json",
+        )
+        if not path:
+            return
+        payload = {
+            "format": "iisu-pc-windows-apps",
+            "version": 1,
+            "apps": apps,
+        }
+        try:
+            Path(path).write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+        except OSError as e:
+            messagebox.showerror("Export failed", str(e))
+            return
+        messagebox.showinfo(
+            "Export complete",
+            "Windows Apps exported.\n\nSteam and URI entries are portable. Executable entries may need their paths updated on another PC.",
+        )
+
+    def _import_windows_apps_file(self) -> None:
+        path = filedialog.askopenfilename(
+            title="Import Windows Apps", filetypes=[("JSON files", "*.json"), ("All files", "*.*")]
+        )
+        if not path:
+            return
+        try:
+            payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as e:
+            messagebox.showerror("Import failed", str(e))
+            return
+        incoming = payload.get("apps", payload) if isinstance(payload, dict) else {}
+        if not isinstance(incoming, dict):
+            messagebox.showerror("Import failed", "That file doesn't contain a Windows Apps mapping.")
+            return
+
+        apps = self._load_windows_apps()
+        existing_steam_ids = self._steam_ids_already_added()
+        added = skipped = 0
+        windows_dir = self._windows_rom_dir()
+        if windows_dir is None:
+            return
+        windows_dir.mkdir(parents=True, exist_ok=True)
+        for raw_name, raw_entry in incoming.items():
+            name = self._safe_pcgame_name(str(raw_name))
+            if not name or not isinstance(raw_entry, dict) or name in apps:
+                skipped += 1
+                continue
+            incoming_steam_id = self._steam_app_id(str(raw_entry.get("uri", "")))
+            if incoming_steam_id and incoming_steam_id in existing_steam_ids:
+                skipped += 1
+                continue
+            entry = self._ensure_added_at(raw_entry)
+            apps[name] = entry
+            try:
+                (windows_dir / f"{name}.pcgame").touch(exist_ok=True)
+            except OSError:
+                apps.pop(name, None)
+                skipped += 1
+                continue
+            added += 1
+            if incoming_steam_id:
+                existing_steam_ids.add(incoming_steam_id)
+        if self._save_windows_apps(apps):
+            self._refresh_windows_apps_tree()
+            messagebox.showinfo("Import complete", f"Imported {added} application(s).\nSkipped {skipped} duplicate/invalid item(s).")
+
+    def _refresh_steam_library_summary(self) -> None:
+        """Refresh the compact Steam status shown on the Windows Apps page."""
+        if not hasattr(self, "steam_library_summary_label"):
+            return
+
+        self.steam_library_summary_label.config(text="Steam: scanning libraries...")
+
+        def worker():
+            games = self._installed_steam_games()
+            installed_ids = {g["appid"] for g in games}
+            added_ids = self._steam_ids_already_added()
+            in_iisu = len(installed_ids & added_ids)
+            available = len(installed_ids - added_ids)
+            libraries = len(self._steam_library_paths())
+
+            def apply():
+                if not hasattr(self, "steam_library_summary_label"):
+                    return
+                self.steam_library_summary_label.config(
+                    text=(
+                        f"Steam: {len(games)} installed  •  {in_iisu} in iiSU  •  "
+                        f"{available} available to import  •  {libraries} librar"
+                        f"{'y' if libraries == 1 else 'ies'}"
+                    )
+                )
+
+            self.after(0, apply)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _auto_import_new_steam_games(self) -> None:
+        """Add every installed Steam game that does not already have an iiSU mapping."""
+        games = self._installed_steam_games()
+        if not games:
+            messagebox.showinfo(
+                "Auto-import Steam Games",
+                "No installed Steam games were found.",
+            )
+            return
+
+        apps = self._load_windows_apps()
+        already = self._steam_ids_already_added()
+        missing = [game for game in games if game["appid"] not in already]
+
+        if not missing:
+            messagebox.showinfo(
+                "Auto-import Steam Games",
+                "Every installed Steam game is already in iiSU.",
+            )
+            self._refresh_steam_library_summary()
+            return
+
+        preview = "\n".join(f"• {game['name']}" for game in missing[:12])
+        if len(missing) > 12:
+            preview += f"\n• …and {len(missing) - 12} more"
+
+        if not messagebox.askyesno(
+            "Auto-import Steam Games",
+            f"Add {len(missing)} installed Steam game(s) that are not currently in iiSU?\n\n"
+            f"{preview}\n\n"
+            "This creates the Windows Apps mappings and .pcgame placeholders. "
+            "It does not change iiSU artwork.",
+        ):
+            return
+
+        windows_dir = self._windows_rom_dir()
+        if windows_dir is None:
+            return
+
+        try:
+            windows_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            messagebox.showerror("Auto-import failed", str(e))
+            return
+
+        imported = skipped = 0
+        for game in missing:
+            appid = game["appid"]
+            if appid in already:
+                skipped += 1
+                continue
+
+            name = self._unique_windows_app_name(
+                self._safe_steam_pcgame_name(game["name"]), apps
+            )
+            entry = self._ensure_added_at({
+                "type": "uri",
+                "uri": f"steam://rungameid/{appid}",
+                "steam_name": game["name"],
+            })
+            apps[name] = entry
+
+            try:
+                (windows_dir / f"{name}.pcgame").touch(exist_ok=True)
+            except OSError:
+                apps.pop(name, None)
+                skipped += 1
+                continue
+
+            already.add(appid)
+            imported += 1
+
+        if self._save_windows_apps(apps):
+            self._refresh_windows_apps_tree()
+            self._refresh_steam_library_summary()
+            messagebox.showinfo(
+                "Steam auto-import complete",
+                f"Imported {imported} new Steam game(s)."
+                + (f"\nSkipped {skipped} item(s)." if skipped else ""),
+            )
+
+    def _import_steam_library(self) -> None:
+        games = self._installed_steam_games()
+        if not games:
+            messagebox.showinfo(
+                "Steam Library",
+                "No installed Steam games were found. Steam may not be installed, or no app manifests are available.",
+            )
+            return
+
+        already = self._steam_ids_already_added()
+        dialog = tk.Toplevel(self)
+        dialog.title("Import Steam Library")
+        dialog.geometry("760x560")
+        dialog.minsize(650, 440)
+        dialog.configure(bg=BG)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        header = tk.Frame(dialog, bg=BG)
+        header.pack(fill="x", padx=18, pady=(16, 8))
+        tk.Label(header, text="Import Steam Library", bg=BG, fg=TEXT, font=FONT_HEADING).pack(anchor="w")
+        libs = self._steam_library_paths()
+        tk.Label(
+            header, text=f"Found {len(games)} installed game(s) across {len(libs)} Steam library folder(s).",
+            bg=BG, fg=TEXT_DIM, font=FONT_BODY,
+        ).pack(anchor="w")
+
+        filter_var = tk.StringVar()
+        filter_row = tk.Frame(dialog, bg=BG)
+        filter_row.pack(fill="x", padx=18, pady=(0, 8))
+        tk.Label(filter_row, text="Search:", bg=BG, fg=TEXT, font=FONT_BODY).pack(side="left")
+        tk.Entry(filter_row, textvariable=filter_var, **ENTRY_KWARGS).pack(side="left", fill="x", expand=True, padx=(8, 0))
+
+        columns = ("name", "appid", "state")
+        tree = ttk.Treeview(dialog, columns=columns, show="headings", selectmode="extended")
+        tree.heading("name", text="Game")
+        tree.heading("appid", text="App ID")
+        tree.heading("state", text="Status")
+        tree.column("name", width=420)
+        tree.column("appid", width=90, anchor="center")
+        tree.column("state", width=130)
+        tree.pack(fill="both", expand=True, padx=18, pady=(0, 8))
+
+        def refill(*_):
+            selected_ids = {tree.item(i, "values")[1] for i in tree.selection()}
+            for i in tree.get_children():
+                tree.delete(i)
+            q = filter_var.get().strip().casefold()
+            for game in games:
+                if q and q not in game["name"].casefold() and q not in game["appid"]:
+                    continue
+                state = "Already in iiSU" if game["appid"] in already else "Installed"
+                iid = f"app_{game['appid']}"
+                tree.insert("", "end", iid=iid, values=(game["name"], game["appid"], state))
+                if game["appid"] in selected_ids and game["appid"] not in already:
+                    tree.selection_add(iid)
+        filter_var.trace_add("write", refill)
+        refill()
+
+        controls = tk.Frame(dialog, bg=BG)
+        controls.pack(fill="x", padx=18, pady=(0, 16))
+
+        def select_all():
+            for iid in tree.get_children():
+                values = tree.item(iid, "values")
+                if len(values) >= 3 and values[2] != "Already in iiSU":
+                    tree.selection_add(iid)
+
+        def do_import():
+            chosen = []
+            for iid in tree.selection():
+                values = tree.item(iid, "values")
+                if len(values) >= 3 and values[2] != "Already in iiSU":
+                    chosen.append((str(values[0]), str(values[1])))
+            if not chosen:
+                messagebox.showinfo("Steam Library", "Select at least one game to import.", parent=dialog)
+                return
+
+            apps = self._load_windows_apps()
+            windows_dir = self._windows_rom_dir()
+            if windows_dir is None:
+                return
+            windows_dir.mkdir(parents=True, exist_ok=True)
+            imported = skipped = 0
+            existing_steam_ids = self._steam_ids_already_added()
+            for game_name, appid in chosen:
+                if appid in existing_steam_ids:
+                    skipped += 1
+                    continue
+                name = self._unique_windows_app_name(self._safe_steam_pcgame_name(game_name), apps)
+                entry = self._ensure_added_at({
+                    "type": "uri",
+                    "uri": f"steam://rungameid/{appid}",
+                    "steam_name": game_name,
+                })
+                apps[name] = entry
+                try:
+                    (windows_dir / f"{name}.pcgame").touch(exist_ok=True)
+                except OSError:
+                    apps.pop(name, None)
+                    skipped += 1
+                    continue
+                imported += 1
+                existing_steam_ids.add(appid)
+
+            if self._save_windows_apps(apps):
+                dialog.destroy()
+                self._refresh_windows_apps_tree()
+                self._refresh_steam_library_summary()
+                messagebox.showinfo("Steam import complete", f"Imported {imported} game(s).\nSkipped {skipped} item(s).")
+
+        ttk.Button(controls, text="Select All Installed", style="Ghost.TButton", command=select_all).pack(side="left")
+        ttk.Button(controls, text="Cancel", style="Ghost.TButton", command=dialog.destroy).pack(side="right")
+        ttk.Button(controls, text="Import Selected", style="Accent.TButton", command=do_import).pack(side="right", padx=(0, 8))
+
+    def _windows_app_status(self, name: str, entry: dict) -> str:
+        if not isinstance(entry, dict):
+            return "✗ Invalid entry"
+
+        launch_type = str(entry.get("type", "executable")).lower()
+        if launch_type == "uri":
+            uri = entry.get("uri", "")
+            if not isinstance(uri, str) or not self._valid_uri(uri):
+                return "✗ Invalid URI"
+            if self._is_steam_uri(uri):
+                appid = self._steam_app_id(uri)
+                installed_ids = getattr(self, "_windows_apps_installed_steam_ids", None)
+                if installed_ids is not None and appid and appid not in installed_ids:
+                    return "○ Steam game not installed"
+        elif launch_type == "executable":
+            exe = entry.get("exe", "")
+            if not isinstance(exe, str) or not exe.strip():
+                return "✗ No EXE"
+            if not Path(os.path.expandvars(os.path.expanduser(exe))).is_file():
+                return "✗ Missing EXE"
+            args = entry.get("args", [])
+            if not isinstance(args, list) or not all(isinstance(arg, str) for arg in args):
+                return "✗ Invalid args"
+            working = entry.get("working_dir")
+            if working and not Path(os.path.expandvars(os.path.expanduser(str(working)))).is_dir():
+                return "✗ Missing work dir"
+        else:
+            return "✗ Unknown type"
+
+        windows_dir = self._windows_rom_dir(show_error=False)
+        if windows_dir is None:
+            return "? ROM dir unset"
+        if not (windows_dir / f"{name}.pcgame").is_file():
+            return "✗ Missing placeholder"
+        return "✓ Ready"
+
+    def _windows_app_display_type(self, entry: dict) -> str:
+        launch_type = str(entry.get("type", "executable")).lower()
+        if launch_type == "uri":
+            return "Steam Game" if self._is_steam_uri(str(entry.get("uri", ""))) else "Custom URI"
+        return "Executable"
+
+    def _refresh_windows_apps_tree(self, *_args) -> None:
+        if not hasattr(self, "windows_apps_tree"):
+            return
+        selected = set(self.windows_apps_tree.selection())
+        for item in self.windows_apps_tree.get_children():
+            self.windows_apps_tree.delete(item)
+        self._windows_apps_images = {}
+
+        query = self.windows_apps_search_var.get().strip().casefold() if hasattr(self, "windows_apps_search_var") else ""
+        apps = self._load_windows_apps()
+        # One manifest scan per refresh lets status distinguish an installed
+        # Steam game from a valid mapping for a temporarily uninstalled game.
+        self._windows_apps_installed_steam_ids = self._installed_steam_ids()
+        rows = list(apps.items())
+        rows.sort(
+            key=lambda item: self._windows_app_sort_key(item[0], item[1] if isinstance(item[1], dict) else {}),
+            reverse=getattr(self, "_windows_apps_sort_reverse", False),
+        )
+
+        for name, entry in rows:
+            if not isinstance(entry, dict):
+                target = ""
+                args_display = ""
+                display_type = "Invalid"
+                added = ""
+            else:
+                launch_type = str(entry.get("type", "executable")).lower()
+                target = entry.get("uri", "") if launch_type == "uri" else entry.get("exe", "")
+                args = entry.get("args", [])
+                args_display = " ".join(str(arg) for arg in args) if isinstance(args, list) and launch_type == "executable" else ""
+                display_type = self._windows_app_display_type(entry)
+                added = str(entry.get("added_at", ""))[:10]
+
+            haystack = f"{name} {display_type} {target} {args_display} {added}".casefold()
+            if query and query not in haystack:
+                continue
+
+            self.windows_apps_tree.insert(
+                "", "end", iid=name, text="",
+                values=(name, display_type, target, args_display, self._windows_app_status(name, entry), added),
+            )
+            if name in selected:
+                self.windows_apps_tree.selection_add(name)
+
+            if isinstance(entry, dict) and display_type == "Steam Game":
+                appid = self._steam_app_id(str(entry.get("uri", "")))
+                if appid:
+                    self.after(0, self._load_cached_windows_artwork, name, appid)
+
+        count = len(self.windows_apps_tree.get_children())
+        total = len(apps)
+        if hasattr(self, "windows_apps_count_label"):
+            self.windows_apps_count_label.config(text=f"{count} shown / {total} total" if query else f"{total} application(s)")
+
+    def _refresh_steam_artwork_cache(self) -> None:
+        """Fetch/refresh Manager-only Steam artwork for mapped Steam games."""
+        apps = self._load_windows_apps()
+        steam_games = []
+        for name, entry in apps.items():
+            if not isinstance(entry, dict):
+                continue
+            uri = entry.get("uri", "")
+            if str(entry.get("type", "executable")).lower() != "uri" or not isinstance(uri, str):
+                continue
+            appid = self._steam_app_id(uri)
+            if appid:
+                steam_games.append((name, appid))
+
+        if not steam_games:
+            messagebox.showinfo("Refresh Steam Artwork", "No mapped Steam games were found.")
+            return
+
+        if not messagebox.askyesno(
+            "Refresh Steam Artwork",
+            f"Refresh Manager artwork for {len(steam_games)} mapped Steam game(s)?\n\n"
+            "This only updates the Manager artwork cache. iiSU/SteamGridDB artwork is untouched.",
+        ):
+            return
+
+        progress = tk.Toplevel(self)
+        progress.title("Refreshing Steam Artwork")
+        progress.geometry("520x150")
+        progress.resizable(False, False)
+        progress.configure(bg=BG)
+        progress.transient(self)
+        progress.grab_set()
+
+        status_var = tk.StringVar(value=f"Preparing to refresh {len(steam_games)} game(s)...")
+        tk.Label(progress, text="Steam Artwork", bg=BG, fg=TEXT, font=FONT_HEADING).pack(
+            anchor="w", padx=18, pady=(16, 4)
+        )
+        tk.Label(progress, textvariable=status_var, bg=BG, fg=TEXT_DIM, font=FONT_BODY).pack(
+            anchor="w", padx=18, pady=(0, 8)
+        )
+        bar = ttk.Progressbar(progress, maximum=len(steam_games), value=0)
+        bar.pack(fill="x", padx=18, pady=(0, 14))
+
+        def worker():
+            import io
+            import urllib.request
+
+            refreshed = failed = 0
+            cache_dir = BRIDGE_DIR / "cache" / "steam_artwork"
+            cache_dir.mkdir(parents=True, exist_ok=True)
+
+            try:
+                from PIL import Image
+            except Exception:
+                Image = None
+
+            for index, (name, appid) in enumerate(steam_games, start=1):
+                self.after(
+                    0, lambda i=index, n=name: (
+                        status_var.set(f"{i}/{len(steam_games)}  {n}"),
+                        bar.configure(value=i - 1),
+                    )
+                )
+                try:
+                    # appdetails gives us the canonical Steam header image directly
+                    # from the App ID, so auto-imported games do not need a prior search.
+                    url = f"https://store.steampowered.com/api/appdetails?appids={appid}&l=english&cc=US"
+                    req = urllib.request.Request(url, headers={"User-Agent": "iiSU-PC Manager"})
+                    with urllib.request.urlopen(req, timeout=10) as response:
+                        payload = json.loads(response.read().decode("utf-8"))
+                    record = payload.get(str(appid), {})
+                    data = record.get("data", {}) if record.get("success") else {}
+                    image_url = str(data.get("header_image") or "")
+                    if not image_url:
+                        raise ValueError("Steam returned no header image")
+
+                    req = urllib.request.Request(image_url, headers={"User-Agent": "iiSU-PC Manager"})
+                    with urllib.request.urlopen(req, timeout=12) as response:
+                        raw = response.read()
+
+                    # Validate/normalize the image when Pillow is available.
+                    cache_file = self._steam_artwork_cache_file(appid)
+                    if Image is not None:
+                        image = Image.open(io.BytesIO(raw)).convert("RGB")
+                        image.save(cache_file, format="JPEG", quality=92)
+                    else:
+                        cache_file.write_bytes(raw)
+                    refreshed += 1
+                except Exception:
+                    failed += 1
+
+                self.after(0, lambda i=index: bar.configure(value=i))
+
+            def finish():
+                try:
+                    progress.destroy()
+                except tk.TclError:
+                    pass
+                self._windows_apps_images = {}
+                self._refresh_windows_apps_tree()
+                messagebox.showinfo(
+                    "Steam artwork refresh complete",
+                    f"Refreshed artwork for {refreshed} game(s)."
+                    + (f"\nCould not refresh {failed} game(s)." if failed else "")
+                    + "\n\niiSU artwork was not changed.",
+                )
+
+            self.after(0, finish)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _scan_windows_apps_health(self) -> dict:
+        """Return non-destructive health findings for Windows Apps and placeholders."""
+        apps = self._load_windows_apps()
+        windows_dir = self._windows_rom_dir(show_error=False)
+        installed_steam_ids = self._installed_steam_ids()
+
+        findings = {
+            "missing_placeholders": [],
+            "orphan_placeholders": [],
+            "missing_executables": [],
+            "uninstalled_steam": [],
+            "invalid_uris": [],
+            "invalid_entries": [],
+            "duplicate_steam_ids": [],
+        }
+
+        steam_owners: dict[str, list[str]] = {}
+
+        for name, entry in apps.items():
+            if not isinstance(entry, dict):
+                findings["invalid_entries"].append(name)
+                continue
+
+            if windows_dir is not None and not (windows_dir / f"{name}.pcgame").is_file():
+                findings["missing_placeholders"].append(name)
+
+            launch_type = str(entry.get("type", "executable")).lower()
+            if launch_type == "executable":
+                exe = entry.get("exe", "")
+                if not isinstance(exe, str) or not exe.strip():
+                    findings["missing_executables"].append(name)
+                else:
+                    expanded = Path(os.path.expandvars(os.path.expanduser(exe)))
+                    if not expanded.is_file():
+                        findings["missing_executables"].append(name)
+            elif launch_type == "uri":
+                uri = entry.get("uri", "")
+                if not isinstance(uri, str) or not self._valid_uri(uri):
+                    findings["invalid_uris"].append(name)
+                    continue
+                appid = self._steam_app_id(uri)
+                if appid:
+                    steam_owners.setdefault(appid, []).append(name)
+                    if appid not in installed_steam_ids:
+                        findings["uninstalled_steam"].append(name)
+            else:
+                findings["invalid_entries"].append(name)
+
+        for appid, names in steam_owners.items():
+            if len(names) > 1:
+                findings["duplicate_steam_ids"].append((appid, names))
+
+        if windows_dir is not None and windows_dir.is_dir():
+            mapped = {name.casefold() for name in apps}
+            try:
+                for placeholder in windows_dir.glob("*.pcgame"):
+                    if placeholder.stem.casefold() not in mapped:
+                        findings["orphan_placeholders"].append(placeholder.stem)
+            except OSError:
+                pass
+
+        return findings
+
+    def _windows_apps_cleanup(self) -> None:
+        findings = self._scan_windows_apps_health()
+
+        counts = {
+            "Missing placeholders": len(findings["missing_placeholders"]),
+            "Orphan placeholders": len(findings["orphan_placeholders"]),
+            "Missing executables": len(findings["missing_executables"]),
+            "Steam games not installed": len(findings["uninstalled_steam"]),
+            "Invalid URIs": len(findings["invalid_uris"]),
+            "Invalid/unknown entries": len(findings["invalid_entries"]),
+            "Duplicate Steam App IDs": len(findings["duplicate_steam_ids"]),
+        }
+        problem_total = sum(counts.values())
+
+        dialog = tk.Toplevel(self)
+        dialog.title("Windows Apps Health Check")
+        dialog.geometry("760x580")
+        dialog.minsize(650, 480)
+        dialog.configure(bg=BG)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        header = tk.Frame(dialog, bg=BG)
+        header.pack(fill="x", padx=18, pady=(16, 8))
+        tk.Label(header, text="Windows Apps Health Check", bg=BG, fg=TEXT, font=FONT_HEADING).pack(anchor="w")
+        tk.Label(
+            header,
+            text=("Everything looks healthy." if problem_total == 0 else f"Found {problem_total} item(s) worth reviewing."),
+            bg=BG, fg=(GREEN if problem_total == 0 else TEXT_DIM), font=FONT_BODY,
+        ).pack(anchor="w", pady=(2, 0))
+
+        summary = Card(dialog)
+        summary.pack(fill="x", padx=18, pady=(0, 10))
+        inner = tk.Frame(summary, bg=PANEL_BG)
+        inner.pack(fill="x", padx=14, pady=10)
+        for label, count in counts.items():
+            row = tk.Frame(inner, bg=PANEL_BG)
+            row.pack(fill="x", pady=1)
+            tk.Label(row, text=label, bg=PANEL_BG, fg=TEXT, font=FONT_BODY, anchor="w").pack(side="left")
+            tk.Label(
+                row, text=str(count), bg=PANEL_BG,
+                fg=(GREEN if count == 0 else TEXT), font=FONT_BODY,
+            ).pack(side="right")
+
+        details_card = Card(dialog)
+        details_card.pack(fill="both", expand=True, padx=18, pady=(0, 10))
+        details = tk.Text(
+            details_card, wrap="word", state="normal", font=FONT_MONO,
+            bg="#0e0e10", fg="#c9c9ce", insertbackground=TEXT,
+            relief="flat", padx=10, pady=10,
+        )
+        details.pack(fill="both", expand=True, padx=8, pady=8)
+
+        sections = [
+            ("Missing placeholders", findings["missing_placeholders"],
+             "Safe to repair automatically; the mapping itself is intact."),
+            ("Orphan placeholders", findings["orphan_placeholders"],
+             "A .pcgame file exists with no Windows Apps mapping. Left untouched."),
+            ("Missing executables", findings["missing_executables"],
+             "The configured EXE is missing or invalid. Update or remove the mapping manually."),
+            ("Steam games not installed", findings["uninstalled_steam"],
+             "The mapping is valid; Steam simply has no installed manifest right now. Left untouched."),
+            ("Invalid URIs", findings["invalid_uris"],
+             "The URI mapping needs to be edited or removed manually."),
+            ("Invalid/unknown entries", findings["invalid_entries"],
+             "The JSON entry is malformed or uses an unknown launch type."),
+        ]
+        for title, items, note in sections:
+            if not items:
+                continue
+            details.insert("end", f"{title} ({len(items)})\n")
+            details.insert("end", f"{note}\n")
+            for item in items:
+                details.insert("end", f"  • {item}\n")
+            details.insert("end", "\n")
+
+        if findings["duplicate_steam_ids"]:
+            details.insert("end", f"Duplicate Steam App IDs ({len(findings['duplicate_steam_ids'])})\n")
+            details.insert("end", "Multiple mappings point to the same Steam App ID. Left untouched.\n")
+            for appid, names in findings["duplicate_steam_ids"]:
+                details.insert("end", f"  • {appid}: {', '.join(names)}\n")
+            details.insert("end", "\n")
+
+        if problem_total == 0:
+            details.insert("end", "No Windows Apps maintenance issues were found.\n")
+        details.config(state="disabled")
+
+        controls = tk.Frame(dialog, bg=BG)
+        controls.pack(fill="x", padx=18, pady=(0, 16))
+
+        def repair_safe():
+            names = findings["missing_placeholders"]
+            if not names:
+                messagebox.showinfo(
+                    "Nothing to repair",
+                    "No safely repairable placeholder issues were found.",
+                    parent=dialog,
+                )
+                return
+
+            windows_dir = self._windows_rom_dir()
+            if windows_dir is None:
+                return
+            try:
+                windows_dir.mkdir(parents=True, exist_ok=True)
+                repaired = 0
+                for name in names:
+                    placeholder = windows_dir / f"{name}.pcgame"
+                    if not placeholder.exists():
+                        placeholder.touch()
+                        repaired += 1
+            except OSError as e:
+                messagebox.showerror("Repair failed", str(e), parent=dialog)
+                return
+
+            dialog.destroy()
+            self._refresh_windows_apps_tree()
+            self._refresh_steam_library_summary()
+            messagebox.showinfo(
+                "Repair complete",
+                f"Recreated {repaired} missing placeholder(s).\n\n"
+                "No mappings, orphan placeholders, or uninstalled Steam games were deleted.",
+            )
+
+        ttk.Button(
+            controls, text="Repair Safe Issues", style="Accent.TButton", command=repair_safe,
+        ).pack(side="left")
+        ttk.Button(
+            controls, text="Close", style="Ghost.TButton", command=dialog.destroy,
+        ).pack(side="right")
+
+    def _build_windows_apps_page(self) -> None:
+        frame = self.pages["windows_apps"]
+        self._clear(frame)
+        self._page_header(
+            frame, "Windows Apps",
+            "Native executables, Steam games, and registered Windows protocol links in iiSU.",
+        )
+        self._windows_apps_sort_column = getattr(self, "_windows_apps_sort_column", "name")
+        self._windows_apps_sort_reverse = getattr(self, "_windows_apps_sort_reverse", False)
+        self._windows_apps_images = {}
+        ttk.Style(self).configure("WindowsApps.Treeview", rowheight=32)
+
+        steam_card = Card(frame)
+        steam_card.pack(fill="x", padx=24, pady=(12, 4))
+        steam_inner = tk.Frame(steam_card, bg=PANEL_BG)
+        steam_inner.pack(fill="x", padx=14, pady=10)
+
+        steam_text = tk.Frame(steam_inner, bg=PANEL_BG)
+        steam_text.pack(side="left", fill="x", expand=True)
+        tk.Label(
+            steam_text, text="Steam Library", bg=PANEL_BG, fg=TEXT, font=FONT_HEADING
+        ).pack(anchor="w")
+        self.steam_library_summary_label = tk.Label(
+            steam_text, text="Steam: scanning libraries...", bg=PANEL_BG,
+            fg=TEXT_DIM, font=FONT_BODY, anchor="w",
+        )
+        self.steam_library_summary_label.pack(anchor="w", pady=(2, 0))
+
+        ttk.Button(
+            steam_inner, text="Auto-import New", style="Accent.TButton",
+            command=self._auto_import_new_steam_games,
+        ).pack(side="right", padx=(8, 0))
+        ttk.Button(
+            steam_inner, text="Refresh Artwork", style="Ghost.TButton",
+            command=self._refresh_steam_artwork_cache,
+        ).pack(side="right", padx=(8, 0))
+        ttk.Button(
+            steam_inner, text="Choose Games...", style="Ghost.TButton",
+            command=self._import_steam_library,
+        ).pack(side="right")
+        ttk.Button(
+            steam_inner, text="Health Check...", style="Ghost.TButton",
+            command=self._windows_apps_cleanup,
+        ).pack(side="right", padx=(0, 8))
+
+        search_row = tk.Frame(frame, bg=BG)
+        search_row.pack(fill="x", padx=24, pady=(12, 4))
+        tk.Label(search_row, text="Search:", bg=BG, fg=TEXT, font=FONT_BODY).pack(side="left")
+        self.windows_apps_search_var = tk.StringVar()
+        tk.Entry(search_row, textvariable=self.windows_apps_search_var, **ENTRY_KWARGS).pack(
+            side="left", fill="x", expand=True, padx=(8, 10), ipady=3
+        )
+        self.windows_apps_count_label = tk.Label(search_row, text="", bg=BG, fg=TEXT_DIM, font=FONT_BODY)
+        self.windows_apps_count_label.pack(side="right")
+        self.windows_apps_search_var.trace_add("write", self._refresh_windows_apps_tree)
+
+        columns = ("name", "type", "target", "args", "status", "added")
+        self.windows_apps_tree = ttk.Treeview(frame, columns=columns, show="tree headings", height=12, selectmode="extended")
+        self.windows_apps_tree.heading("#0", text="Art")
+        for col, label in (
+            ("name", "Name"), ("type", "Launch type"), ("target", "Executable / URI"),
+            ("args", "Arguments"), ("status", "Status"), ("added", "Added"),
+        ):
+            self.windows_apps_tree.heading(col, text=label, command=lambda c=col: self._sort_windows_apps(c))
+        self.windows_apps_tree.heading("#0", text="Art")
+        self.windows_apps_tree.column("#0", width=78, minwidth=60, stretch=False)
+        self.windows_apps_tree.column("name", width=150)
+        self.windows_apps_tree.column("type", width=95)
+        self.windows_apps_tree.column("target", width=275)
+        self.windows_apps_tree.column("args", width=105)
+        self.windows_apps_tree.column("status", width=130)
+        self.windows_apps_tree.column("added", width=90)
+        self.windows_apps_tree.pack(fill="both", expand=True, padx=24, pady=(4, 4))
+        self.windows_apps_tree.bind("<Double-1>", lambda _e: self._edit_windows_app())
+        self.windows_apps_tree.bind("<Button-3>", self._show_windows_apps_context_menu)
+
+        action_row = tk.Frame(frame, bg=BG)
+        action_row.pack(fill="x", padx=24, pady=(0, 4))
+        ttk.Button(action_row, text="Add Application...", style="Accent.TButton", command=self._add_windows_app).pack(side="left")
+        ttk.Button(action_row, text="Import Steam Library...", style="Ghost.TButton", command=self._import_steam_library).pack(side="left", padx=(8, 0))
+        ttk.Button(action_row, text="Edit...", style="Ghost.TButton", command=self._edit_windows_app).pack(side="left", padx=(8, 0))
+        ttk.Button(action_row, text="Duplicate...", style="Ghost.TButton", command=self._duplicate_windows_app).pack(side="left", padx=(8, 0))
+        ttk.Button(action_row, text="Remove Selected", style="Ghost.TButton", command=self._remove_windows_app).pack(side="left", padx=(8, 0))
+        ttk.Button(action_row, text="Test...", style="Ghost.TButton", command=self._test_windows_app).pack(side="left", padx=(8, 0))
+
+        utility_row = tk.Frame(frame, bg=BG)
+        utility_row.pack(fill="x", padx=24, pady=(0, 8))
+        ttk.Button(utility_row, text="Open Location / Copy URI", style="Ghost.TButton", command=self._windows_app_open_or_copy).pack(side="left")
+        ttk.Button(utility_row, text="Sync / Repair...", style="Ghost.TButton", command=self._repair_windows_apps).pack(side="left", padx=(8, 0))
+        ttk.Button(utility_row, text="Export...", style="Ghost.TButton", command=self._export_windows_apps).pack(side="left", padx=(8, 0))
+        ttk.Button(utility_row, text="Import...", style="Ghost.TButton", command=self._import_windows_apps_file).pack(side="left", padx=(8, 0))
+        ttk.Button(utility_row, text="Open Windows ROMs", style="Ghost.TButton", command=self._open_windows_roms).pack(side="left", padx=(8, 0))
+
+        tk.Label(
+            frame,
+            text="Steam import reads your installed Steam libraries locally. Steam artwork shown here is Manager-only; "
+                 "iiSU's own SteamGridDB artwork workflow is untouched.",
+            bg=BG, fg=TEXT_DIM, font=FONT_BODY, justify="left", wraplength=850,
+        ).pack(anchor="w", padx=24, pady=(0, 12))
+        self._refresh_windows_apps_tree()
+
+        self._refresh_steam_library_summary()
+
+    def _windows_app_dialog(self, title: str, initial_name: str = "", initial: dict | None = None):
+        initial = initial or {}
+        dialog = tk.Toplevel(self)
+        dialog.title(title)
+        dialog.configure(bg=BG)
+        dialog.resizable(False, False)
+        dialog.transient(self)
+        dialog.grab_set()
+
+        stored_type = str(initial.get("type", "executable")).lower()
+        stored_uri = str(initial.get("uri", ""))
+        if stored_type == "uri" and self._is_steam_uri(stored_uri):
+            initial_type = "Steam Game"
+        elif stored_type == "uri":
+            initial_type = "Custom URI"
+        else:
+            initial_type = "Executable"
+
+        name_var = tk.StringVar(value=initial_name)
+        type_var = tk.StringVar(value=initial_type)
+        exe_var = tk.StringVar(value=str(initial.get("exe", "")))
+        uri_var = tk.StringVar(value=stored_uri)
+        steam_search_var = tk.StringVar(value=initial_name if initial_type == "Steam Game" else "")
+        steam_manual_var = tk.StringVar()
+        selected_steam = {"appid": self._steam_app_id(stored_uri), "name": initial_name or None}
+        existing_steam_id = self._steam_app_id(stored_uri)
+        if existing_steam_id:
+            steam_manual_var.set(existing_steam_id)
+        args = initial.get("args", [])
+        args_var = tk.StringVar(value=" ".join(str(a) for a in args) if isinstance(args, list) else "")
+        work_var = tk.StringVar(value=str(initial.get("working_dir", "")))
+        result = {"value": None}
+
+        # Keep PhotoImage objects alive for as long as the dialog exists.
+        steam_images = {}
+        steam_search_generation = {"value": 0}
+
+        body = tk.Frame(dialog, bg=BG)
+        body.pack(fill="both", expand=True, padx=20, pady=18)
+
+        tk.Label(body, text="Name:", bg=BG, fg=TEXT, font=FONT_BODY).grid(row=0, column=0, sticky="w", pady=4)
+        name_entry = tk.Entry(body, textvariable=name_var, width=58, **ENTRY_KWARGS)
+        name_entry.grid(row=0, column=1, columnspan=2, sticky="ew", pady=4)
+
+        tk.Label(body, text="Launch type:", bg=BG, fg=TEXT, font=FONT_BODY).grid(row=1, column=0, sticky="w", pady=4)
+        type_combo = ttk.Combobox(
+            body, textvariable=type_var,
+            values=("Executable", "Steam Game", "Custom URI"), state="readonly", width=18, font=FONT_BODY,
+        )
+        type_combo.grid(row=1, column=1, columnspan=2, sticky="w", pady=4)
+
+        dynamic = tk.Frame(body, bg=BG)
+        dynamic.grid(row=2, column=0, columnspan=3, sticky="ew")
+        dynamic.grid_columnconfigure(1, weight=1)
+
+        def browse_exe():
+            path = filedialog.askopenfilename(
+                parent=dialog, title="Select Windows application",
+                filetypes=[("Windows applications", "*.exe"), ("All files", "*.*")],
+            )
+            if path:
+                exe_var.set(path)
+                if not name_var.get().strip():
+                    name_var.set(Path(path).stem)
+
+        def browse_work():
+            path = filedialog.askdirectory(parent=dialog, title="Select working directory")
+            if path:
+                work_var.set(path)
+
+        def set_selected_steam(appid: str, game_name: str):
+            selected_steam["appid"] = str(appid)
+            selected_steam["name"] = game_name
+            steam_manual_var.set(str(appid))
+            name_var.set(self._safe_steam_pcgame_name(game_name))
+
+        def rebuild_dynamic(*_args):
+            steam_search_generation["value"] += 1
+            for child in dynamic.winfo_children():
+                child.destroy()
+            steam_images.clear()
+
+            if type_var.get() == "Steam Game":
+                tk.Label(dynamic, text="Search Steam:", bg=BG, fg=TEXT, font=FONT_BODY).grid(
+                    row=0, column=0, sticky="w", pady=(6, 4)
+                )
+                search_entry = tk.Entry(dynamic, textvariable=steam_search_var, width=44, **ENTRY_KWARGS)
+                search_entry.grid(row=0, column=1, sticky="ew", pady=(6, 4))
+
+                search_button = ttk.Button(dynamic, text="Search", style="Ghost.TButton")
+                search_button.grid(row=0, column=2, padx=(8, 0), pady=(6, 4))
+
+                status_var = tk.StringVar(value="Search by game name, then choose the correct Steam result.")
+                tk.Label(
+                    dynamic, textvariable=status_var, bg=BG, fg=TEXT_DIM, font=FONT_BODY,
+                    justify="left", anchor="w",
+                ).grid(row=1, column=0, columnspan=3, sticky="ew", pady=(2, 6))
+
+                results_frame = tk.Frame(dynamic, bg=BG)
+                results_frame.grid(row=2, column=0, columnspan=3, sticky="ew")
+                columns = ("name", "appid", "state")
+                ttk.Style(dialog).configure("SteamResults.Treeview", rowheight=48)
+                results = ttk.Treeview(
+                    results_frame, columns=columns, show="tree headings",
+                    height=7, selectmode="browse", style="SteamResults.Treeview",
+                )
+                results.heading("#0", text="Artwork")
+                results.heading("name", text="Game")
+                results.heading("appid", text="App ID")
+                results.heading("state", text="Status")
+                results.column("#0", width=128, minwidth=128, stretch=False)
+                results.column("name", width=330, minwidth=220)
+                results.column("appid", width=80, minwidth=70, stretch=False)
+                results.column("state", width=105, minwidth=90, stretch=False)
+                scroll = ttk.Scrollbar(results_frame, orient="vertical", command=results.yview)
+                results.configure(yscrollcommand=scroll.set)
+                results.pack(side="left", fill="both", expand=True)
+                scroll.pack(side="right", fill="y")
+
+                selected_var = tk.StringVar(
+                    value=(
+                        f"Selected: {selected_steam['name']}  •  App ID {selected_steam['appid']}"
+                        if selected_steam.get("appid") else "Selected: none"
+                    )
+                )
+                tk.Label(
+                    dynamic, textvariable=selected_var, bg=BG, fg=TEXT, font=FONT_BODY,
+                    justify="left", anchor="w",
+                ).grid(row=3, column=0, columnspan=3, sticky="ew", pady=(7, 2))
+
+                manual_frame = tk.Frame(dynamic, bg=BG)
+                manual_frame.grid(row=4, column=0, columnspan=3, sticky="ew", pady=(4, 8))
+                tk.Label(
+                    manual_frame, text="Manual App ID / Steam URL:", bg=BG, fg=TEXT_DIM, font=FONT_BODY
+                ).pack(side="left")
+                tk.Entry(manual_frame, textvariable=steam_manual_var, width=26, **ENTRY_KWARGS).pack(
+                    side="left", padx=(8, 0)
+                )
+                ttk.Button(
+                    manual_frame, text="Use", style="Ghost.TButton",
+                    command=lambda: use_manual_steam(selected_var),
+                ).pack(side="left", padx=(8, 0))
+
+                def choose_result(_event=None):
+                    selected = results.selection()
+                    if not selected:
+                        return
+                    item = selected[0]
+                    values = results.item(item, "values")
+                    if len(values) < 2:
+                        return
+                    game_name, appid = values[0], str(values[1])
+                    set_selected_steam(appid, game_name)
+                    selected_var.set(f"Selected: {game_name}  •  App ID {appid}")
+
+                def use_manual_steam(label_var=selected_var):
+                    app_id = self._steam_app_id(steam_manual_var.get())
+                    if not app_id:
+                        messagebox.showerror(
+                            "Invalid Steam game",
+                            "Enter a Steam App ID, Steam store URL, or steam:// launch URI.",
+                            parent=dialog,
+                        )
+                        return
+
+                    # If a search result already selected this ID, keep its known name.
+                    if str(selected_steam.get("appid") or "") == str(app_id) and selected_steam.get("name"):
+                        label_var.set(f"Selected: {selected_steam['name']}  •  App ID {app_id}")
+                        return
+
+                    selected_steam["appid"] = str(app_id)
+                    selected_steam["name"] = None
+                    label_var.set(f"Selected: App ID {app_id} (name lookup in progress...)")
+
+                    def worker():
+                        try:
+                            import urllib.request
+                            url = f"https://store.steampowered.com/api/appdetails?appids={app_id}&l=english&cc=US"
+                            req = urllib.request.Request(url, headers={"User-Agent": "iiSU-PC Manager"})
+                            with urllib.request.urlopen(req, timeout=8) as response:
+                                payload = json.loads(response.read().decode("utf-8"))
+                            data = payload.get(str(app_id), {})
+                            game_name = data.get("data", {}).get("name") if data.get("success") else None
+                        except Exception:
+                            game_name = None
+
+                        def finish():
+                            if str(selected_steam.get("appid") or "") != str(app_id):
+                                return
+                            if game_name:
+                                set_selected_steam(str(app_id), game_name)
+                                label_var.set(f"Selected: {game_name}  •  App ID {app_id}")
+                            else:
+                                label_var.set(f"Selected: App ID {app_id}")
+                        self.after(0, finish)
+
+                    threading.Thread(target=worker, daemon=True).start()
+
+                def load_artwork(appid: str, image_url: str, item_id: str, generation: int):
+                    if not image_url:
+                        return
+                    try:
+                        import io
+                        import urllib.request
+                        from PIL import Image, ImageTk
+
+                        cache_dir = BRIDGE_DIR / "cache" / "steam_artwork"
+                        cache_dir.mkdir(parents=True, exist_ok=True)
+                        cache_file = cache_dir / f"{appid}.jpg"
+
+                        if cache_file.is_file():
+                            raw = cache_file.read_bytes()
+                        else:
+                            req = urllib.request.Request(image_url, headers={"User-Agent": "iiSU-PC Manager"})
+                            with urllib.request.urlopen(req, timeout=8) as response:
+                                raw = response.read()
+                            cache_file.write_bytes(raw)
+
+                        image = Image.open(io.BytesIO(raw)).convert("RGB")
+                        image.thumbnail((120, 45))
+                        photo = ImageTk.PhotoImage(image)
+                    except Exception:
+                        # Artwork is cosmetic: no Pillow/network/bad image = text-only result.
+                        return
+
+                    def apply_image():
+                        if generation != steam_search_generation["value"] or not results.exists(item_id):
+                            return
+                        steam_images[item_id] = photo
+                        results.item(item_id, image=photo)
+                    self.after(0, apply_image)
+
+                def perform_search(_event=None):
+                    query = steam_search_var.get().strip()
+                    if len(query) < 2:
+                        messagebox.showinfo("Steam search", "Type at least two characters to search Steam.", parent=dialog)
+                        return
+
+                    steam_search_generation["value"] += 1
+                    generation = steam_search_generation["value"]
+                    for item in results.get_children():
+                        results.delete(item)
+                    steam_images.clear()
+                    search_button.config(state="disabled")
+                    status_var.set("Searching Steam...")
+
+                    def worker():
+                        local_games = self._installed_steam_games()
+                        installed_ids = {g["appid"] for g in local_games}
+                        already_ids = self._steam_ids_already_added()
+
+                        def steam_state(appid: str) -> str:
+                            if str(appid) in already_ids:
+                                return "Already Added"
+                            if str(appid) in installed_ids:
+                                return "Installed"
+                            return "Store"
+
+                        local_matches = [
+                            {"appid": g["appid"], "name": g["name"], "image": "", "state": steam_state(g["appid"])}
+                            for g in local_games
+                            if query.casefold() in g["name"].casefold() or query == g["appid"]
+                        ][:25]
+                        try:
+                            import urllib.parse
+                            import urllib.request
+                            params = urllib.parse.urlencode({"term": query, "l": "english", "cc": "US"})
+                            url = f"https://store.steampowered.com/api/storesearch/?{params}"
+                            req = urllib.request.Request(url, headers={"User-Agent": "iiSU-PC Manager"})
+                            with urllib.request.urlopen(req, timeout=10) as response:
+                                payload = json.loads(response.read().decode("utf-8"))
+                            items = payload.get("items", [])
+                            if not isinstance(items, list):
+                                items = []
+                            normalized = []
+                            for item in items[:25]:
+                                if not isinstance(item, dict):
+                                    continue
+                                appid = item.get("id")
+                                game_name = item.get("name")
+                                if appid is None or not game_name:
+                                    continue
+                                normalized.append({
+                                    "appid": str(appid),
+                                    "name": str(game_name),
+                                    "image": str(item.get("tiny_image") or ""),
+                                    "state": steam_state(str(appid)),
+                                })
+                            seen_ids = {item["appid"] for item in local_matches}
+                            normalized = local_matches + [item for item in normalized if item["appid"] not in seen_ids]
+                            normalized = normalized[:25]
+                            error = None
+                        except Exception as e:
+                            normalized = local_matches
+                            error = None if local_matches else str(e)
+
+                        def finish():
+                            if generation != steam_search_generation["value"]:
+                                return
+                            search_button.config(state="normal")
+                            if error:
+                                status_var.set("Steam search failed.")
+                                messagebox.showerror(
+                                    "Steam search failed",
+                                    "Couldn't search the Steam Store right now.\n\n"
+                                    f"{error}\n\nYou can still use the manual App ID field or Custom URI.",
+                                    parent=dialog,
+                                )
+                                return
+                            if not normalized:
+                                status_var.set("No matching Steam games found.")
+                                return
+
+                            status_var.set(f"{len(normalized)} result(s) — select or double-click a game.")
+                            for index, item in enumerate(normalized):
+                                iid = f"steam_{generation}_{index}"
+                                results.insert(
+                                    "", "end", iid=iid, text="",
+                                    values=(item["name"], item["appid"], item.get("state", "Store")),
+                                )
+                                if item["image"]:
+                                    threading.Thread(
+                                        target=load_artwork,
+                                        args=(item["appid"], item["image"], iid, generation),
+                                        daemon=True,
+                                    ).start()
+
+                        self.after(0, finish)
+
+                    threading.Thread(target=worker, daemon=True).start()
+
+                search_button.config(command=perform_search)
+                search_entry.bind("<Return>", perform_search)
+                results.bind("<<TreeviewSelect>>", choose_result)
+                results.bind("<Double-1>", choose_result)
+                self.after(50, search_entry.focus_set)
+
+            elif type_var.get() == "Custom URI":
+                tk.Label(dynamic, text="URI:", bg=BG, fg=TEXT, font=FONT_BODY).grid(row=0, column=0, sticky="w", pady=4)
+                tk.Entry(dynamic, textvariable=uri_var, width=58, **ENTRY_KWARGS).grid(
+                    row=0, column=1, columnspan=2, sticky="ew", pady=4
+                )
+                tk.Label(
+                    dynamic,
+                    text="Any registered Windows protocol URI, including non-Steam launchers and custom application links.",
+                    bg=BG, fg=TEXT_DIM, font=FONT_BODY, justify="left",
+                ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(6, 10))
+            else:
+                tk.Label(dynamic, text="Executable:", bg=BG, fg=TEXT, font=FONT_BODY).grid(row=0, column=0, sticky="w", pady=4)
+                tk.Entry(dynamic, textvariable=exe_var, width=58, **ENTRY_KWARGS).grid(row=0, column=1, sticky="ew", pady=4)
+                ttk.Button(dynamic, text="Browse...", style="Ghost.TButton", command=browse_exe).grid(
+                    row=0, column=2, padx=(8, 0), pady=4
+                )
+                tk.Label(dynamic, text="Arguments:", bg=BG, fg=TEXT, font=FONT_BODY).grid(row=1, column=0, sticky="w", pady=4)
+                tk.Entry(dynamic, textvariable=args_var, width=58, **ENTRY_KWARGS).grid(
+                    row=1, column=1, columnspan=2, sticky="ew", pady=4
+                )
+                tk.Label(dynamic, text="Working directory:", bg=BG, fg=TEXT, font=FONT_BODY).grid(row=2, column=0, sticky="w", pady=4)
+                tk.Entry(dynamic, textvariable=work_var, width=58, **ENTRY_KWARGS).grid(row=2, column=1, sticky="ew", pady=4)
+                ttk.Button(dynamic, text="Browse...", style="Ghost.TButton", command=browse_work).grid(
+                    row=2, column=2, padx=(8, 0), pady=4
+                )
+                tk.Label(
+                    dynamic,
+                    text="Arguments are space-separated. Leave Working directory blank to use the executable's folder.",
+                    bg=BG, fg=TEXT_DIM, font=FONT_BODY, justify="left",
+                ).grid(row=3, column=0, columnspan=3, sticky="w", pady=(6, 10))
+
+            dialog.update_idletasks()
+
+        type_combo.bind("<<ComboboxSelected>>", rebuild_dynamic)
+        rebuild_dynamic()
+
+        def accept():
+            if type_var.get() == "Steam Game":
+                app_id = selected_steam.get("appid")
+                if not app_id:
+                    # Allow Save after typing a valid manual ID even if Use wasn't clicked.
+                    app_id = self._steam_app_id(steam_manual_var.get())
+                if not app_id:
+                    messagebox.showerror(
+                        "No Steam game selected",
+                        "Search for a Steam game and select it, or enter an App ID manually.",
+                        parent=dialog,
+                    )
+                    return
+
+                # Search/manual lookup already filled Name with a filename-safe
+                # version of the canonical Steam title. Keep any user edits here.
+                if selected_steam.get("name") and not name_var.get().strip():
+                    name_var.set(self._safe_steam_pcgame_name(str(selected_steam["name"])))
+
+            name = self._safe_pcgame_name(name_var.get())
+            if not name:
+                messagebox.showerror("Invalid name", 'Enter a name without < > : " / \\ | ? *.', parent=dialog)
+                return
+
+            if type_var.get() == "Steam Game":
+                app_id = selected_steam.get("appid") or self._steam_app_id(steam_manual_var.get())
+                entry = {"type": "uri", "uri": f"steam://rungameid/{app_id}"}
+                if selected_steam.get("name"):
+                    entry["steam_name"] = str(selected_steam["name"])
+            elif type_var.get() == "Custom URI":
+                uri = uri_var.get().strip()
+                if not self._valid_uri(uri):
+                    messagebox.showerror(
+                        "Invalid URI",
+                        "Enter a registered protocol URI such as mylauncher://game/123.",
+                        parent=dialog,
+                    )
+                    return
+                entry = {"type": "uri", "uri": uri}
+            else:
+                exe = exe_var.get().strip()
+                if not exe or not Path(os.path.expandvars(os.path.expanduser(exe))).is_file():
+                    messagebox.showerror("Executable not found", "Choose an existing executable.", parent=dialog)
+                    return
+                import shlex
+                try:
+                    parsed_args = shlex.split(args_var.get(), posix=False)
+                    parsed_args = [a[1:-1] if len(a) >= 2 and a[0] == a[-1] == '"' else a for a in parsed_args]
+                except ValueError as e:
+                    messagebox.showerror("Invalid arguments", str(e), parent=dialog)
+                    return
+                entry = {"type": "executable", "exe": exe, "args": parsed_args}
+                if work_var.get().strip():
+                    entry["working_dir"] = work_var.get().strip()
+
+            result["value"] = (name, entry)
+            dialog.destroy()
+
+        buttons = tk.Frame(body, bg=BG)
+        buttons.grid(row=3, column=0, columnspan=3, sticky="e", pady=(8, 0))
+        ttk.Button(buttons, text="Cancel", style="Ghost.TButton", command=dialog.destroy).pack(side="left")
+        ttk.Button(buttons, text="Save", style="Accent.TButton", command=accept).pack(side="left", padx=(8, 0))
+        body.grid_columnconfigure(1, weight=1)
+
+        dialog.update_idletasks()
+        dialog.geometry(f"+{self.winfo_rootx()+100}+{self.winfo_rooty()+55}")
+        self.wait_window(dialog)
+        return result["value"]
+
+    def _create_windows_app(self, name: str, entry: dict, apps: dict | None = None) -> bool:
+        entry = self._ensure_added_at(entry)
+        apps = self._load_windows_apps() if apps is None else apps
+        if any(existing.casefold() == name.casefold() for existing in apps):
+            messagebox.showerror("Duplicate", f"A Windows app named '{name}' already exists.")
+            return False
+
+        windows_dir = self._windows_rom_dir()
+        if windows_dir is None:
+            return False
+        try:
+            windows_dir.mkdir(parents=True, exist_ok=True)
+            (windows_dir / f"{name}.pcgame").touch(exist_ok=True)
+        except OSError as e:
+            messagebox.showerror("Windows Apps", f"Couldn't create the .pcgame placeholder:\n\n{e}")
+            return False
+
+        apps[name] = entry
+        if not self._save_windows_apps(apps):
+            return False
+        self._refresh_windows_apps_tree()
+        if self.windows_apps_tree.exists(name):
+            self.windows_apps_tree.selection_set(name)
+            self.windows_apps_tree.see(name)
+        return True
+
+    def _add_windows_app(self) -> None:
+        result = self._windows_app_dialog("Add Windows Application")
+        if result:
+            self._create_windows_app(*result)
+
+    def _edit_windows_app(self) -> None:
+        selected = self.windows_apps_tree.selection()
+        if not selected:
+            messagebox.showinfo("Nothing selected", "Select a Windows app first.")
+            return
+        old_name = selected[0]
+        apps = self._load_windows_apps()
+        old_entry = apps.get(old_name)
+        if not isinstance(old_entry, dict):
+            return
+        result = self._windows_app_dialog("Edit Windows Application", old_name, old_entry)
+        if not result:
+            return
+        new_name, new_entry = result
+        if new_name.casefold() != old_name.casefold() and any(k.casefold() == new_name.casefold() for k in apps):
+            messagebox.showerror("Duplicate", f"A Windows app named '{new_name}' already exists.")
+            return
+
+        windows_dir = self._windows_rom_dir()
+        if windows_dir is None:
+            return
+        old_stub = windows_dir / f"{old_name}.pcgame"
+        new_stub = windows_dir / f"{new_name}.pcgame"
+        try:
+            windows_dir.mkdir(parents=True, exist_ok=True)
+            if old_stub != new_stub and old_stub.exists():
+                old_stub.rename(new_stub)
+            else:
+                new_stub.touch(exist_ok=True)
+        except OSError as e:
+            messagebox.showerror("Windows Apps", f"Couldn't update the .pcgame placeholder:\n\n{e}")
+            return
+
+        apps.pop(old_name, None)
+        apps[new_name] = new_entry
+        if self._save_windows_apps(apps):
+            self._refresh_windows_apps_tree()
+            if self.windows_apps_tree.exists(new_name):
+                self.windows_apps_tree.selection_set(new_name)
+                self.windows_apps_tree.see(new_name)
+
+    def _duplicate_windows_app(self) -> None:
+        selected = self.windows_apps_tree.selection()
+        if not selected:
+            messagebox.showinfo("Nothing selected", "Select a Windows app first.")
+            return
+        if len(selected) != 1:
+            messagebox.showinfo("Select one", "Select one Windows app to duplicate.")
+            return
+        source_name = selected[0]
+        entry = self._load_windows_apps().get(source_name)
+        if not isinstance(entry, dict):
+            return
+
+        apps = self._load_windows_apps()
+        base = f"{source_name} Copy"
+        suggested = base
+        number = 2
+        while any(name.casefold() == suggested.casefold() for name in apps):
+            suggested = f"{base} {number}"
+            number += 1
+
+        # JSON round-trip makes a simple deep copy without adding another dependency.
+        cloned = json.loads(json.dumps(entry))
+        result = self._windows_app_dialog("Duplicate Windows Application", suggested, cloned)
+        if result:
+            self._create_windows_app(*result)
+
+    def _remove_windows_app(self) -> None:
+        selected = list(self.windows_apps_tree.selection())
+        if not selected:
+            messagebox.showinfo("Nothing selected", "Select one or more applications first.")
+            return
+        if not messagebox.askyesno(
+            "Remove Windows Apps?",
+            f"Remove {len(selected)} selected application(s) from iiSU-PC?\n\n"
+            "Their .pcgame placeholders will also be removed. This does not uninstall the applications themselves.",
+        ):
+            return
+        apps = self._load_windows_apps()
+        windows_dir = self._windows_rom_dir(show_error=False)
+        for name in selected:
+            apps.pop(name, None)
+            if windows_dir is not None:
+                try:
+                    (windows_dir / f"{name}.pcgame").unlink(missing_ok=True)
+                except OSError:
+                    pass
+        if self._save_windows_apps(apps):
+            self._refresh_windows_apps_tree()
+        self._refresh_steam_library_summary()
+
+    def _test_windows_app(self) -> None:
+        """Launch the selected Windows app directly, bypassing iiSU and the bridge."""
+        selected = self.windows_apps_tree.selection()
+        if not selected:
+            messagebox.showinfo("Nothing selected", "Select a Windows app first.")
+            return
+        if len(selected) != 1:
+            messagebox.showinfo("Select one", "Select one Windows app to test.")
+            return
+
+        app_name = selected[0]
+        entry = self._load_windows_apps().get(app_name)
+        if not isinstance(entry, dict):
+            messagebox.showerror("Can't test", f"'{app_name}' has an invalid configuration entry.")
+            return
+
+        launch_type = str(entry.get("type", "executable")).lower()
+        if launch_type == "uri":
+            uri = entry.get("uri")
+            if not isinstance(uri, str) or not self._valid_uri(uri):
+                messagebox.showerror("Can't test", f"'{app_name}' has an invalid URI.")
+                return
+            try:
+                os.startfile(uri.strip())
+            except OSError as e:
+                scheme = uri.split(":", 1)[0]
+                messagebox.showerror(
+                    "Launch failed",
+                    f"Windows couldn't open '{app_name}'.\n\n"
+                    f"URI: {uri}\nProtocol: {scheme}://\n\n"
+                    "The application that handles this protocol may not be installed or registered.\n\n"
+                    f"Windows error: {e}",
+                )
+            return
+
+        if launch_type != "executable":
+            messagebox.showerror("Can't test", f"'{app_name}' has an unknown launch type: {launch_type}")
+            return
+
+        exe_value = entry.get("exe")
+        if not isinstance(exe_value, str) or not exe_value.strip():
+            messagebox.showerror("Can't test", f"'{app_name}' has no executable configured.")
+            return
+
+        executable = Path(os.path.expandvars(os.path.expanduser(exe_value)))
+        if not executable.is_file():
+            messagebox.showerror("Executable not found", f"The configured executable for '{app_name}' does not exist:\n\n{executable}")
+            return
+
+        args = entry.get("args", [])
+        if not isinstance(args, list) or not all(isinstance(arg, str) for arg in args):
+            messagebox.showerror("Can't test", f"'{app_name}' has invalid arguments. The args value must be a list of strings.")
+            return
+
+        working_dir_value = entry.get("working_dir")
+        working_dir = (
+            Path(os.path.expandvars(os.path.expanduser(str(working_dir_value))))
+            if working_dir_value else executable.parent
+        )
+        if not working_dir.is_dir():
+            messagebox.showerror("Working directory not found", f"The configured working directory for '{app_name}' does not exist:\n\n{working_dir}")
+            return
+
+        command = [str(executable), *args]
+        try:
+            subprocess.Popen(command, cwd=str(working_dir))
+        except OSError as e:
+            messagebox.showerror(
+                "Launch failed",
+                f"Windows couldn't launch '{app_name}'.\n\n"
+                f"Executable: {executable}\nArguments: {' '.join(args) or '(none)'}\n"
+                f"Working directory: {working_dir}\n\n{e}",
+            )
+
+    def _windows_app_open_or_copy(self) -> None:
+        selected = self.windows_apps_tree.selection()
+        if not selected:
+            messagebox.showinfo("Nothing selected", "Select a Windows app first.")
+            return
+        if len(selected) != 1:
+            messagebox.showinfo("Select one", "Select one Windows app first.")
+            return
+
+        name = selected[0]
+        entry = self._load_windows_apps().get(name)
+        if not isinstance(entry, dict):
+            return
+        if str(entry.get("type", "executable")).lower() == "uri":
+            uri = str(entry.get("uri", "")).strip()
+            if not uri:
+                messagebox.showerror("No URI", f"'{name}' has no URI configured.")
+                return
+            self.clipboard_clear()
+            self.clipboard_append(uri)
+            self.update()
+            messagebox.showinfo("URI copied", f"Copied to clipboard:\n\n{uri}")
+            return
+
+        exe = Path(os.path.expandvars(os.path.expanduser(str(entry.get("exe", "")))))
+        if not exe.is_file():
+            messagebox.showerror("Executable not found", f"The configured executable does not exist:\n\n{exe}")
+            return
+        try:
+            subprocess.Popen(["explorer.exe", "/select,", str(exe)])
+        except OSError as e:
+            messagebox.showerror("Couldn't open location", str(e))
+
+    def _repair_windows_apps(self) -> None:
+        windows_dir = self._windows_rom_dir()
+        if windows_dir is None:
+            return
+        try:
+            windows_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            messagebox.showerror("Windows Apps", f"Couldn't create the Windows ROM folder:\n\n{e}")
+            return
+
+        apps = self._load_windows_apps()
+        mapped = {name.casefold(): name for name in apps}
+        try:
+            placeholders = {p.stem.casefold(): p for p in windows_dir.glob("*.pcgame") if p.is_file()}
+        except OSError as e:
+            messagebox.showerror("Windows Apps", f"Couldn't scan placeholders:\n\n{e}")
+            return
+
+        missing = [name for key, name in mapped.items() if key not in placeholders]
+        orphans = [path for key, path in placeholders.items() if key not in mapped]
+
+        created = []
+        failed = []
+        for name in missing:
+            try:
+                (windows_dir / f"{name}.pcgame").touch(exist_ok=True)
+                created.append(name)
+            except OSError as e:
+                failed.append(f"{name}: {e}")
+
+        self._refresh_windows_apps_tree()
+
+        summary = []
+        if created:
+            summary.append(f"Recreated {len(created)} missing placeholder(s):\n  " + "\n  ".join(created))
+        if orphans:
+            summary.append(f"Found {len(orphans)} unconfigured placeholder(s):\n  " + "\n  ".join(p.name for p in orphans))
+        if failed:
+            summary.append("Could not repair:\n  " + "\n  ".join(failed))
+        if not summary:
+            messagebox.showinfo("Windows Apps", "Everything is already in sync. No repairs were needed.")
+            return
+
+        if orphans and messagebox.askyesno(
+            "Windows Apps — Sync / Repair",
+            "\n\n".join(summary) + "\n\nWould you like to configure the unconfigured placeholders now?",
+        ):
+            apps = self._load_windows_apps()
+            for orphan in orphans:
+                original_name = orphan.stem
+                result = self._windows_app_dialog("Configure Existing Placeholder", original_name)
+                if not result:
+                    continue
+                new_name, entry = result
+                if any(existing.casefold() == new_name.casefold() for existing in apps):
+                    messagebox.showerror("Duplicate", f"A Windows app named '{new_name}' already exists.")
+                    continue
+                new_stub = windows_dir / f"{new_name}.pcgame"
+                try:
+                    if orphan != new_stub:
+                        orphan.rename(new_stub)
+                except OSError as e:
+                    messagebox.showerror("Windows Apps", f"Couldn't rename the placeholder:\n\n{e}")
+                    continue
+                apps[new_name] = entry
+            if self._save_windows_apps(apps):
+                self._refresh_windows_apps_tree()
+        else:
+            messagebox.showinfo("Windows Apps — Sync / Repair", "\n\n".join(summary))
+
+    def _open_windows_roms(self) -> None:
+        windows_dir = self._windows_rom_dir()
+        if windows_dir is None:
+            return
+        try:
+            windows_dir.mkdir(parents=True, exist_ok=True)
+            os.startfile(windows_dir)
+        except OSError as e:
+            messagebox.showerror("Windows Apps", str(e))
+
 
     def _build_display_page(self) -> None:
         frame = self.pages["display"]
