@@ -18,6 +18,7 @@ approach create_shortcut.py already takes for iiSU's own icon.
 """
 
 import json
+import math
 import urllib.request
 import hashlib
 import shutil
@@ -164,6 +165,7 @@ from bridge_config import CONFIG_PATH, load_config
 from console_names import load_console_lookup, resolve_console_shortname
 from emulator_dialogs import EmulatorDialog, RedirectorInstallDialog
 from launch_bridge import find_emulator_for_package, find_executable, find_rom
+from controller_bridge import BUTTON_DISPLAY_NAMES, BUTTON_NAME_TO_BIT, DEFAULT_QUIT_CHORD
 
 import start_iisu_pc
 import stop_iisu_pc
@@ -210,23 +212,58 @@ MODIFIER_NAMES = ["ctrl", "alt", "shift", "win"]
 
 STATUS_POLL_INTERVAL_MS = 2000
 
+# Segoe Fluent Icons/MDL2 Assets codepoints -- an outlined icon font that
+# ships with every Windows 10/11 install (this project's only supported
+# OS), so it needs no bundled asset, unlike Google's own Material Symbols
+# font. Same visual language (flat, single-color, outlined) as Material
+# UI icons, without adding a new font file to the repo.
 NAV_ITEMS = [
-    ("home", "\U0001F3E0", "Home"),
-    ("roms", "\U0001F4C1", "ROM Directory"),
-    ("emulators", "\U0001F3AE", "Emulators"),
-    ("windows_apps", "\U0001FA9F", "Windows Apps"),
-    ("media_library", "\U0001F5BC", "Media Library"),
-    ("android_storage", "\U0001F4F1", "Android Storage"),
-    ("display", "\U0001F5A5", "Display"),
-    ("backup_restore", "\U0001F4BE", "Backup & Restore"),
-    ("advanced", "⚙", "Advanced"),
-    ("diagnostics", "\U0001F50D", "Diagnostics"),
-    ("credits", "❤", "Credits"),
+    ("home", "", "Home"),
+    ("library", "", "Library"),
+    ("emulators", "", "Emulators"),
+    ("settings", "", "Settings"),
+    ("backup_diagnostics", "", "Backup & Diagnostics"),
+    ("credits", "", "Credits"),
 ]
 DANGER_NAV_ITEMS = [
-    ("uninstall", "\U0001F5D1", "Uninstall"),
+    ("uninstall", "", "Uninstall"),
 ]
-SETTINGS_PAGES = {"roms", "emulators", "display", "advanced"}
+
+# Groups that fan out into a segmented sub-nav (a row of pill buttons at
+# the top of the page) instead of being a single flat sidebar entry --
+# this is what actually shrank the sidebar from 11 items to 7. Each
+# (key, label) pair's key is the existing self.subpages/self.pages key
+# the page was already built under; only the sidebar entry pointing at
+# it changed, not the page's own internals.
+NAV_GROUPS: dict[str, list[tuple[str, str]]] = {
+    "library": [
+        ("roms", "ROM Directory"),
+        ("media_library", "Media Library"),
+        ("android_storage", "Android Storage"),
+    ],
+    "emulators": [
+        ("emulators", "PC Emulators"),
+        ("windows_apps", "Windows Apps"),
+    ],
+    "settings": [
+        ("settings", "Display"),
+        ("advanced", "Advanced"),
+    ],
+    "backup_diagnostics": [
+        ("backup_restore", "Backup & Restore"),
+        ("diagnostics", "Diagnostics"),
+    ],
+}
+
+# Top-level nav entries that need a real install before they're useful --
+# everything except Home and Credits, which either doesn't need config.json
+# at all or is static text. Uninstall is deliberately never locked: it
+# should stay reachable even against a partial/broken install.
+LOCKED_NAV = {"library", "emulators", "settings", "backup_diagnostics"}
+
+# Pages (top-level keys or sub-page keys, whichever is actually shown) that
+# use the shared bottom Save bar to commit straight to config.json.
+SAVE_BAR_PAGES = {"roms", "emulators", "settings", "advanced"}
 
 SIDEBAR_WIDTH_EXPANDED = 200
 SIDEBAR_WIDTH_COLLAPSED = 56
@@ -251,6 +288,39 @@ class StatusDot(tk.Canvas):
         self.create_oval(pad, pad, self.size - pad, self.size - pad, fill=color, outline="")
 
 
+class _Tooltip:
+    """A small borderless popup that appears near the cursor on hover and
+    disappears on leave -- Tk has no built-in tooltip widget. retarget()
+    lets the caller swap which widget triggers it after the fact (the
+    contributors row starts with a placeholder circle and replaces it
+    with a real avatar image once one loads asynchronously)."""
+
+    def __init__(self, widget: tk.Widget, text: str):
+        self._text = text
+        self._popup: tk.Toplevel | None = None
+        self.retarget(widget)
+
+    def retarget(self, widget: tk.Widget) -> None:
+        widget.bind("<Enter>", self._show, add="+")
+        widget.bind("<Leave>", self._hide, add="+")
+
+    def _show(self, event: tk.Event) -> None:
+        if self._popup is not None:
+            return
+        self._popup = tk.Toplevel(event.widget)
+        self._popup.wm_overrideredirect(True)
+        self._popup.wm_geometry(f"+{event.widget.winfo_rootx() + 20}+{event.widget.winfo_rooty() + event.widget.winfo_height() + 6}")
+        tk.Label(
+            self._popup, text=self._text, bg="#0e0e10", fg=TEXT, font=FONT_BODY,
+            justify="left", padx=10, pady=6, relief="solid", borderwidth=1,
+        ).pack()
+
+    def _hide(self, _event: tk.Event) -> None:
+        if self._popup is not None:
+            self._popup.destroy()
+            self._popup = None
+
+
 class Manager(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -258,6 +328,7 @@ class Manager(tk.Tk):
         self.geometry("1000x700")
         self.minsize(880, 620)
         self.configure(bg=BG)
+        self._apply_window_icon()
 
         self.config_data: dict = {}
         self.configured = False
@@ -276,6 +347,11 @@ class Manager(tk.Tk):
         self._uninstall_targets_cache: list[Path] = []
         self.nav_buttons: dict[str, tk.Label] = {}
         self.pages: dict[str, tk.Frame] = {}
+        self.subpages: dict[str, tk.Frame] = {}
+        self.subnav_buttons: dict[str, dict[str, tk.Label]] = {}
+        self.group_current_sub: dict[str, str] = {}
+        self.current_subpage: str | None = None
+        self.settings_dirty = False
 
         self._configure_style()
         self._reload_config()
@@ -286,8 +362,25 @@ class Manager(tk.Tk):
         self.after(100, self._poll_log_queue)
         self.after(100, self._poll_uninstall_log_queue)
         self.after(200, self._poll_status)
+        self.after(500, self._poll_settings_dirty)
 
     # -- Style -------------------------------------------------
+
+    def _apply_window_icon(self) -> None:
+        """Same icon create_shortcut.py uses for the desktop shortcut --
+        iiSU's own launcher icon if it's already been extracted from your
+        APK (see create_shortcut.extract_iisu_icon), otherwise the bundled
+        generic one. iconbitmap() sets both the window's titlebar icon and
+        its taskbar icon on Windows in one call -- there's no separate API
+        for the two. Best-effort: a missing/corrupt .ico shouldn't stop
+        the app from opening, just leave it on Tk's default icon."""
+        import create_shortcut
+
+        icon_path = create_shortcut.EXTRACTED_ICON_PATH if create_shortcut.EXTRACTED_ICON_PATH.is_file() else create_shortcut.FALLBACK_ICON_PATH
+        try:
+            self.iconbitmap(str(icon_path))
+        except tk.TclError:
+            pass
 
     def _configure_style(self) -> None:
         theme.apply_ttk_styles(ttk.Style(self))
@@ -336,6 +429,21 @@ class Manager(tk.Tk):
         content_col = tk.Frame(root_row, bg=BG)
         content_col.pack(side="left", fill="both", expand=True)
 
+        # Packed BEFORE page_container (side="bottom") and never unpacked --
+        # see _update_save_bar for why. Tk's packer gives space to slaves in
+        # the order they were *packed*, not by side: if this were packed
+        # afterward instead (e.g. inside _update_save_bar, on demand), a
+        # tall page's content packed first with expand=True would already
+        # own the whole cavity, leaving this zero room and no visible sign
+        # it exists at all -- exactly the "I don't see a Save button
+        # anywhere" bug this fixes. Visibility is toggled by packing/
+        # unpacking its CHILDREN instead, which doesn't change this frame's
+        # own position in that priority order.
+        self.save_bar = tk.Frame(content_col, bg=BG)
+        self.save_bar.pack(side="bottom", fill="x")
+        self.save_button = ttk.Button(self.save_bar, text="Save", style="Accent.TButton", command=self._save_settings)
+        self.save_status_label = tk.Label(self.save_bar, text="", bg=BG, fg=GREEN, font=FONT_BODY)
+
         self.page_container = tk.Frame(content_col, bg=BG)
         self.page_container.pack(side="top", fill="both", expand=True)
         self.page_container.grid_rowconfigure(0, weight=1)
@@ -345,12 +453,8 @@ class Manager(tk.Tk):
             page = tk.Frame(self.page_container, bg=BG)
             page.grid(row=0, column=0, sticky="nsew")
             self.pages[key] = page
-
-        self.save_bar = tk.Frame(content_col, bg=BG)
-        self.save_button = ttk.Button(self.save_bar, text="Save", style="Accent.TButton", command=self._save_settings)
-        self.save_button.pack(side="right", padx=24, pady=14)
-        self.save_status_label = tk.Label(self.save_bar, text="", bg=BG, fg=GREEN, font=FONT_BODY)
-        self.save_status_label.pack(side="left", padx=24, pady=14)
+            if key in NAV_GROUPS:
+                self._build_group_shell(key)
 
         self._build_home_page()
         self._build_settings_pages()
@@ -395,6 +499,37 @@ class Manager(tk.Tk):
         btn.bind("<Leave>", lambda e, b=btn, k=key: b.config(bg=PANEL_BG_HOVER if self.current_page == k else PANEL_BG))
         self.nav_buttons[key] = btn
 
+    def _build_group_shell(self, group_key: str) -> None:
+        """Builds the segmented sub-nav (a row of pill buttons) plus the
+        stacked sub-page frames for a grouped tab -- e.g. Library fans out
+        into ROM Directory/Media Library/Android Storage. Each sub-page's
+        own _build_*_page method is unchanged; only which dict it's built
+        into moved (self.pages -> self.subpages)."""
+        shell = self.pages[group_key]
+        subnav = tk.Frame(shell, bg=BG)
+        subnav.pack(side="top", fill="x", padx=24, pady=(16, 0))
+        self.subnav_buttons[group_key] = {}
+        for sub_key, label in NAV_GROUPS[group_key]:
+            btn = tk.Label(
+                subnav, text=label, font=FONT_BODY, bg=PANEL_BG, fg=TEXT,
+                padx=14, pady=6, cursor="hand2",
+            )
+            btn.pack(side="left", padx=(0, 6))
+            btn.bind("<Button-1>", lambda e, gk=group_key, sk=sub_key: self._on_subnav_click(gk, sk))
+            self.subnav_buttons[group_key][sub_key] = btn
+
+        divider = tk.Frame(shell, bg=PANEL_BG_HOVER, height=1)
+        divider.pack(side="top", fill="x", padx=24, pady=(10, 0))
+
+        sub_container = tk.Frame(shell, bg=BG)
+        sub_container.pack(side="top", fill="both", expand=True)
+        sub_container.grid_rowconfigure(0, weight=1)
+        sub_container.grid_columnconfigure(0, weight=1)
+        for sub_key, _label in NAV_GROUPS[group_key]:
+            frame = tk.Frame(sub_container, bg=BG)
+            frame.grid(row=0, column=0, sticky="nsew")
+            self.subpages[sub_key] = frame
+
     def _toggle_sidebar(self) -> None:
         self.sidebar_expanded = not self.sidebar_expanded
         self.sidebar.config(width=SIDEBAR_WIDTH_EXPANDED if self.sidebar_expanded else SIDEBAR_WIDTH_COLLAPSED)
@@ -403,7 +538,11 @@ class Manager(tk.Tk):
             self.nav_buttons[key].config(text=f"{icon}  {label}" if self.sidebar_expanded else icon)
 
     def _on_nav_click(self, key: str) -> None:
-        if key in SETTINGS_PAGES:
+        if key == self.current_page:
+            return
+        if not self._confirm_leave_unsaved_settings():
+            return
+        if key in LOCKED_NAV:
             if not self.configured:
                 return
             if self._config_changed_on_disk():
@@ -411,8 +550,18 @@ class Manager(tk.Tk):
                 self._build_settings_pages()
         self._show_page(key)
 
+    def _on_subnav_click(self, group_key: str, sub_key: str) -> None:
+        if group_key == self.current_page and sub_key == self.current_subpage:
+            return
+        if not self._confirm_leave_unsaved_settings():
+            return
+        if group_key in LOCKED_NAV and self._config_changed_on_disk():
+            self._reload_config()
+            self._build_settings_pages()
+        self._show_subpage(group_key, sub_key)
+
     def _refresh_nav_enabled(self) -> None:
-        for key in SETTINGS_PAGES:
+        for key in LOCKED_NAV:
             btn = self.nav_buttons[key]
             btn.config(fg=TEXT if self.configured else TEXT_DIM, cursor="hand2" if self.configured else "arrow")
 
@@ -421,10 +570,32 @@ class Manager(tk.Tk):
         for k, btn in self.nav_buttons.items():
             btn.config(bg=PANEL_BG_HOVER if k == key else PANEL_BG)
         self.pages[key].tkraise()
-        if key in SETTINGS_PAGES:
-            self.save_bar.pack(side="bottom", fill="x")
+        if key in NAV_GROUPS:
+            sub_key = self.group_current_sub.get(key, NAV_GROUPS[key][0][0])
+            self._show_subpage(key, sub_key)
         else:
-            self.save_bar.pack_forget()
+            self.current_subpage = None
+            self._update_save_bar(key)
+            self._trigger_page_side_effects(key)
+
+    def _show_subpage(self, group_key: str, sub_key: str) -> None:
+        self.current_subpage = sub_key
+        self.group_current_sub[group_key] = sub_key
+        for k, btn in self.subnav_buttons[group_key].items():
+            btn.config(bg=PANEL_BG_HOVER if k == sub_key else PANEL_BG)
+        self.subpages[sub_key].tkraise()
+        self._update_save_bar(sub_key)
+        self._trigger_page_side_effects(sub_key)
+
+    def _update_save_bar(self, key: str) -> None:
+        if key in SAVE_BAR_PAGES:
+            self.save_button.pack(side="right", padx=24, pady=14)
+            self.save_status_label.pack(side="left", padx=24, pady=14)
+        else:
+            self.save_button.pack_forget()
+            self.save_status_label.pack_forget()
+
+    def _trigger_page_side_effects(self, key: str) -> None:
         if key == "uninstall":
             self._refresh_uninstall_preview()
         elif key == "android_storage":
@@ -476,6 +647,8 @@ class Manager(tk.Tk):
         self.roms_folder_button.pack(side="left", padx=(10, 0))
         self.logs_button = ttk.Button(self.button_row, text="Logs", style="Ghost.TButton", command=self._open_logs)
         self.logs_button.pack(side="left", padx=(10, 0))
+        self.shortcut_button = ttk.Button(self.button_row, text="Recreate Shortcut", style="Ghost.TButton", command=self._recreate_desktop_shortcut)
+        self.shortcut_button.pack(side="left", padx=(10, 0))
         self.progress = ttk.Progressbar(self.button_row, mode="indeterminate", style="Dark.Horizontal.TProgressbar")
         self.progress.pack(side="left", fill="x", expand=True, padx=(16, 0))
 
@@ -596,7 +769,7 @@ class Manager(tk.Tk):
             return
         roms_dir = Path(self.config_data.get("roms_dir", ""))
         if not roms_dir.is_dir():
-            messagebox.showerror("Can't open ROMs folder", f"{roms_dir} doesn't exist yet -- set it up in ROM Directory first.")
+            messagebox.showerror("Can't open ROMs folder", f"{roms_dir} doesn't exist yet. Set it up in ROM Directory first.")
             return
         os.startfile(roms_dir)
 
@@ -607,6 +780,34 @@ class Manager(tk.Tk):
         # those processes get a visible console of their own to check
         # instead.
         os.startfile(BRIDGE_DIR)
+
+    def _recreate_desktop_shortcut(self) -> None:
+        """Re-runs the same shortcut creation Setup does on first install --
+        useful after deleting it by accident, or after re-patching a new
+        iiSU APK (extract_iisu_icon() re-extracts its icon automatically
+        when the APK is newer than the cached one). Threaded since a fresh
+        icon extraction shells out to apktool and can take a few seconds;
+        the button stays disabled meanwhile so a second click can't start
+        a race against the first."""
+        self.shortcut_button.config(state="disabled", text="Creating...")
+
+        def worker() -> None:
+            import create_shortcut
+
+            try:
+                path = create_shortcut.create_desktop_shortcut()
+                self.after(0, lambda: self._on_shortcut_recreated(path, None))
+            except Exception as e:  # noqa: BLE001 -- reported to the user either way
+                self.after(0, lambda: self._on_shortcut_recreated(None, str(e)))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_shortcut_recreated(self, path: Path | None, error: str | None) -> None:
+        self.shortcut_button.config(state="normal", text="Recreate Shortcut")
+        if error:
+            messagebox.showerror("Shortcut", f"Couldn't create the desktop shortcut:\n{error}")
+        else:
+            messagebox.showinfo("Shortcut", f"Desktop shortcut created:\n{path}")
 
     def _on_close(self) -> None:
         if self._last_avd_up or self._last_bridge_up:
@@ -727,7 +928,7 @@ class Manager(tk.Tk):
             child.destroy()
 
     def _build_roms_page(self) -> None:
-        frame = self.pages["roms"]
+        frame = self.subpages["roms"]
         self._clear(frame)
         self._page_header(frame, "ROM Directory", "Where your games live, and where Community-iiSU-PC looks for your PC emulators.")
 
@@ -802,32 +1003,40 @@ class Manager(tk.Tk):
             self.search_roots_list.delete(index)
 
     def _build_emulators_page(self) -> None:
-        frame = self.pages["emulators"]
+        frame = self.subpages["emulators"]
         self._clear(frame)
         self._page_header(frame, "Emulators", "Maps the Android package name iiSU tries to launch to a real PC emulator.")
 
         columns = ("prefix", "exe_names", "pre_args")
-        self.emulators_tree = ttk.Treeview(frame, columns=columns, show="headings", height=12)
+        tree_container = tk.Frame(frame, bg=BG)
+        tree_container.pack(fill="both", expand=True, padx=24, pady=(12, 4))
+        self.emulators_tree = ttk.Treeview(tree_container, columns=columns, show="headings", height=12)
         self.emulators_tree.heading("prefix", text="Package prefix")
         self.emulators_tree.heading("exe_names", text="Executable name(s)")
         self.emulators_tree.heading("pre_args", text="Launch flags")
         self.emulators_tree.column("prefix", width=230)
         self.emulators_tree.column("exe_names", width=210)
         self.emulators_tree.column("pre_args", width=150)
-        self.emulators_tree.pack(fill="both", expand=True, padx=24, pady=(12, 4))
+        emulators_hscroll = ttk.Scrollbar(tree_container, orient="horizontal", command=self.emulators_tree.xview)
+        self.emulators_tree.configure(xscrollcommand=emulators_hscroll.set)
+        self.emulators_tree.pack(side="top", fill="both", expand=True)
+        emulators_hscroll.pack(side="bottom", fill="x")
 
         for prefix, profile in self.config_data.get("emulators", {}).items():
             exe_display, pre_args_display = describe_profile(profile)
             self.emulators_tree.insert("", "end", iid=prefix, values=(prefix, exe_display, pre_args_display))
 
         btn_row = tk.Frame(frame, bg=BG)
-        btn_row.pack(fill="x", padx=24, pady=(0, 16))
+        btn_row.pack(fill="x", padx=24, pady=(0, 4))
         ttk.Button(btn_row, text="Add...", style="Ghost.TButton", command=self._add_emulator).pack(side="left")
         ttk.Button(btn_row, text="Edit selected...", style="Ghost.TButton", command=self._edit_emulator).pack(side="left", padx=(8, 0))
         ttk.Button(btn_row, text="Remove selected", style="Ghost.TButton", command=self._remove_emulator).pack(side="left", padx=(8, 0))
         ttk.Button(btn_row, text="Test selected...", style="Ghost.TButton", command=self._test_emulator_mapping).pack(side="left", padx=(8, 0))
-        ttk.Button(btn_row, text="Install Redirector Apps...", style="Ghost.TButton", command=lambda: RedirectorInstallDialog(self)).pack(side="left", padx=(8, 0))
-        ttk.Button(btn_row, text="Restore Defaults", style="Ghost.TButton", command=self._restore_default_emulators).pack(side="left", padx=(8, 0))
+
+        btn_row2 = tk.Frame(frame, bg=BG)
+        btn_row2.pack(fill="x", padx=24, pady=(0, 16))
+        ttk.Button(btn_row2, text="Install Redirector Apps...", style="Ghost.TButton", command=lambda: RedirectorInstallDialog(self)).pack(side="left")
+        ttk.Button(btn_row2, text="Restore Defaults", style="Ghost.TButton", command=self._restore_default_emulators).pack(side="left", padx=(8, 0))
 
     def _restore_default_emulators(self) -> None:
         if not messagebox.askyesno(
@@ -884,7 +1093,7 @@ class Manager(tk.Tk):
         prefix = selected[0]
         profile = self.config_data.get("emulators", {}).get(prefix)
         if profile is None:
-            messagebox.showerror("Can't test", "This mapping hasn't been saved yet -- click Save first, then try again.")
+            messagebox.showerror("Can't test", "This mapping hasn't been saved yet. Click Save first, then try again.")
             return
 
         rom_filename = None
@@ -993,7 +1202,7 @@ class Manager(tk.Tk):
 
 
     def _build_diagnostics_page(self) -> None:
-        frame = self.pages["diagnostics"]
+        frame = self.subpages["diagnostics"]
         self._clear(frame)
         self._page_header(
             frame,
@@ -1003,15 +1212,15 @@ class Manager(tk.Tk):
 
         toolbar = tk.Frame(frame, bg=BG)
         toolbar.pack(fill="x", padx=24, pady=(0, 10))
-        tk.Button(
-            toolbar, text="Run Diagnostics", command=self._run_diagnostics
+        ttk.Button(
+            toolbar, text="Run Diagnostics", style="Accent.TButton", command=self._run_diagnostics
         ).pack(side="left")
-        tk.Button(
-            toolbar, text="Open Manager Log",
+        ttk.Button(
+            toolbar, text="Open Manager Log", style="Ghost.TButton",
             command=lambda: self._diagnostics_open_path(MANAGER_LOG_PATH)
         ).pack(side="left", padx=(8, 0))
-        tk.Button(
-            toolbar, text="Open Bridge Log",
+        ttk.Button(
+            toolbar, text="Open Bridge Log", style="Ghost.TButton",
             command=lambda: self._diagnostics_open_path(BRIDGE_DIR / "bridge_debug.log")
         ).pack(side="left", padx=(8, 0))
 
@@ -1029,17 +1238,11 @@ class Manager(tk.Tk):
         self.auto_updates_var = tk.BooleanVar(
             value=bool(self.config_data.get("auto_updates", False))
         )
-        tk.Checkbutton(
+        ttk.Checkbutton(
             update_top,
             text="Automatically apply updates on startup",
             variable=self.auto_updates_var,
             command=self._diagnostics_set_auto_updates,
-            bg=PANEL_BG,
-            fg=TEXT,
-            selectcolor=BG,
-            activebackground=PANEL_BG,
-            activeforeground=TEXT,
-            font=FONT_BODY,
         ).pack(side="right")
 
         tk.Label(
@@ -1049,14 +1252,15 @@ class Manager(tk.Tk):
                 "fast-forward a Git checkout or apply a newer release over tracked project files."
             ),
             bg=PANEL_BG, fg=TEXT_DIM, font=FONT_BODY, anchor="w", justify="left",
-            wraplength=880,
+            wraplength=620,
         ).pack(fill="x", padx=14, pady=(0, 8))
 
         update_actions = tk.Frame(update_frame, bg=PANEL_BG)
         update_actions.pack(fill="x", padx=14, pady=(0, 12))
-        tk.Button(
+        ttk.Button(
             update_actions,
             text="Check for Updates Now",
+            style="Ghost.TButton",
             command=self._diagnostics_check_for_updates_now,
         ).pack(side="left")
 
@@ -1395,7 +1599,7 @@ class Manager(tk.Tk):
         return candidates
 
     def _build_backup_restore_page(self) -> None:
-        frame = self.pages["backup_restore"]
+        frame = self.subpages["backup_restore"]
         self._clear(frame)
         self._page_header(
             frame,
@@ -1418,16 +1622,16 @@ class Manager(tk.Tk):
                 "and Steam game files are intentionally excluded."
             ),
             bg=PANEL_BG, fg=TEXT_DIM, font=FONT_BODY,
-            justify="left", wraplength=760, anchor="w",
+            justify="left", wraplength=620, anchor="w",
         ).pack(fill="x", pady=(6, 14))
 
         button_row = tk.Frame(card, bg=PANEL_BG)
         button_row.pack(fill="x")
-        tk.Button(
-            button_row, text="Create Backup...", command=self._create_manager_backup
+        ttk.Button(
+            button_row, text="Create Backup...", style="Accent.TButton", command=self._create_manager_backup
         ).pack(side="left", padx=(0, 8))
-        tk.Button(
-            button_row, text="Restore Backup...", command=self._restore_manager_backup
+        ttk.Button(
+            button_row, text="Restore Backup...", style="Ghost.TButton", command=self._restore_manager_backup
         ).pack(side="left")
 
         self.backup_restore_status_var = tk.StringVar(
@@ -1436,7 +1640,7 @@ class Manager(tk.Tk):
         tk.Label(
             frame, textvariable=self.backup_restore_status_var,
             bg=BG, fg=TEXT_DIM, font=FONT_BODY,
-            justify="left", wraplength=800, anchor="w",
+            justify="left", wraplength=620, anchor="w",
         ).pack(fill="x", padx=24, pady=(4, 0))
 
     def _create_manager_backup(self) -> None:
@@ -1590,7 +1794,7 @@ class Manager(tk.Tk):
             messagebox.showerror("Backup & Restore", f"Restore failed:\n{exc}")
 
     def _build_android_storage_page(self) -> None:
-        frame = self.pages["android_storage"]
+        frame = self.subpages["android_storage"]
         self._clear(frame)
         self._page_header(
             frame,
@@ -1633,7 +1837,7 @@ class Manager(tk.Tk):
         tk.Label(
             frame,
             text="Tip: use Upload File / Upload Folder below. Drag-and-drop will be added with a safer backend.",
-            bg=BG, fg=TEXT_DIM, font=FONT_BODY, anchor="w",
+            bg=BG, fg=TEXT_DIM, font=FONT_BODY, anchor="w", justify="left", wraplength=620,
         ).pack(fill="x", padx=24, pady=(0, 8))
 
         buttons = tk.Frame(frame, bg=BG)
@@ -2215,7 +2419,7 @@ class Manager(tk.Tk):
         return "REMOTE_CHANGED", remote_hash or "Different file"
 
     def _build_media_library_page(self) -> None:
-        frame = self.pages["media_library"]
+        frame = self.subpages["media_library"]
         self._clear(frame)
         self._page_header(frame, "Media Library", "Durable iiDB artwork history and one-click recovery after iiSU rescans.")
         connection_row = tk.Frame(frame, bg=BG)
@@ -2234,7 +2438,7 @@ class Manager(tk.Tk):
                  font=FONT_HEADING, anchor="w").pack(fill="x")
         self.media_library_detail_var = tk.StringVar(value="")
         tk.Label(inner, textvariable=self.media_library_detail_var, bg=PANEL_BG, fg=TEXT_DIM,
-                 font=FONT_BODY, anchor="w", justify="left", wraplength=800).pack(fill="x", pady=(5, 0))
+                 font=FONT_BODY, anchor="w", justify="left", wraplength=620).pack(fill="x", pady=(5, 0))
         row = tk.Frame(frame, bg=BG)
         row.pack(fill="x", padx=24, pady=(0, 10))
         ttk.Button(row, text="Check iiSU Media", style="Ghost.TButton", command=self._media_library_check).pack(side="left")
@@ -2828,7 +3032,7 @@ class Manager(tk.Tk):
             except OSError: pass
         self._media_library_populate_tree(rows, checked=False)
         self.media_library_summary_var.set(f"{games} game{'s' if games != 1 else ''} • {len(rows)} saved asset{'s' if len(rows) != 1 else ''} • {total_bytes / (1024*1024):.1f} MB")
-        self.media_library_detail_var.set(f"Registry: {IIDB_REGISTRY_PATH}\nLibrary: {IIDB_LIBRARY_DIR}")
+        self.media_library_detail_var.set("Stored locally -- use “Open Local Library” below to browse the actual folder.")
 
     def _media_library_open(self) -> None:
         IIDB_LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
@@ -3125,7 +3329,7 @@ class Manager(tk.Tk):
     def _iidb_refresh_cart_button(self):
         asset=getattr(self,"_iidb_selected_asset",None)
         if not asset:return
-        self.iidb_cart_asset_var.set("✓ In Cart — Remove" if self._iidb_cart_key(asset) in self._iidb_cart else "Add to Cart")
+        self.iidb_cart_asset_var.set("✓ In Cart (Remove)" if self._iidb_cart_key(asset) in self._iidb_cart else "Add to Cart")
 
     def _iidb_toggle_selected_cart(self):
         asset=getattr(self,"_iidb_selected_asset",None);game=getattr(self,"_iidb_current_game",None)
@@ -3266,7 +3470,7 @@ class Manager(tk.Tk):
         summary=[]
         for p in plan:
             a=p["item"]["asset"]
-            summary.append(f"• {p['target']['display_name']} — {self._iidb_type_label(a.get('type',''))} → {p['logical_type']} slot {p['slot']}")
+            summary.append(f"• {p['target']['display_name']}: {self._iidb_type_label(a.get('type',''))} → {p['logical_type']} slot {p['slot']}")
         if not messagebox.askyesno("Install iiDB Media", "Install these iiDB originals into iiSU?\n\n"+"\n".join(summary)+"\n\nThe originals will also be saved permanently in the iiDB Media Library for recovery.", parent=cart_window or self._iidb_browser_window):
             return
         self.iidb_status_var.set(f"Installing {len(plan)} iiDB asset{'s' if len(plan)!=1 else ''}…")
@@ -4388,7 +4592,7 @@ class Manager(tk.Tk):
         ).pack(side="right")
 
     def _build_windows_apps_page(self) -> None:
-        frame = self.pages["windows_apps"]
+        frame = self.subpages["windows_apps"]
         self._clear(frame)
         self._page_header(
             frame, "Windows Apps",
@@ -4444,7 +4648,11 @@ class Manager(tk.Tk):
         self.windows_apps_search_var.trace_add("write", self._refresh_windows_apps_tree)
 
         columns = ("name", "type", "target", "args", "status", "added")
-        self.windows_apps_tree = ttk.Treeview(frame, columns=columns, show="tree headings", height=12, selectmode="extended")
+        windows_apps_tree_container = tk.Frame(frame, bg=BG)
+        windows_apps_tree_container.pack(fill="both", expand=True, padx=24, pady=(4, 4))
+        self.windows_apps_tree = ttk.Treeview(
+            windows_apps_tree_container, columns=columns, show="tree headings", height=12, selectmode="extended"
+        )
         self.windows_apps_tree.heading("#0", text="Art")
         for col, label in (
             ("name", "Name"), ("type", "Launch type"), ("target", "Executable / URI"),
@@ -4459,7 +4667,12 @@ class Manager(tk.Tk):
         self.windows_apps_tree.column("args", width=105)
         self.windows_apps_tree.column("status", width=130)
         self.windows_apps_tree.column("added", width=90)
-        self.windows_apps_tree.pack(fill="both", expand=True, padx=24, pady=(4, 4))
+        windows_apps_hscroll = ttk.Scrollbar(
+            windows_apps_tree_container, orient="horizontal", command=self.windows_apps_tree.xview
+        )
+        self.windows_apps_tree.configure(xscrollcommand=windows_apps_hscroll.set)
+        self.windows_apps_tree.pack(side="top", fill="both", expand=True)
+        windows_apps_hscroll.pack(side="bottom", fill="x")
         self.windows_apps_tree.bind("<Double-1>", lambda _e: self._edit_windows_app())
         self.windows_apps_tree.bind("<Button-3>", self._show_windows_apps_context_menu)
 
@@ -4484,7 +4697,7 @@ class Manager(tk.Tk):
             frame,
             text="Steam import reads your installed Steam libraries locally. Steam artwork shown here is Manager-only; "
                  "iiSU's own SteamGridDB artwork workflow is untouched.",
-            bg=BG, fg=TEXT_DIM, font=FONT_BODY, justify="left", wraplength=850,
+            bg=BG, fg=TEXT_DIM, font=FONT_BODY, justify="left", wraplength=620,
         ).pack(anchor="w", padx=24, pady=(0, 12))
         self._refresh_windows_apps_tree()
 
@@ -4803,7 +5016,7 @@ class Manager(tk.Tk):
                                 status_var.set("No matching Steam games found.")
                                 return
 
-                            status_var.set(f"{len(normalized)} result(s) — select or double-click a game.")
+                            status_var.set(f"{len(normalized)} result(s); select or double-click a game.")
                             for index, item in enumerate(normalized):
                                 iid = f"steam_{generation}_{index}"
                                 results.insert(
@@ -5206,7 +5419,7 @@ class Manager(tk.Tk):
             return
 
         if orphans and messagebox.askyesno(
-            "Windows Apps — Sync / Repair",
+            "Windows Apps: Sync / Repair",
             "\n\n".join(summary) + "\n\nWould you like to configure the unconfigured placeholders now?",
         ):
             apps = self._load_windows_apps()
@@ -5230,7 +5443,7 @@ class Manager(tk.Tk):
             if self._save_windows_apps(apps):
                 self._refresh_windows_apps_tree()
         else:
-            messagebox.showinfo("Windows Apps — Sync / Repair", "\n\n".join(summary))
+            messagebox.showinfo("Windows Apps: Sync / Repair", "\n\n".join(summary))
 
     def _open_windows_roms(self) -> None:
         windows_dir = self._windows_rom_dir()
@@ -5244,7 +5457,7 @@ class Manager(tk.Tk):
 
 
     def _build_display_page(self) -> None:
-        frame = self.pages["display"]
+        frame = self.subpages["settings"]
         self._clear(frame)
         self._page_header(frame, "Display", "The emulated device's actual hardware profile -- applying it cold-boots the AVD.")
         # _page_header() already packed a header + gradient bar straight
@@ -5298,14 +5511,14 @@ class Manager(tk.Tk):
         gpu_combo.grid(row=4, column=1, sticky="w", padx=(8, 0), pady=3)
         tk.Label(
             settings_col,
-            text="Try \"host\" or \"swiftshader_indirect\" here if you see screen tearing\nor audio cutting out after tabbing away and back -- a known Android\nEmulator GPU-backend issue on some hardware. \"auto\" is the default.",
+            text="Try \"host\" or \"swiftshader_indirect\" here if you see screen tearing\nor audio cutting out after tabbing away and back, a known Android\nEmulator GPU-backend issue on some hardware. \"auto\" is the default.",
             bg=BG, fg=TEXT_DIM, font=FONT_BODY, justify="left",
         ).grid(row=5, column=0, columnspan=2, sticky="w", pady=(2, 0))
 
         preview_col = tk.Frame(body, bg=BG)
         preview_col.grid(row=1, column=1, sticky="ne", padx=24, pady=(8, 0))
-        tk.Label(preview_col, text="Preview", bg=BG, fg=TEXT_DIM, font=FONT_BODY).pack(anchor="e")
-        self.aspect_canvas = tk.Canvas(preview_col, width=150, height=100, bg="#0e0e10", highlightthickness=0)
+        tk.Label(preview_col, text="Aspect ratio preview", bg=BG, fg=TEXT_DIM, font=FONT_BODY).pack(anchor="e")
+        self.aspect_canvas = tk.Canvas(preview_col, width=150, height=110, bg="#0e0e10", highlightthickness=0)
         self.aspect_canvas.pack()
         self.display_width_var.trace_add("write", self._redraw_aspect_preview)
         self.display_height_var.trace_add("write", self._redraw_aspect_preview)
@@ -5313,7 +5526,7 @@ class Manager(tk.Tk):
 
         tk.Label(
             body,
-            text="Only affects iiSU's own UI smoothness inside the AVD -- actual gameplay runs\n"
+            text="Only affects iiSU's own UI smoothness inside the AVD. Actual gameplay runs\n"
             "in a separate native Windows emulator process, which already uses your\n"
             "monitor's real refresh rate with no setup needed.",
             bg=BG, fg=TEXT_DIM, font=FONT_BODY, justify="left",
@@ -5354,12 +5567,19 @@ class Manager(tk.Tk):
             return
         if width <= 0 or height <= 0:
             return
+        label_h = 18  # reserved at the bottom for the ratio text
         margin = 10
-        scale = min((box_w - margin * 2) / width, (box_h - margin * 2) / height)
+        draw_h = box_h - label_h
+        scale = min((box_w - margin * 2) / width, (draw_h - margin * 2) / height)
         rect_w, rect_h = width * scale, height * scale
-        x0, y0 = (box_w - rect_w) / 2, (box_h - rect_h) / 2
+        x0, y0 = (box_w - rect_w) / 2, (draw_h - rect_h) / 2
         canvas.create_rectangle(x0, y0, x0 + rect_w, y0 + rect_h, fill=PANEL_BG_HOVER, outline=GRADIENT_STOPS[2], width=2)
-        canvas.create_text(box_w / 2, box_h / 2, text=f"{width}×{height}", fill=TEXT, font=FONT_BODY)
+        canvas.create_text(box_w / 2, draw_h / 2, text=f"{width}×{height}", fill=TEXT, font=FONT_BODY)
+        divisor = math.gcd(width, height) or 1
+        canvas.create_text(
+            box_w / 2, box_h - label_h / 2,
+            text=f"{width // divisor}:{height // divisor}", fill=TEXT_DIM, font=FONT_BODY,
+        )
 
     def _autodetect_display(self) -> None:
         try:
@@ -5389,13 +5609,13 @@ class Manager(tk.Tk):
 
 
     def _build_advanced_page(self) -> None:
-        frame = self.pages["advanced"]
+        frame = self.subpages["advanced"]
         self._clear(frame)
         self._page_header(frame, "Advanced", "Bridge port, window matching, and hotkeys -- rarely need to change these.")
-        # See the matching comment in _build_display_page() -- pack (used by
-        # _page_header) and grid (used below) can't share the same parent.
-        body = tk.Frame(frame, bg=BG)
-        body.pack(fill="both", expand=True)
+        # Scrollable: this page's content can outgrow a smaller window --
+        # see _make_scrollable_body's docstring for why that would otherwise
+        # push the Save bar below the visible window entirely.
+        body = self._make_scrollable_body(frame)
 
         tk.Label(body, text="iiSU window title match:", bg=BG, fg=TEXT, font=FONT_BODY).grid(row=1, column=0, sticky="w", padx=24, pady=(12, 0))
         self.window_title_var = tk.StringVar(value=self.config_data.get("iisu_window_title", ""))
@@ -5410,16 +5630,29 @@ class Manager(tk.Tk):
             initial=self.config_data.get("quit_hotkey", {"modifiers": [], "key": "escape"}),
         )
 
-        tk.Label(body, text="Hold the quit key this long to close iiSU and the AVD entirely (seconds):", bg=BG, fg=TEXT, font=FONT_BODY).grid(
-            row=8, column=0, columnspan=2, sticky="w", padx=24, pady=(8, 2)
-        )
-        self.shutdown_hold_seconds_var = tk.StringVar(value=str(self.config_data.get("shutdown_hold_seconds", 5)))
-        tk.Entry(body, textvariable=self.shutdown_hold_seconds_var, width=6, **ENTRY_KWARGS).grid(row=9, column=0, sticky="w", padx=24, pady=(0, 8))
-
         self.shutdown_hotkey_vars = self._build_hotkey_editor(
-            body, row=10, title="Optional separate full-shutdown hotkey (in addition to holding the quit key above -- leave blank for none):",
+            body, row=8, title="Optional separate full-shutdown hotkey (leave blank for none):",
             initial=self.config_data.get("shutdown_hotkey") or {"modifiers": [], "key": ""},
         )
+
+        tk.Label(
+            body, text="Controller quit chord (press all selected buttons together on any pad):",
+            bg=BG, fg=TEXT, font=FONT_BODY,
+        ).grid(row=11, column=0, columnspan=2, sticky="w", padx=24, pady=(8, 2))
+        chord_row = tk.Frame(body, bg=BG)
+        chord_row.grid(row=12, column=0, columnspan=2, sticky="w", padx=24)
+        initial_chord = set(self.config_data.get("controller_quit_chord") or DEFAULT_QUIT_CHORD)
+        self.controller_chord_vars: dict[str, tk.BooleanVar] = {}
+        for col, name in enumerate(BUTTON_NAME_TO_BIT):
+            var = tk.BooleanVar(value=name in initial_chord)
+            self.controller_chord_vars[name] = var
+            ttk.Checkbutton(chord_row, text=BUTTON_DISPLAY_NAMES.get(name, name), variable=var).grid(
+                row=col // 7, column=col % 7, sticky="w", padx=(0, 12), pady=2
+            )
+        tk.Label(
+            body, text="Runs the same action as tapping the quit key above. Leave every box unchecked to disable it.",
+            bg=BG, fg=TEXT_DIM, font=FONT_BODY,
+        ).grid(row=13, column=0, columnspan=2, sticky="w", padx=24, pady=(2, 8))
 
         tk.Label(
             body,
@@ -5427,22 +5660,24 @@ class Manager(tk.Tk):
             "directory, search folders, and emulator mappings apply on the very next\n"
             "game launch, no restart needed).",
             bg=BG, fg=TEXT_DIM, font=FONT_BODY, justify="left",
-        ).grid(row=13, column=0, sticky="w", padx=24, pady=(8, 8))
+        ).grid(row=14, column=0, sticky="w", padx=24, pady=(8, 8))
+
+        self.show_overlay_var = tk.BooleanVar(value=self.config_data.get("show_boot_overlay", True))
+        ttk.Checkbutton(
+            body, text="Show the fullscreen loading overlay during boot and game hand-off", variable=self.show_overlay_var
+        ).grid(row=15, column=0, columnspan=2, sticky="w", padx=24, pady=(0, 4))
 
         self.debug_console_var = tk.BooleanVar(value=self.config_data.get("debug_show_console_windows", False))
         ttk.Checkbutton(
             body, text="Show console windows for the AVD and bridge (debugging)", variable=self.debug_console_var
-        ).grid(row=14, column=0, columnspan=2, sticky="w", padx=24, pady=(0, 4))
+        ).grid(row=16, column=0, columnspan=2, sticky="w", padx=24, pady=(0, 4))
         tk.Label(
             body,
-            text="Off by default: the AVD, bridge, and shutdown-hotkey teardown all run without a visible\n"
-            "console, logging to emulator.log/bridge.log/stop.log instead, and the fullscreen loading\n"
-            "overlay covers the AVD-boot/emulator-handoff gaps. Turn this on to watch their live output\n"
-            "directly instead -- also turns the overlay off, since it would just hide those consoles.\n"
-            "Trades away that run's log file, since a process can't sensibly have both. Takes effect on\n"
-            "the next Start.",
+            text="Console windows are off by default, logging to emulator.log/bridge.log/stop.log instead.\n"
+            "Turning them on always hides the overlay too, since it would just cover them up, and trades\n"
+            "away that run's log file since a process can't sensibly have both. Takes effect on the next Start.",
             bg=BG, fg=TEXT_DIM, font=FONT_BODY, justify="left",
-        ).grid(row=15, column=0, columnspan=2, sticky="w", padx=24, pady=(0, 16))
+        ).grid(row=17, column=0, columnspan=2, sticky="w", padx=24, pady=(0, 16))
 
     def _build_hotkey_editor(self, parent, row: int, title: str, initial: dict) -> dict:
         tk.Label(parent, text=title, bg=BG, fg=TEXT, font=FONT_BODY).grid(row=row, column=0, columnspan=2, sticky="w", padx=24, pady=(4, 2))
@@ -5480,6 +5715,36 @@ class Manager(tk.Tk):
 
         self.bind("<KeyPress>", on_key)
 
+    def _make_scrollable_body(self, parent: tk.Frame) -> tk.Frame:
+        """Wraps a page's content in a vertically scrollable canvas, for
+        pages whose settings can outgrow a smaller window. Without this, a
+        tk.Frame with grid_propagate left on (the default) pushes its
+        oversized natural size up through every ancestor, which can shove
+        sibling widgets like the Save bar below the bottom of a fixed-size
+        window -- out of view and unreachable, with no visible sign
+        anything is missing. Wrapping the content in a Canvas breaks that
+        upward propagation (a Canvas's own size never depends on what's
+        drawn inside it), so overflow becomes scrollable instead."""
+        outer = tk.Frame(parent, bg=BG)
+        outer.pack(fill="both", expand=True)
+        canvas = tk.Canvas(outer, bg=BG, highlightthickness=0)
+        vscroll = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=vscroll.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        vscroll.pack(side="right", fill="y")
+
+        body = tk.Frame(canvas, bg=BG)
+        window_id = canvas.create_window((0, 0), window=body, anchor="nw")
+        body.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>", lambda e: canvas.itemconfig(window_id, width=e.width))
+
+        def _on_mousewheel(event: tk.Event) -> None:
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", _on_mousewheel))
+        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
+        return body
+
     def _page_header(self, frame: tk.Frame, title: str, subtitle: str) -> None:
         header = tk.Frame(frame, bg=BG)
         header.pack(fill="x", padx=24, pady=(20, 8))
@@ -5501,7 +5766,15 @@ class Manager(tk.Tk):
             return None
         return {"modifiers": [name for name, var in hotkey_vars["mods"].items() if var.get()], "key": key}
 
-    def _save_settings(self) -> None:
+    def _gather_settings(self, silent: bool = False) -> dict | None:
+        """Builds the settings dict exactly as Save would write it, from
+        current widget state -- shared by the actual Save action and by
+        the pending-changes check (_is_settings_dirty), so the two can
+        never disagree about what counts as a change. silent=True (used
+        by the dirty check, which runs on a timer) swallows invalid input
+        instead of popping up a messagebox -- a field being mid-edit (e.g.
+        momentarily empty) shouldn't interrupt typing, it just reads as
+        dirty until it's valid and saved."""
         original_emulators = self.config_data.get("emulators", {})
         emulators = {}
         for item in self.emulators_tree.get_children():
@@ -5518,8 +5791,10 @@ class Manager(tk.Tk):
         try:
             port = int(self.port_var.get())
         except ValueError:
+            if silent:
+                return None
             messagebox.showerror("Invalid port", "Bridge listen port must be a number.")
-            return
+            return None
 
         try:
             display = {
@@ -5530,16 +5805,12 @@ class Manager(tk.Tk):
                 "gpu_mode": self.gpu_mode_var.get(),
             }
         except ValueError:
+            if silent:
+                return None
             messagebox.showerror("Invalid display settings", "Width, height, density, and refresh rate must be numbers.")
-            return
+            return None
 
-        try:
-            shutdown_hold_seconds = int(self.shutdown_hold_seconds_var.get())
-        except ValueError:
-            messagebox.showerror("Invalid hold duration", "The quit-key hold duration must be a number of seconds.")
-            return
-
-        self.config_data = {
+        return {
             "bridge_port": port,
             "roms_dir": self.roms_dir_var.get().strip(),
             "search_roots": list(self.search_roots_list.get(0, "end")),
@@ -5549,16 +5820,75 @@ class Manager(tk.Tk):
             "avd_name": self.avd_name_var.get().strip() or "iisuwin",
             "display": display,
             "quit_hotkey": self._read_hotkey(self.quit_hotkey_vars, default_key="escape"),
-            "shutdown_hold_seconds": shutdown_hold_seconds,
             "shutdown_hotkey": self._read_optional_hotkey(self.shutdown_hotkey_vars),
+            "controller_quit_chord": [name for name, var in self.controller_chord_vars.items() if var.get()],
             "usb_passthrough": self.config_data.get("usb_passthrough", []),
+            "show_boot_overlay": self.show_overlay_var.get(),
             "debug_show_console_windows": self.debug_console_var.get(),
             "emulators": emulators,
         }
+
+    def _save_settings(self) -> bool:
+        settings = self._gather_settings()
+        if settings is None:
+            return False
+        self.config_data = settings
         save_config(self.config_data)
         self._write_avd_display_profile(self.config_data)
         self.save_status_label.config(text=f"Saved to {CONFIG_PATH.name}")
         self.after(3000, lambda: self.save_status_label.config(text=""))
+        self._set_settings_dirty(False)
+        return True
+
+    def _is_settings_dirty(self) -> bool:
+        if not hasattr(self, "emulators_tree"):
+            return False  # settings pages not built yet (no install)
+        current = self._gather_settings(silent=True)
+        return current is not None and current != {k: self.config_data.get(k) for k in current}
+
+    def _set_settings_dirty(self, dirty: bool) -> None:
+        self.settings_dirty = dirty
+        self.save_button.config(
+            text="Save • unsaved changes" if dirty else "Save",
+            style="Dirty.TButton" if dirty else "Accent.TButton",
+        )
+
+    def _poll_settings_dirty(self) -> None:
+        # current_page holds the GROUP key for as long as any of its
+        # sub-tabs is showing (e.g. "emulators" while on Windows Apps, not
+        # just PC Emulators) -- checking it directly would wrongly count
+        # as a save-bar page just because the group's key happens to match
+        # one of its own sub-page keys. The subpage key is what's actually
+        # on screen whenever the current page is grouped.
+        visible_key = self.current_subpage if self.current_page in NAV_GROUPS else self.current_page
+        if visible_key in SAVE_BAR_PAGES:
+            dirty = self._is_settings_dirty()
+            if dirty != getattr(self, "settings_dirty", False):
+                self._set_settings_dirty(dirty)
+        elif getattr(self, "settings_dirty", False):
+            self._set_settings_dirty(False)
+        self.after(500, self._poll_settings_dirty)
+
+    def _confirm_leave_unsaved_settings(self) -> bool:
+        """Called right before any page navigation. Returns False to abort
+        the navigation (stay put) -- either the user chose Cancel, or chose
+        to save but the current input is invalid (_save_settings already
+        showed why)."""
+        if not getattr(self, "settings_dirty", False):
+            return True
+        choice = messagebox.askyesnocancel(
+            "Unsaved changes",
+            "This page has unsaved changes. Save them before leaving?",
+        )
+        if choice is None:
+            return False
+        if choice:
+            return self._save_settings()
+        # Discard: rebuild the settings pages from the last-saved
+        # config_data so the abandoned edits don't linger on screen.
+        self._set_settings_dirty(False)
+        self._build_settings_pages()
+        return True
 
     def _write_avd_display_profile(self, config: dict) -> None:
         """Writes the chosen resolution/density straight into the AVD's own
@@ -5593,6 +5923,17 @@ class Manager(tk.Tk):
         self._build_credit_row(
             body, username="claude", display_name="Claude (Anthropic)",
             role="AI coding assistant -- wrote and refactored most of this codebase, including this Manager app, in collaboration with MAGOOSKEE.",
+        )
+
+        self._build_contributors_section(
+            body,
+            [
+                {
+                    "username": "Jacko1234wdd",
+                    "display_name": "Jacko1234wdd",
+                    "blurb": "Native Windows app/Steam launching, the Android Storage browser, and the Media Library/MediaBridge artwork pipeline.",
+                },
+            ],
         )
 
         disclaimer = Card(body)
@@ -5643,6 +5984,65 @@ class Manager(tk.Tk):
         label = tk.Label(holder, image=photo, bg=PANEL_BG, bd=0)
         label.image = photo
         label.pack()
+
+    def _build_contributors_section(self, parent, contributors: list[dict]) -> None:
+        """A row of small avatars for people who've sent in real code
+        beyond the two credited above (MAGOOSKEE, Claude) -- hover for
+        what they contributed, click for their GitHub profile. Kept
+        separate from _build_credit_row's big cards since a contributor
+        list is expected to grow past what one-card-per-person scales to."""
+        if not contributors:
+            return
+        card = Card(parent)
+        card.pack(fill="x", pady=(0, 12))
+        inner = tk.Frame(card, bg=PANEL_BG)
+        inner.pack(fill="x", padx=16, pady=14)
+        tk.Label(inner, text="Contributors", font=FONT_HEADING, bg=PANEL_BG, fg=TEXT).pack(anchor="w")
+        tk.Label(
+            inner, text="Hover for what they worked on, click for their GitHub profile.",
+            font=FONT_BODY, bg=PANEL_BG, fg=TEXT_DIM,
+        ).pack(anchor="w", pady=(2, 10))
+
+        avatar_row = tk.Frame(inner, bg=PANEL_BG)
+        avatar_row.pack(anchor="w")
+        avatar_size = 36
+        for person in contributors:
+            username = person["username"]
+            display_name = person.get("display_name", username)
+            blurb = person.get("blurb", "")
+
+            holder = tk.Frame(avatar_row, width=avatar_size, height=avatar_size, bg=PANEL_BG, cursor="hand2")
+            holder.pack(side="left", padx=(0, 10))
+            holder.pack_propagate(False)
+            placeholder = make_placeholder_circle(holder, avatar_size, display_name, GRADIENT_STOPS[2], "#101010")
+            placeholder.pack()
+            holder.bind("<Button-1>", lambda e, u=username: webbrowser.open(f"https://github.com/{u}"))
+
+            tooltip = _Tooltip(holder, f"{display_name}\n{blurb}" if blurb else display_name)
+            placeholder.bind("<Button-1>", lambda e, u=username: webbrowser.open(f"https://github.com/{u}"))
+
+            threading.Thread(
+                target=self._load_contributor_avatar, args=(username, holder, avatar_size, placeholder, tooltip), daemon=True
+            ).start()
+
+    def _load_contributor_avatar(self, username: str, holder: tk.Frame, size: int, placeholder: tk.Widget, tooltip: "_Tooltip") -> None:
+        data = fetch_avatar_bytes(username)
+        if data is None:
+            return
+        self.after(0, self._apply_contributor_avatar, data, holder, size, placeholder, tooltip, username)
+
+    def _apply_contributor_avatar(
+        self, data: bytes, holder: tk.Frame, size: int, placeholder: tk.Widget, tooltip: "_Tooltip", username: str
+    ) -> None:
+        photo = make_circular_photo(data, size)
+        if photo is None:
+            return
+        placeholder.destroy()
+        label = tk.Label(holder, image=photo, bg=PANEL_BG, bd=0, cursor="hand2")
+        label.image = photo
+        label.pack()
+        tooltip.retarget(label)
+        label.bind("<Button-1>", lambda e: webbrowser.open(f"https://github.com/{username}"))
 
     # -- Uninstall page -------------------------------------------------
 
@@ -5717,7 +6117,7 @@ class Manager(tk.Tk):
                 size_text = ""
             self.uninstall_tree.insert("", "end", values=(str(path), size_text))
         if not existing:
-            self.uninstall_total_label.config(text="Nothing to remove -- this already looks like a clean slate.")
+            self.uninstall_total_label.config(text="Nothing to remove. This already looks like a clean slate.")
             self.uninstall_button.config(state="disabled")
         else:
             self.uninstall_total_label.config(text=f"~{total / 1e9:.2f} GB will be reclaimed.")

@@ -4,11 +4,11 @@ actual hardware profile and cold-boots it so the change takes effect.
 
 gpu_mode is deliberately NOT handled here, unlike the others -- it's passed
 straight to emulator.exe as a plain -gpu launch flag by start_iisu_pc.py
-instead, since this AVD always cold-boots on every normal start regardless
-(-no-snapshot, never resumed), so a GPU-backend choice needs no dedicated
-"cold-boot to apply" cycle of its own the way an actual hardware-profile
-change (resolution) does: it just takes effect on the very next normal
-start, like every other config.json setting already does.
+instead, since it's read fresh from config.json on every launch, so a
+GPU-backend choice needs no dedicated "cold-boot to apply" cycle of its
+own the way an actual hardware-profile change (resolution) does: it just
+takes effect on the very next normal start, like every other config.json
+setting already does.
 
 This edits hw.lcd.width/height/density directly in the AVD's config.ini
 rather than using the live `adb shell wm size` override: `wm size` only

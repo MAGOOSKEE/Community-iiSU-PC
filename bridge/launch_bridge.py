@@ -123,7 +123,7 @@ NAMED_KEY_VK = {
     **{f"f{n}": 0x6F + n for n in range(1, 13)},
 }
 KEY_POLL_INTERVAL = 0.03  # seconds -- responsive without busy-looping
-DEFAULT_SHUTDOWN_HOLD_SECONDS = 5
+BOOTANIM_WAIT_SECONDS = 90  # generous cap; see launch_iisu's docstring
 
 
 def resolve_vk(key: str) -> int:
@@ -572,22 +572,36 @@ def launch_iisu(config: dict) -> None:
     default home app, so this just launches it directly rather than
     depending on that.
 
-    Retries every second since `am start` can fail with a transient "does
-    not exist" error for a while right after a cold boot -- package
-    manager can still be resolving components even once Android's own
-    home screen is already visible (confirmed via `dumpsys package`: the
-    activity is genuinely registered, `am start` just tried too early).
+    Waits for init.svc.bootanim to report "stopped" first (the boot
+    animation ending, a cheap getprop check) before making any am start
+    attempt at all: measured live, am start reliably fails for the whole
+    stretch before that point, so trying earlier is a guaranteed-wasted
+    adb round trip, not a head start. Capped at BOOTANIM_WAIT_SECONDS so a
+    system image that never sets this property (or sets it oddly) still
+    falls through to the retry loop below rather than hanging.
 
-    Deliberately does NOT gate this on sys.boot_completed first (setup_
-    wizard.py's own separate wait_for_avd() uses that signal, but only for
-    the one-time install boot): boot_completed only flips once *every*
-    system app's BOOT_COMPLETED receiver has finished, which is well
-    after Android's own home screen is already interactive -- gating the
-    first am start attempt on that turned "wait however long it takes for
-    am start to actually succeed" (this loop
-    alone) into "wait for full boot_completed first, THEN start trying,"
-    adding a real, needless delay confirmed live (iiSU sitting on the
-    stock home screen for 1-2 minutes) instead of shortening one."""
+    Still does NOT gate on sys.boot_completed, unlike setup_wizard.py's
+    own separate wait_for_avd() (used only for the one-time install boot,
+    where waiting longer is fine): boot_completed only flips once *every*
+    system app's BOOT_COMPLETED receiver has finished, including this
+    project's own redirector stubs, and can lag well behind bootanim once
+    more of them are installed -- confirmed live on an earlier run
+    (iiSU sitting on the stock home screen for 1-2 minutes with
+    boot_completed still unset). Retries every second after that since
+    `am start` can still fail with a transient "does not exist" error for
+    a moment even once the system looks interactive -- package manager
+    can still be resolving components (confirmed via `dumpsys package`:
+    the activity is genuinely registered, `am start` just tried too
+    early)."""
+    deadline = time.monotonic() + BOOTANIM_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        result = subprocess.run(
+            ["adb", "shell", "getprop", "init.svc.bootanim"], capture_output=True, text=True
+        )
+        if result.stdout.strip() == "stopped":
+            break
+        time.sleep(1)
+
     component = config.get("iisu_component", DEFAULT_IISU_COMPONENT)
     result = None
     for _ in range(60):
@@ -778,120 +792,96 @@ def hotkey_listener(config: dict) -> None:
             shutdown_everything()
 
 
+def quit_tap_action(label: str = "quit") -> None:
+    """Runs whatever a quit tap means right now: force-quit the running
+    game and return to iiSU if one's active, or close iiSU and shut down
+    the AVD entirely if nothing's running. Shared by the keyboard quit
+    hotkey (quit_key_watcher) and the controller quit chord
+    (controller_bridge.ControllerBridge), so both trigger identical
+    behavior through one code path. label is just what gets printed/
+    logged to say what triggered it."""
+    with current_process_lock:
+        proc = current_process
+        native_hwnd = current_native_window
+        native_pid = current_native_pid
+        handoff_active = game_handoff_active
+    if native_hwnd is not None and user32.IsWindow(native_hwnd):
+        print(f"[bridge] {label}, quitting native game")
+        log_launch(f"QUIT: {label} -- native HWND {native_hwnd}, PID {native_pid}")
+        if native_pid and _pid_is_running(native_pid):
+            # Once a native game has been identified, its owning PID is
+            # authoritative. current_process may only be a launcher or
+            # wrapper executable that remains alive beside it.
+            if not _terminate_native_pid(native_pid):
+                print("[bridge] taskkill failed; falling back to WM_CLOSE")
+                close_window(native_hwnd)
+        else:
+            close_window(native_hwnd)
+        if proc is not None and proc.poll() is None and proc.pid != native_pid:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+    elif native_pid and _pid_is_running(native_pid):
+        print(f"[bridge] {label}, native game window changed -- terminating tracked PID {native_pid}")
+        log_launch(f"QUIT: {label} -- native HWND changed; terminating PID {native_pid}")
+        _terminate_native_pid(native_pid)
+        if proc is not None and proc.poll() is None and proc.pid != native_pid:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+    elif proc is not None and proc.poll() is None:
+        # No native HWND/PID has been established, so this is still a
+        # normal subprocess-backed emulator/game launch.
+        print(f"[bridge] {label}, terminating emulator")
+        proc.terminate()
+    elif handoff_active:
+        # Steam may still be between URI invocation and creation of the
+        # game's real window. Queue the quit instead of either shutting
+        # down iiSU-PC or silently dropping the command.
+        #
+        # IMPORTANT: do not acquire current_process_lock here. This
+        # function already sampled the handoff state under that lock
+        # above; taking the same non-reentrant Lock a second time could
+        # permanently deadlock the calling thread.
+        global pending_native_quit
+        pending_native_quit = True
+        print(f"[bridge] {label} during native launch handoff -- quit queued")
+        log_launch(f"QUIT: {label} during native launch handoff; queued until HWND/PID is tracked")
+    else:
+        print(f"[bridge] {label} with no emulator/native game running -- closing iiSU and the AVD entirely...")
+        log_launch(f"QUIT: {label} -- no tracked emulator/native HWND; shutting down iiSU-PC")
+        shutdown_everything()
+
+
 def quit_key_watcher(config: dict) -> None:
-    global pending_native_quit
     """Polls quit_hotkey's key (default: Escape, no modifiers) via
-    GetAsyncKeyState instead of RegisterHotKey, on its own thread.
-
-    A tap's meaning depends on whether an emulator is actually running:
-    with one running, it force-quits it and returns to iiSU (the original
-    quit_hotkey behavior); with none running -- already sitting at iiSU
-    itself -- there's nothing to "quit back to", so it closes iiSU and the
-    AVD entirely instead. This replaced tapping being a no-op with nothing
-    running (proc.terminate() guarded on proc not being None, so a tap did
-    genuinely nothing, confirmed live -- reported as "pressing Escape
-    doesn't close iiSU").
-
-    Holding the key for shutdown_hold_seconds (default 5) also closes
-    iiSU and the AVD entirely, *regardless* of whether an emulator is
-    running -- kept as a way to skip straight to shutdown without
-    quitting back to iiSU first, mid-game. RegisterHotKey can't express
-    "how long has this been held," so this needed its own polling loop
-    rather than reusing hotkey_listener's message-loop mechanism."""
+    GetAsyncKeyState instead of RegisterHotKey, on its own thread, and
+    runs quit_tap_action() on release. A tap's meaning depends on
+    whether an emulator is actually running: with one running, it
+    force-quits it and returns to iiSU; with none running, already
+    sitting at iiSU itself, there's nothing to quit back to, so it
+    closes iiSU and the AVD entirely instead."""
     hotkey_config = config["quit_hotkey"]
     key_name = hotkey_config.get("key", "escape")
     vk = resolve_vk(key_name)
     modifier_names = hotkey_config.get("modifiers", [])
     modifier_vks = [MODIFIER_VK[name] for name in modifier_names if name in MODIFIER_VK]
-    hold_seconds = config.get("shutdown_hold_seconds", DEFAULT_SHUTDOWN_HOLD_SECONDS)
     label = "+".join([*modifier_names, key_name]).upper()
 
-    print(
-        f"[bridge] {label}: tap to quit the running emulator (or close iiSU entirely if none is running); "
-        f"hold {hold_seconds}s to close iiSU and the AVD entirely regardless"
-    )
+    print(f"[bridge] {label}: tap to quit the running emulator (or close iiSU entirely if none is running)")
 
-    pressed_since: float | None = None
-    shutdown_fired = False
+    was_down = False
     while True:
         time.sleep(KEY_POLL_INTERVAL)
         is_down = _is_key_down(vk) and all(_is_key_down(m) for m in modifier_vks)
-        if is_down:
-            if pressed_since is None:
-                pressed_since = time.monotonic()
-                shutdown_fired = False
-                debug_log(f"quit hotkey DOWN: {label}")
-            elif not shutdown_fired and time.monotonic() - pressed_since >= hold_seconds:
-                shutdown_fired = True
-                print(f"[bridge] {label} held {hold_seconds}s -- closing iiSU and the AVD entirely...")
-                shutdown_everything()
-        else:
-            if pressed_since is not None:
-                debug_log(f"quit hotkey UP: {label}; shutdown_fired={shutdown_fired}")
-            if pressed_since is not None and not shutdown_fired:
-                with current_process_lock:
-                    proc = current_process
-                    native_hwnd = current_native_window
-                    native_pid = current_native_pid
-                    handoff_active = game_handoff_active
-                if native_hwnd is not None and user32.IsWindow(native_hwnd):
-                    print(f"[bridge] {label} tapped, quitting native game")
-                    log_launch(
-                        f"QUIT: {label} tapped -- native HWND {native_hwnd}, "
-                        f"PID {native_pid}"
-                    )
-                    if native_pid and _pid_is_running(native_pid):
-                        # Once a native game has been identified, its owning PID
-                        # is authoritative. current_process may only be a launcher
-                        # or wrapper executable that remains alive beside it.
-                        if not _terminate_native_pid(native_pid):
-                            print("[bridge] taskkill failed; falling back to WM_CLOSE")
-                            close_window(native_hwnd)
-                    else:
-                        close_window(native_hwnd)
-                    if proc is not None and proc.poll() is None and proc.pid != native_pid:
-                        try:
-                            proc.terminate()
-                        except Exception:
-                            pass
-                elif native_pid and _pid_is_running(native_pid):
-                    print(
-                        f"[bridge] {label} tapped, native game window changed -- "
-                        f"terminating tracked PID {native_pid}"
-                    )
-                    log_launch(
-                        f"QUIT: {label} tapped -- native HWND changed; "
-                        f"terminating PID {native_pid}"
-                    )
-                    _terminate_native_pid(native_pid)
-                    if proc is not None and proc.poll() is None and proc.pid != native_pid:
-                        try:
-                            proc.terminate()
-                        except Exception:
-                            pass
-                elif proc is not None and proc.poll() is None:
-                    # No native HWND/PID has been established, so this is still
-                    # a normal subprocess-backed emulator/game launch.
-                    print(f"[bridge] {label} tapped, terminating emulator")
-                    proc.terminate()
-                elif handoff_active:
-                    # Steam may still be between URI invocation and creation of
-                    # the game's real window. Queue the quit instead of either
-                    # shutting down iiSU-PC or silently dropping the command.
-                    #
-                    # IMPORTANT: do not acquire current_process_lock here.
-                    # quit_key_watcher already sampled the handoff state under
-                    # that lock above; the previous version attempted to take
-                    # the same non-reentrant Lock a second time and could
-                    # permanently deadlock the quit-watcher thread.
-                    pending_native_quit = True
-                    print(f"[bridge] {label} tapped during native launch handoff -- quit queued")
-                    log_launch(f"QUIT: {label} tapped during native launch handoff; queued until HWND/PID is tracked")
-                else:
-                    print(f"[bridge] {label} tapped with no emulator/native game running -- closing iiSU and the AVD entirely...")
-                    log_launch(f"QUIT: {label} tapped -- no tracked emulator/native HWND; shutting down iiSU-PC")
-                    shutdown_everything()
-            pressed_since = None
+        if is_down and not was_down:
+            debug_log(f"quit hotkey DOWN: {label}")
+        elif was_down and not is_down:
+            debug_log(f"quit hotkey UP: {label}")
+            quit_tap_action(f"{label} tapped")
+        was_down = is_down
 
 
 
@@ -1046,7 +1036,7 @@ def launch_windows_app(app_name: str, config: dict) -> bool:
     begin_game_handoff()
 
     existing_windows = list_visible_windows()
-    show_overlay = not config.get("debug_show_console_windows", False)
+    show_overlay = config.get("show_boot_overlay", True) and not config.get("debug_show_console_windows", False)
     overlay = boot_overlay.show(f"Waiting on {app_name}...") if show_overlay else None
     process = None
     hwnd = None
@@ -1172,7 +1162,7 @@ def launch_steam_game(app_id: str, config: dict) -> None:
     begin_game_handoff()
 
     existing_windows = list_visible_windows()
-    show_overlay = not config.get("debug_show_console_windows", False)
+    show_overlay = config.get("show_boot_overlay", True) and not config.get("debug_show_console_windows", False)
     overlay = boot_overlay.show(f"Waiting on Steam app {app_id}...") if show_overlay else None
     hwnd = None
 
@@ -1403,7 +1393,7 @@ def handle_request(raw_intent: str) -> None:
     # it, that moment shows raw desktop. Skipped when debug_show_console_
     # windows is on, since a fullscreen overlay would just hide the
     # console windows that setting exists to show.
-    show_overlay = not config.get("debug_show_console_windows", False)
+    show_overlay = config.get("show_boot_overlay", True) and not config.get("debug_show_console_windows", False)
     overlay = boot_overlay.show(f"Waiting on {friendly_emulator_name(executable)}...") if show_overlay else None
     try:
         iisu_hwnd = find_window_by_title(config["iisu_window_title"])
@@ -1537,7 +1527,12 @@ def main() -> None:
     threading.Thread(target=hotkey_listener, args=(config,), daemon=True).start()
     threading.Thread(target=quit_key_watcher, args=(config,), daemon=True).start()
 
-    threading.Thread(target=ControllerBridge(is_game_running, shutdown_everything).run, daemon=True).start()
+    controller_bridge = ControllerBridge(
+        is_game_running,
+        lambda label: quit_tap_action(label),
+        config.get("controller_quit_chord"),
+    )
+    threading.Thread(target=controller_bridge.run, daemon=True).start()
 
     # Launch iiSU directly rather than leaving the stock Android home
     # screen showing, whether this is a fresh boot or the bridge is being
