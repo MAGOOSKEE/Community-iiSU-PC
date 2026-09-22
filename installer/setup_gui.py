@@ -38,7 +38,7 @@ import create_shortcut
 class SetupApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("iiSU-PC Setup")
+        self.title("Community-iiSU-PC Setup")
         self.geometry("720x600")
         self.minsize(620, 480)
         self.configure(bg=BG)
@@ -62,7 +62,7 @@ class SetupApp(tk.Tk):
     def _build_ui(self) -> None:
         header = tk.Frame(self, bg=BG)
         header.pack(fill="x", padx=20, pady=(18, 8))
-        tk.Label(header, text="iiSU-PC Setup", font=FONT_TITLE, bg=BG, fg=TEXT).pack(anchor="w")
+        tk.Label(header, text="Community-iiSU-PC Setup", font=FONT_TITLE, bg=BG, fg=TEXT).pack(anchor="w")
         tk.Label(
             header,
             text="Patches your own copy of iiSU to hand off game launches to real PC\nemulators, and sets up a self-contained Android VM to run it in.",
@@ -228,7 +228,7 @@ class SetupApp(tk.Tk):
         self.next_steps_frame.pack(fill="x", padx=20, pady=(0, 18))
         tk.Label(self.next_steps_frame, text="Next step:", font=FONT_HEADING, bg=BG, fg=TEXT).pack(anchor="w", pady=(0, 6))
         ttk.Button(
-            self.next_steps_frame, text="Open iiSU-PC Manager", style="Accent.TButton",
+            self.next_steps_frame, text="Open Community-iiSU-PC Manager", style="Accent.TButton",
             command=lambda: self._launch_bridge_script("manager.py"),
         ).pack(side="left")
         ttk.Button(
@@ -244,7 +244,7 @@ class SetupApp(tk.Tk):
         emulator folders, display, and hotkeys one step at a time instead
         of dropping manager.py's settings pages on someone who's never seen
         this app before; that Manager is still there afterward via "Open
-        iiSU-PC Manager" for anything this doesn't cover."""
+        Community-iiSU-PC Manager" for anything this doesn't cover."""
         subprocess.Popen([sys.executable, "onboarding_wizard.py"], cwd=str(BRIDGE_DIR))
 
     def _create_shortcut(self) -> None:

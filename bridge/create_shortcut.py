@@ -26,7 +26,7 @@ from pathlib import Path
 BRIDGE_DIR = Path(__file__).parent
 PROJECT_ROOT = BRIDGE_DIR.parent
 START_SCRIPT = BRIDGE_DIR / "start_iisu_pc.py"
-SHORTCUT_NAME = "iiSU-PC.lnk"
+SHORTCUT_NAME = "Community-iiSU-PC.lnk"
 
 FALLBACK_ICON_PATH = BRIDGE_DIR / "assets" / "iisu_launch.ico"
 EXTRACTED_ICON_PATH = BRIDGE_DIR / ".iisu_icon.ico"
@@ -170,7 +170,7 @@ def create_desktop_shortcut(apk_path: Path | None = None) -> Path:
         f"$shortcut.Arguments = '\"{START_SCRIPT}\"'\n"
         f"$shortcut.WorkingDirectory = '{BRIDGE_DIR}'\n"
         f"$shortcut.IconLocation = '{icon_path}'\n"
-        "$shortcut.Description = 'Launch iiSU-PC'\n"
+        "$shortcut.Description = 'Launch Community-iiSU-PC'\n"
         "$shortcut.Save()\n"
     )
     result = subprocess.run(["powershell", "-NoProfile", "-Command", script], capture_output=True, text=True)

@@ -1,4 +1,4 @@
-# iiSU-PC Setup
+# Community-iiSU-PC Setup
 
 Runs iiSU (an Android emulation frontend) inside a Windows-hosted Android VM, patched so launching a game in iiSU hands off to a real PC emulator instead of an Android one.
 
@@ -17,7 +17,7 @@ Runs iiSU (an Android emulation frontend) inside a Windows-hosted Android VM, pa
 ## First-time setup
 
 1. Drop your iiSU APK into `installer/input/`, or just point Setup at it with Browse.
-2. Run **`iiSU-PC Manager.bat`** (in `bridge/`) and click **Run Setup** on its Home page.
+2. Run **`Community-iiSU-PC Manager.bat`** (in `bridge/`) and click **Run Setup** on its Home page.
 
 Setup checks your APK is actually iiSU and that you have enough disk space, then downloads and sets up a self-contained Android SDK and virtual device, patches your APK, installs it, installs a redirector app for every console `shared/emulator_defaults.py` knows about, and creates a desktop shortcut. It shows which step it's on, since first run can take a while and several GB.
 
@@ -25,7 +25,7 @@ Once it's done, a short onboarding wizard walks you through your ROM directory, 
 
 ## Day to day use
 
-Double-click the **desktop shortcut**, or run **`iiSU-PC Manager.bat`** (in `bridge/`) for the full Manager -- one window, navigated with the hamburger (☰) sidebar:
+Double-click the **desktop shortcut**, or run **`Community-iiSU-PC Manager.bat`** (in `bridge/`) for the full Manager -- one window, navigated with the hamburger (☰) sidebar:
 
 - **Home** -- AVD/bridge status, Open/Stop, a running status line, and quick buttons to your ROMs folder and logs.
 - **ROM Directory**, **Emulators**, **Display**, **Advanced** -- everything `config.json` holds, saved with one Save button. Emulators has a "Test Selected..." button to check a mapping without starting the AVD. Advanced has a "Show console windows" checkbox for debugging.
@@ -34,7 +34,7 @@ Double-click the **desktop shortcut**, or run **`iiSU-PC Manager.bat`** (in `bri
 
 Every start checks for updates (`bridge/updater.py`) and re-syncs your ROM library into the VM automatically -- both are no-ops when there's nothing to do, so neither adds noticeable time on repeat starts. iiSU still needs to notice new games: hit "Rescan full library" in its Library settings.
 
-A fullscreen overlay (`bridge/boot_overlay.py`) covers the AVD boot and the emulator hand-off, showing what's happening ("Booting iiSU-PC...", "Waiting on DuckStation...") instead of raw desktop. It's off while the debug console checkbox is on.
+A fullscreen overlay (`bridge/boot_overlay.py`) covers the AVD boot and the emulator hand-off, showing what's happening ("Booting Community-iiSU-PC...", "Waiting on DuckStation...") instead of raw desktop. It's off while the debug console checkbox is on.
 
 Inside the VM, tap **Escape** to force-quit the current game and return to iiSU (or close iiSU and shut down the VM entirely if nothing's running); hold it for 5s to always close iiSU and shut down the VM entirely, regardless of what's running (both the key and the hold duration are rebindable in Advanced, along with an optional separate full-shutdown combo). Holding **Back+Start** together on a controller for 2.5s does the same full shutdown.
 
@@ -69,8 +69,8 @@ installer/
   uninstall.py             removes everything Setup and day-to-day use create
 
 bridge/
-  manager.py               the day-to-day app: Home, all settings, Credits, Uninstall
-  iiSU-PC Manager.bat       launches manager.py
+  manager.py                          the day-to-day app: Home, all settings, Credits, Uninstall
+  Community-iiSU-PC Manager.bat       launches manager.py
   emulator_dialogs.py      dialogs shared by manager.py and onboarding_wizard.py
   onboarding_wizard.py     step-by-step first-run setup
   bridge_config.py         shared config.json loader
@@ -103,7 +103,7 @@ tests/                    unit tests for the pure routing/mapping logic (no AVD 
 
 ## Credits
 
-- **[MAGOOSKEE](https://github.com/MAGOOSKEE)** -- project owner, built and maintains iiSU-PC.
+- **[MAGOOSKEE](https://github.com/MAGOOSKEE)** -- project owner, built and maintains Community-iiSU-PC.
 - **[Claude](https://github.com/claude)** (Anthropic) -- AI coding assistant; wrote and refactored most of this codebase in collaboration with MAGOOSKEE.
 
 Both are shown with live GitHub avatars on the Manager's Credits page.

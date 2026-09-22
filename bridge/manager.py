@@ -1,5 +1,5 @@
 """
-iiSU-PC Manager: the single day-to-day app for iiSU-PC -- home status/
+Community-iiSU-PC Manager: the single day-to-day app for Community-iiSU-PC -- home status/
 Start/Stop, every config.json setting, and uninstall, unified behind one
 sidebar instead of three separate windows (this replaces control_panel.py
 and config_editor.py; see git history for either's old standalone form).
@@ -107,7 +107,7 @@ class StatusDot(tk.Canvas):
 class Manager(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("iiSU-PC Manager")
+        self.title("Community-iiSU-PC Manager")
         self.geometry("1000x700")
         self.minsize(880, 620)
         self.configure(bg=BG)
@@ -197,7 +197,7 @@ class Manager(tk.Tk):
         draw_menu_icon(hamburger, hamburger_size, TEXT)
         hamburger.pack(side="left", padx=(16, 10))
         hamburger.bind("<Button-1>", lambda e: self._toggle_sidebar())
-        self.sidebar_title_label = tk.Label(header, text="iiSU-PC", font=FONT_HEADING, bg=PANEL_BG, fg=TEXT)
+        self.sidebar_title_label = tk.Label(header, text="Community-iiSU-PC", font=FONT_HEADING, bg=PANEL_BG, fg=TEXT)
         self.sidebar_title_label.pack(side="left")
 
         nav_frame = tk.Frame(self.sidebar, bg=PANEL_BG)
@@ -225,7 +225,7 @@ class Manager(tk.Tk):
     def _toggle_sidebar(self) -> None:
         self.sidebar_expanded = not self.sidebar_expanded
         self.sidebar.config(width=SIDEBAR_WIDTH_EXPANDED if self.sidebar_expanded else SIDEBAR_WIDTH_COLLAPSED)
-        self.sidebar_title_label.config(text="iiSU-PC" if self.sidebar_expanded else "")
+        self.sidebar_title_label.config(text="Community-iiSU-PC" if self.sidebar_expanded else "")
         for key, icon, label in NAV_ITEMS + DANGER_NAV_ITEMS:
             self.nav_buttons[key].config(text=f"{icon}  {label}" if self.sidebar_expanded else icon)
 
@@ -257,7 +257,7 @@ class Manager(tk.Tk):
         page = self.pages["home"]
         header = tk.Frame(page, bg=BG)
         header.pack(fill="x", padx=24, pady=(20, 8))
-        tk.Label(header, text="iiSU-PC", font=FONT_TITLE, bg=BG, fg=TEXT).pack(anchor="w")
+        tk.Label(header, text="Community-iiSU-PC", font=FONT_TITLE, bg=BG, fg=TEXT).pack(anchor="w")
         tk.Label(header, text="Android frontend, real PC emulators.", font=FONT_BODY, bg=BG, fg=TEXT_DIM).pack(anchor="w")
 
         gradient = tk.Canvas(page, height=3, bg=BG, highlightthickness=0)
@@ -282,7 +282,7 @@ class Manager(tk.Tk):
 
         self.setup_intro_label = tk.Label(
             page,
-            text="iiSU-PC hasn't been set up yet. Setup installs a self-contained Android VM and\n"
+            text="Community-iiSU-PC hasn't been set up yet. Setup installs a self-contained Android VM and\n"
             "patches your copy of iiSU to hand off game launches to real PC emulators.",
             font=FONT_BODY, bg=BG, fg=TEXT_DIM, justify="left",
         )
@@ -421,7 +421,7 @@ class Manager(tk.Tk):
     def _on_close(self) -> None:
         if self._last_avd_up or self._last_bridge_up:
             proceed = messagebox.askyesno(
-                "iiSU-PC is still running",
+                "Community-iiSU-PC is still running",
                 "The Android VM and/or launch bridge are still running in the background.\n\n"
                 "Closing this window will NOT stop them -- use Stop first if you want to shut "
                 "everything down.\n\nClose this window anyway?",
@@ -495,8 +495,8 @@ class Manager(tk.Tk):
         running = bool(avd_up) or bool(bridge_up)
         self.save_button.config(state="disabled" if running else "normal")
         if running:
-            self.save_status_label.config(text="Stop iiSU-PC to change settings", fg=RED)
-        elif self.save_status_label.cget("text") == "Stop iiSU-PC to change settings":
+            self.save_status_label.config(text="Stop Community-iiSU-PC to change settings", fg=RED)
+        elif self.save_status_label.cget("text") == "Stop Community-iiSU-PC to change settings":
             self.save_status_label.config(text="", fg=GREEN)
 
     # -- Settings pages (ROM Directory / Emulators / Display / Advanced) -------------------------------------------------
@@ -520,7 +520,7 @@ class Manager(tk.Tk):
     def _build_roms_page(self) -> None:
         frame = self.pages["roms"]
         self._clear(frame)
-        self._page_header(frame, "ROM Directory", "Where your games live, and where iiSU-PC looks for your PC emulators.")
+        self._page_header(frame, "ROM Directory", "Where your games live, and where Community-iiSU-PC looks for your PC emulators.")
 
         tk.Label(frame, text="Root ROM folder (contains one subfolder per console):", bg=BG, fg=TEXT, font=FONT_BODY).pack(
             anchor="w", padx=24, pady=(12, 0)
@@ -623,7 +623,7 @@ class Manager(tk.Tk):
     def _restore_default_emulators(self) -> None:
         if not messagebox.askyesno(
             "Restore default emulators?",
-            "This replaces every mapping in this list with iiSU-PC's built-in defaults "
+            "This replaces every mapping in this list with Community-iiSU-PC's built-in defaults "
             "(shared/emulator_defaults.py). Any custom or edited mappings you've added "
             "will be lost. Save afterward to keep the change.",
         ):
@@ -1053,7 +1053,7 @@ class Manager(tk.Tk):
         body = tk.Frame(page, bg=BG)
         body.pack(fill="both", expand=True, padx=24, pady=(4, 0))
 
-        self._build_credit_row(body, username="MAGOOSKEE", display_name="MAGOOSKEE", role="Project owner -- built and maintains iiSU-PC.")
+        self._build_credit_row(body, username="MAGOOSKEE", display_name="MAGOOSKEE", role="Project owner -- built and maintains Community-iiSU-PC.")
         self._build_credit_row(
             body, username="claude", display_name="Claude (Anthropic)",
             role="AI coding assistant -- wrote and refactored most of this codebase, including this Manager app, in collaboration with MAGOOSKEE.",

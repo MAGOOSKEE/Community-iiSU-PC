@@ -133,7 +133,7 @@ def _manifest_xml(package_name: str, app_label: str) -> str:
         # aligned, which apktool's build doesn't guarantee the moment
         # there's an actual resource to compile. A cosmetic icon isn't
         # worth trading for stubs that don't install at all.
-        f'    <application android:label="{safe_label} (iiSU-PC redirector)" android:hasCode="true">\n'
+        f'    <application android:label="{safe_label} (Community-iiSU-PC redirector)" android:hasCode="true">\n'
         f'        <activity android:name="{REDIRECTOR_ACTIVITY}" android:exported="true">\n'
         '            <intent-filter>\n'
         '                <action android:name="android.intent.action.MAIN"/>\n'
