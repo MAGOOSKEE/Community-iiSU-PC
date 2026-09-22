@@ -197,6 +197,7 @@ def wait_for_new_visible_window_excluding_processes(
         time.sleep(0.2)
     return None
 
+
 def wait_for_stable_new_visible_window(
     existing: set[int],
     timeout: float = 45.0,
@@ -241,6 +242,7 @@ def close_window(hwnd: int) -> bool:
         return False
     return bool(user32.PostMessageW(hwnd, WM_CLOSE, 0, 0))
 
+
 def wait_for_window_to_close(
     hwnd: int,
     poll_interval: float = 0.25,
@@ -268,6 +270,38 @@ def find_window_by_pid(pid: int) -> int | None:
         return owner_pid.value == pid and user32.IsWindowVisible(hwnd)
 
     return _find_window(matches)
+
+
+def wait_for_visible_window_by_pid(
+    pid: int,
+    timeout: float = 5.0,
+    stable_seconds: float = 0.5,
+) -> int | None:
+    """Wait for a visible window owned by `pid` to remain stable.
+
+    Native games can destroy and recreate their top-level HWND during display
+    mode or resolution changes. This lets launch_bridge reacquire the
+    replacement window without adopting an unrelated application's HWND.
+    """
+    deadline = time.monotonic() + timeout
+    candidate: int | None = None
+    first_seen: float | None = None
+
+    while time.monotonic() < deadline:
+        hwnd = find_window_by_pid(pid)
+
+        if hwnd is None or not user32.IsWindow(hwnd):
+            candidate = None
+            first_seen = None
+        elif hwnd != candidate:
+            candidate = hwnd
+            first_seen = time.monotonic()
+        elif first_seen is not None and time.monotonic() - first_seen >= stable_seconds:
+            return hwnd
+
+        time.sleep(0.2)
+
+    return None
 
 
 def find_window_by_title(substring: str) -> int | None:

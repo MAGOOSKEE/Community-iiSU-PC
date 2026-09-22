@@ -218,22 +218,32 @@ def patch_manifest_for_media_bridge(decompiled_dir: Path) -> None:
 
     No intent filter is needed: Manager addresses the component explicitly.
     exported=true is required because `adb shell am broadcast` originates
-    outside iiSU's app UID.  Re-running the patch remains idempotent.
+    outside iiSU's app UID. Protect the exported receiver with Android's DUMP
+    permission so adb shell can invoke it while ordinary third-party apps
+    cannot explicitly address the component. Re-running the patch remains
+    idempotent.
     """
     manifest = decompiled_dir / "AndroidManifest.xml"
     text = manifest.read_text(encoding="utf-8")
     receiver_name = "com.iisulauncher.pcbridge.MediaBridgeReceiver"
+    receiver = (
+        '        <receiver android:name="com.iisulauncher.pcbridge.MediaBridgeReceiver" '
+        'android:enabled="true" android:exported="true" '
+        'android:permission="android.permission.DUMP" />\n'
+    )
     if receiver_name in text:
+        if 'android:permission="android.permission.DUMP"' not in text:
+            pattern = re.compile(
+                r'[ \t]*<receiver\s+[^>]*android:name="com\.iisulauncher\.pcbridge\.MediaBridgeReceiver"[^>]*/>\n?'
+            )
+            text = pattern.sub(receiver, text, count=1)
+            manifest.write_text(text, encoding="utf-8")
         return
 
     marker = "</application>"
     if marker not in text:
         raise RuntimeError("Could not find </application> in AndroidManifest.xml.")
 
-    receiver = (
-        '        <receiver android:name="com.iisulauncher.pcbridge.MediaBridgeReceiver" '
-        'android:enabled="true" android:exported="true" />\n'
-    )
     text = text.replace(marker, receiver + marker, 1)
     manifest.write_text(text, encoding="utf-8")
 
