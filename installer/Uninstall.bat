@@ -1,4 +1,10 @@
 @echo off
 cd /d "%~dp0"
-python uninstall.py
+where python >nul 2>nul
+if not errorlevel 1 (
+    set "PYCMD=python"
+) else (
+    set "PYCMD=py"
+)
+%PYCMD% uninstall.py
 pause
