@@ -14,14 +14,17 @@ manage to stop in time -- and even then, any leftover lock files are swept
 away afterward so the next start isn't blocked by them.
 
 Also stops the adb server (it's a persistent background process that
-outlives the AVD it was talking to and never exits on its own) and
-deletes any snapshot state left behind by the shutdown itself (see
-clear_snapshots()) -- this AVD always cold-boots, so a saved snapshot is
-just multi-GB dead weight, never something that gets loaded.
+outlives the AVD it was talking to and never exits on its own).
+
+Deliberately does NOT touch any snapshot state left behind by the
+shutdown itself: start_iisu_pc.py's boot-fingerprint check decides on
+the *next* start whether that saved snapshot is still trustworthy (a
+quick resume) or stale (a fresh cold boot, which naturally overwrites
+it on exit). Clearing it here unconditionally would defeat quick resume
+before it ever got a chance to be used.
 """
 
 import json
-import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -120,26 +123,6 @@ def clear_stale_locks(avd_name: str | None) -> None:
             _remove_path_with_retry(lock_path)
 
 
-def clear_snapshots(avd_name: str | None) -> None:
-    """start_iisu_pc.py always cold-boots (-no-snapshot, forceColdBoot=yes,
-    quickbootChoice.ini pinned to saveOnExit=false -- see portable_sdk.py),
-    so a saved snapshot is never going to be loaded by anything. It gets
-    written anyway: `adb emu kill`'s own shutdown path saves a multi-GB
-    snapshot regardless of all three of those settings. Deleting it here,
-    every time, is a disk-leak fix rather than fighting an emulator
-    behavior that doesn't follow its own documented flags -- and it's also
-    exactly the kind of stale, no-longer-matching-reality VM state a
-    resumed snapshot would otherwise carry forward (e.g. mounts reflecting
-    whatever was true when it was captured, not what's true now)."""
-    avd_dir = PORTABLE_AVD_HOME / f"{avd_name}.avd" if avd_name else None
-    if avd_dir is None or not avd_dir.is_dir():
-        return
-    snapshots_dir = avd_dir / "snapshots"
-    if snapshots_dir.is_dir():
-        print("[stop] removing snapshot state (never loaded -- this AVD always cold-boots)...")
-        shutil.rmtree(snapshots_dir, ignore_errors=True)
-
-
 def main() -> None:
     state = load_state()
     avd_name = load_avd_name(state)
@@ -183,7 +166,6 @@ def main() -> None:
     subprocess.run(["adb", "kill-server"], capture_output=True, text=True)
 
     clear_stale_locks(avd_name)
-    clear_snapshots(avd_name)
 
     if STATE_PATH.is_file():
         STATE_PATH.unlink()

@@ -261,7 +261,7 @@ class OnboardingWizard(tk.Tk):
         tk.Label(self.content, text="Let's get Community-iiSU-PC set up.", font=FONT_HEADING, bg=PANEL_BG, fg=TEXT).pack(anchor="w")
         tk.Label(
             self.content,
-            text="A few quick questions and you'll be ready to play -- no manual\nconfig.json editing needed afterward.",
+            text="A few quick questions and you'll be ready to play, no manual\nconfig.json editing needed afterward.",
             font=FONT_BODY, bg=PANEL_BG, fg=TEXT_DIM, justify="left",
         ).pack(anchor="w", pady=(6, 18))
 
@@ -316,7 +316,7 @@ class OnboardingWizard(tk.Tk):
             return
         path = Path(raw)
         if not path.is_dir():
-            self.roms_status_label.config(text="This folder doesn't exist yet -- create it or pick a different one.", fg=RED)
+            self.roms_status_label.config(text="This folder doesn't exist yet. Create it or pick a different one.", fg=RED)
             return
 
         exact, by_compact = load_console_lookup()
@@ -327,7 +327,7 @@ class OnboardingWizard(tk.Tk):
             (recognized if resolve_console_shortname(child.name, exact, by_compact) else unrecognized).append(child.name)
 
         if not recognized and not unrecognized:
-            self.roms_status_label.config(text="This folder is empty -- that's fine, add ROMs to it anytime.", fg=TEXT_DIM)
+            self.roms_status_label.config(text="This folder is empty, that's fine, add ROMs to it anytime.", fg=TEXT_DIM)
         elif not unrecognized:
             self.roms_status_label.config(
                 text=f"✓ iiSU will recognize all {len(recognized)} folder(s): {', '.join(recognized)}", fg=GREEN
@@ -395,7 +395,7 @@ class OnboardingWizard(tk.Tk):
         self.running_bg_task = True
         self._set_nav_enabled(False)
         self.scan_button.config(state="disabled")
-        self.scan_status_label.config(text="Scanning -- this can take a few seconds for large folders like Program Files...", fg=TEXT_DIM)
+        self.scan_status_label.config(text="Scanning. This can take a few seconds for large folders like Program Files...", fg=TEXT_DIM)
         threading.Thread(target=self._run_emulator_scan, args=(roots,), daemon=True).start()
 
     def _run_emulator_scan(self, roots: list[str]) -> None:
@@ -521,7 +521,7 @@ class OnboardingWizard(tk.Tk):
         tk.Label(self.content, text="What resolution should the VM run at?", font=FONT_HEADING, bg=PANEL_BG, fg=TEXT).pack(anchor="w")
         tk.Label(
             self.content,
-            text="iiSU's default is a portrait phone screen -- this switches it to a\nreal desktop-shaped display. Pre-filled from your primary monitor.",
+            text="iiSU's default is a portrait phone screen, this switches it to a\nreal desktop-shaped display. Pre-filled from your primary monitor.",
             font=FONT_BODY, bg=PANEL_BG, fg=TEXT_DIM, justify="left",
         ).pack(anchor="w", pady=(4, 14))
 
@@ -576,7 +576,7 @@ class OnboardingWizard(tk.Tk):
         ).pack(anchor="w", pady=(18, 0))
         tk.Label(
             self.content,
-            text="Only affects iiSU's own UI inside the VM -- actual gameplay runs in a\n"
+            text="Only affects iiSU's own UI inside the VM. Actual gameplay runs in a\n"
             "separate native emulator window at your monitor's real resolution already.",
             font=FONT_BODY, bg=PANEL_BG, fg=TEXT_DIM, justify="left",
         ).pack(anchor="w", pady=(10, 0))
@@ -626,7 +626,7 @@ class OnboardingWizard(tk.Tk):
     def _build_hotkeys(self) -> None:
         tk.Label(self.content, text="Hotkeys", font=FONT_HEADING, bg=PANEL_BG, fg=TEXT).pack(anchor="w")
         tk.Label(
-            self.content, text="Used inside the VM to get back out of a game -- both rebindable later too.",
+            self.content, text="Used inside the VM to get back out of a game (both rebindable later too).",
             font=FONT_BODY, bg=PANEL_BG, fg=TEXT_DIM,
         ).pack(anchor="w", pady=(4, 4))
 
@@ -635,7 +635,7 @@ class OnboardingWizard(tk.Tk):
 
         tk.Label(
             self.content,
-            text="Also works with a controller: hold Back+Start together for 2.5s for a\nfull shutdown, no keyboard needed.",
+            text="Also works with a controller: press Select+Start together on any pad for the same\nquit action, no keyboard needed. Remappable later in Advanced.",
             font=FONT_BODY, bg=PANEL_BG, fg=TEXT_DIM, justify="left",
         ).pack(anchor="w", pady=(16, 0))
 

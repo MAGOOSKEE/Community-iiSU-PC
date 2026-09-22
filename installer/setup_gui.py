@@ -144,7 +144,7 @@ class SetupApp(tk.Tk):
         self.running = True
         self.start_button.config(state="disabled")
         self.browse_button.config(state="disabled")
-        self.status_label.config(text="Running setup -- this can take a long time on first run (several GB)...", fg=TEXT_DIM)
+        self.status_label.config(text="Running setup. This can take a long time on first run (several GB)...", fg=TEXT_DIM)
         self.progress.start(12)
 
         thread = threading.Thread(target=self._run_setup_thread, args=(self.apk_path,), daemon=True)
@@ -180,7 +180,7 @@ class SetupApp(tk.Tk):
         self.start_button.config(state="normal")
 
         if error is None:
-            self.status_label.config(text="Setup complete -- opening the setup wizard...", fg=GREEN)
+            self.status_label.config(text="Setup complete, opening the setup wizard...", fg=GREEN)
             self._open_onboarding()
             # Closing this window (instead of leaving it open with "next
             # step" buttons) hands off cleanly to onboarding_wizard.py --
