@@ -148,7 +148,7 @@ def collect_targets(avd_name: str) -> list[Path]:
         import create_shortcut
         targets.append(create_shortcut.desktop_dir() / create_shortcut.SHORTCUT_NAME)
     except Exception:
-        targets.append(Path.home() / "Desktop" / "iiSU-PC.lnk")
+        targets.append(Path.home() / "Desktop" / "Community-iiSU-PC.lnk")
 
     return targets
 
@@ -173,7 +173,7 @@ def print_preview(targets: list[Path]) -> None:
 
 
 def main() -> None:
-    print("=== iiSU-PC uninstall ===\n")
+    print("=== Community-iiSU-PC uninstall ===\n")
     print("This removes the Android VM, its SDK, your bridge config, the signing")
     print("keystore, and the desktop shortcut. It does NOT touch your ROM library,")
     print("your PC emulators, or the iiSU APK you supplied in installer/input/.\n")

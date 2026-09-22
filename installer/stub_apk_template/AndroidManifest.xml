@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.iisupc.stub.placeholder">
-    <application android:label="iiSU-PC redirector" android:hasCode="true">
+    <application android:label="Community-iiSU-PC redirector" android:hasCode="true">
         <activity android:name="com.iisupc.stub.RedirectorActivity" android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>

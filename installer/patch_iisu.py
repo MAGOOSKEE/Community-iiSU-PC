@@ -1,5 +1,5 @@
 """
-Applies the iiSU-PC interposer patch to a copy of the iiSU APK: decompiles
+Applies the Community-iiSU-PC interposer patch to a copy of the iiSU APK: decompiles
 it, injects the LaunchBridge classes (smali_patch/), redirects its
 ROM-launch startActivity call sites to LaunchBridge.launch(), rebuilds,
 zipaligns, and signs the result with a freshly-generated debug keystore.

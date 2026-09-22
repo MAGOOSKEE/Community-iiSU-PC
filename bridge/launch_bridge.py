@@ -177,7 +177,7 @@ def save_path_cache(cache: dict) -> None:
         pass
 
 
-def log_launch(line: str, notify: bool = False, notify_title: str = "iiSU-PC") -> None:
+def log_launch(line: str, notify: bool = False, notify_title: str = "Community-iiSU-PC") -> None:
     """Appends one line to launch_history.log with a timestamp -- every
     launch attempt gets logged here regardless of outcome, not just
     failures, so there's always a record to check against ("did this
