@@ -122,6 +122,8 @@ class Manager(tk.Tk):
         self._last_avd_up: bool | None = None
         self._last_bridge_up: bool | None = None
         self._setup_process: subprocess.Popen | None = None
+        self._hidden_for_setup = False
+        self._config_mtime: float | None = None
         self._uninstall_targets_cache: list[Path] = []
         self.nav_buttons: dict[str, tk.Label] = {}
         self.pages: dict[str, tk.Frame] = {}
@@ -148,11 +150,28 @@ class Manager(tk.Tk):
             try:
                 self.config_data = load_config()
                 self.configured = True
+                self._config_mtime = CONFIG_PATH.stat().st_mtime
                 return
             except Exception:
                 pass
         self.config_data = {}
         self.configured = False
+        self._config_mtime = None
+
+    def _config_changed_on_disk(self) -> bool:
+        """True when config.json's mtime doesn't match what's currently
+        loaded into self.config_data -- the settings pages are only built
+        from a snapshot taken at startup or the last reload, so anything
+        that changes the file out from under this process (onboarding_
+        wizard.py finishing after Setup already made self.configured True,
+        or a manual edit) would otherwise go unnoticed until Manager is
+        restarted."""
+        if not CONFIG_PATH.is_file():
+            return False
+        try:
+            return CONFIG_PATH.stat().st_mtime != self._config_mtime
+        except OSError:
+            return False
 
     # -- Chrome: sidebar + page container -------------------------------------------------
 
@@ -230,8 +249,12 @@ class Manager(tk.Tk):
             self.nav_buttons[key].config(text=f"{icon}  {label}" if self.sidebar_expanded else icon)
 
     def _on_nav_click(self, key: str) -> None:
-        if key in SETTINGS_PAGES and not self.configured:
-            return
+        if key in SETTINGS_PAGES:
+            if not self.configured:
+                return
+            if self._config_changed_on_disk():
+                self._reload_config()
+                self._build_settings_pages()
         self._show_page(key)
 
     def _refresh_nav_enabled(self) -> None:
@@ -340,6 +363,15 @@ class Manager(tk.Tk):
             return
         self._setup_process = subprocess.Popen([sys.executable, "setup_gui.py"], cwd=str(INSTALLER_DIR))
         self._refresh_primary_button()
+        # Hidden, not destroyed, so it comes back exactly where it was --
+        # having Manager sitting open behind Setup added a second window
+        # nobody asked for, showing a permanently-disabled "Setup
+        # running..." button until Setup's own window was closed by hand.
+        # setup_gui.py closes itself once it hands off to onboarding_
+        # wizard.py (or the user closes it after a failure), and
+        # _apply_status below notices that exit and brings this back.
+        self.withdraw()
+        self._hidden_for_setup = True
 
     def _start(self) -> None:
         if self.busy:
@@ -452,15 +484,33 @@ class Manager(tk.Tk):
         self._last_avd_up = avd_up
         self._last_bridge_up = bridge_up
 
-        if now_configured != self.configured:
-            # Flips true right after Setup finishes, or false right after
-            # an uninstall -- either way the settings pages need to be
-            # rebuilt from scratch, since they were built (or last
-            # rebuilt) against whatever config.json looked like before.
+        setup_just_exited = (
+            self._hidden_for_setup
+            and self._setup_process is not None
+            and self._setup_process.poll() is not None
+        )
+
+        if now_configured != self.configured or setup_just_exited:
+            # now_configured flips true right after Setup finishes, or
+            # false right after an uninstall -- either way the settings
+            # pages need rebuilding from scratch, since they were built
+            # (or last rebuilt) against whatever config.json looked like
+            # before. setup_just_exited also covers onboarding_wizard.py
+            # writing the user's real settings *after* config.json already
+            # existed (write_bridge_config creates it mid-Setup, well
+            # before onboarding runs), which now_configured alone would
+            # never catch.
             self._reload_config()
             self._refresh_nav_enabled()
             self._refresh_home_state()
             self._build_settings_pages()
+
+        if setup_just_exited:
+            self._hidden_for_setup = False
+            self._show_page("home")
+            self.deiconify()
+            self.lift()
+            self.focus_force()
 
         if not self.busy:
             if avd_up is None:
