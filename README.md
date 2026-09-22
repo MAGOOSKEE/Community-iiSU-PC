@@ -86,7 +86,13 @@ bridge/
   console_names.py         resolves a ROM folder name to one of iiSU's known consoles
   create_shortcut.py       creates the desktop shortcut
   winapi.py                shared Win32 window-management helpers
+
+tests/                    unit tests for the pure routing/mapping logic (no AVD needed)
 ```
+
+## Running tests
+
+`python -m unittest discover -s tests` runs the unit tests covering the console/emulator routing logic (`shared/emulator_defaults.py`, `bridge/console_names.py`, `bridge/launch_bridge.py`'s `find_emulator_for_package`). Stdlib-only, no AVD or adb needed -- these only check the pure mapping/decision logic, not an actual end-to-end launch.
 
 ## If something breaks
 
