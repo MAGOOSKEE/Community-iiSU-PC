@@ -80,7 +80,7 @@ def read_avd_display(avd_name: str) -> dict:
 class OnboardingWizard(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("Welcome to iiSU-PC")
+        self.title("Welcome to Community-iiSU-PC")
         # Tall enough that the Emulator Mappings step (title + description +
         # a 9-row treeview + button row, the tallest of any step at ~420px
         # of actual content) fits with room to spare -- measured against
@@ -135,8 +135,12 @@ class OnboardingWizard(tk.Tk):
         self._autodetected_display = False
         self.original_avd_display = read_avd_display(self.config_data.get("avd_name", "iisuwin"))
 
-        quit_initial = self.config_data.get("quit_hotkey", {"modifiers": ["ctrl", "alt"], "key": "q"})
-        shutdown_initial = self.config_data.get("shutdown_hotkey", {"modifiers": ["ctrl", "alt"], "key": "x"})
+        quit_initial = self.config_data.get("quit_hotkey") or {"modifiers": ["ctrl", "alt"], "key": "q"}
+        # shutdown_hotkey defaults to None (no separate combo -- holding
+        # quit_hotkey already covers full shutdown), not a missing key, so
+        # .get()'s own default never kicks in for a fresh config and this
+        # would otherwise crash on the None.get() below.
+        shutdown_initial = self.config_data.get("shutdown_hotkey") or {"modifiers": ["ctrl", "alt"], "key": "x"}
         self.quit_mod_vars = {name: tk.BooleanVar(value=name in {m.lower() for m in quit_initial.get("modifiers", [])}) for name in MODIFIER_NAMES}
         self.quit_key_var = tk.StringVar(value=quit_initial.get("key", "q"))
         self.shutdown_mod_vars = {name: tk.BooleanVar(value=name in {m.lower() for m in shutdown_initial.get("modifiers", [])}) for name in MODIFIER_NAMES}
@@ -216,7 +220,7 @@ class OnboardingWizard(tk.Tk):
 
         is_welcome = index == 0
         is_last = index == len(STEP_TITLES) - 1
-        self.title_label.config(text="Welcome to iiSU-PC" if is_welcome else STEP_TITLES[index])
+        self.title_label.config(text="Welcome to Community-iiSU-PC" if is_welcome else STEP_TITLES[index])
         self.step_label.config(text="" if is_welcome or is_last else f"Step {index} of {len(STEP_TITLES) - 2}")
 
         self._step_builders()[index]()
@@ -254,7 +258,7 @@ class OnboardingWizard(tk.Tk):
     # -- Step 0: Welcome -------------------------------------------------
 
     def _build_welcome(self) -> None:
-        tk.Label(self.content, text="Let's get iiSU-PC set up.", font=FONT_HEADING, bg=PANEL_BG, fg=TEXT).pack(anchor="w")
+        tk.Label(self.content, text="Let's get Community-iiSU-PC set up.", font=FONT_HEADING, bg=PANEL_BG, fg=TEXT).pack(anchor="w")
         tk.Label(
             self.content,
             text="A few quick questions and you'll be ready to play -- no manual\nconfig.json editing needed afterward.",
@@ -349,7 +353,7 @@ class OnboardingWizard(tk.Tk):
         tk.Label(self.content, text="Where are your PC emulators installed?", font=FONT_HEADING, bg=PANEL_BG, fg=TEXT).pack(anchor="w")
         tk.Label(
             self.content,
-            text="iiSU-PC searches these folders for the emulators it knows about\n"
+            text="Community-iiSU-PC searches these folders for the emulators it knows about\n"
             "(DuckStation, Dolphin, RetroArch, and more) -- install those yourself\n"
             "first if you haven't already, this project doesn't bundle them.",
             font=FONT_BODY, bg=PANEL_BG, fg=TEXT_DIM, justify="left",
@@ -417,7 +421,7 @@ class OnboardingWizard(tk.Tk):
 
         lines = [f"Found {len(found_labels)} of {total} known emulators: {', '.join(found_labels) or '(none yet)'}"]
         if missing_labels:
-            lines.append(f"Not found yet: {', '.join(missing_labels)} -- install any of these and iiSU-PC will pick them up automatically.")
+            lines.append(f"Not found yet: {', '.join(missing_labels)} -- install any of these and Community-iiSU-PC will pick them up automatically.")
         self.scan_status_label.config(text="\n".join(lines), fg=GREEN if found_labels else TEXT_DIM)
 
     # -- Step 3: Emulator mappings -------------------------------------------------
@@ -784,7 +788,7 @@ class OnboardingWizard(tk.Tk):
         # cold-booting the VM right here to "apply" it: this AVD always
         # cold-boots on its very first real start regardless (-no-snapshot,
         # never resumed), so the setting is already going to be in effect
-        # the moment the person starts iiSU-PC themselves -- proving it
+        # the moment the person starts Community-iiSU-PC themselves -- proving it
         # here first, unprompted, just meant onboarding finished by
         # dropping whoever just set this up straight into a live session
         # instead of letting them start it deliberately, whenever they're
@@ -794,7 +798,7 @@ class OnboardingWizard(tk.Tk):
 
         self.finish_status_label.config(
             text=(
-                "Saved. You're all set -- close this and start iiSU-PC yourself whenever you're "
+                "Saved. You're all set -- close this and start Community-iiSU-PC yourself whenever you're "
                 "ready (the desktop shortcut, or Manager's Home page). Two things worth double-"
                 "checking before you do: your real ROM library actually needs to be reachable from "
                 "inside the VM at the folder you mapped (this only points at it, nothing gets copied "

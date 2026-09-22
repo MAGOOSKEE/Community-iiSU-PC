@@ -31,14 +31,12 @@ from shared import theme
 from shared.theme import BG, GREEN, PANEL_BG, RED, TEXT, TEXT_DIM, FONT_BODY, FONT_HEADING, FONT_MONO, FONT_TITLE, Card, QueueWriter, draw_gradient_bar
 
 BRIDGE_DIR = setup_wizard.BRIDGE_DIR
-sys.path.insert(0, str(BRIDGE_DIR))
-import create_shortcut
 
 
 class SetupApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("iiSU-PC Setup")
+        self.title("Community-iiSU-PC Setup")
         self.geometry("720x600")
         self.minsize(620, 480)
         self.configure(bg=BG)
@@ -62,7 +60,7 @@ class SetupApp(tk.Tk):
     def _build_ui(self) -> None:
         header = tk.Frame(self, bg=BG)
         header.pack(fill="x", padx=20, pady=(18, 8))
-        tk.Label(header, text="iiSU-PC Setup", font=FONT_TITLE, bg=BG, fg=TEXT).pack(anchor="w")
+        tk.Label(header, text="Community-iiSU-PC Setup", font=FONT_TITLE, bg=BG, fg=TEXT).pack(anchor="w")
         tk.Label(
             header,
             text="Patches your own copy of iiSU to hand off game launches to real PC\nemulators, and sets up a self-contained Android VM to run it in.",
@@ -105,9 +103,6 @@ class SetupApp(tk.Tk):
 
         self.status_label = tk.Label(self, text="Ready.", font=FONT_BODY, bg=BG, fg=TEXT_DIM, anchor="w")
         self.status_label.pack(fill="x", padx=20, pady=(0, 8))
-
-        self.next_steps_frame = tk.Frame(self, bg=BG)
-        # Populated (and packed) only after a successful setup.
 
     def _autodetect_apk(self) -> None:
         found = setup_wizard.find_input_apk()
@@ -185,9 +180,18 @@ class SetupApp(tk.Tk):
         self.start_button.config(state="normal")
 
         if error is None:
-            self.status_label.config(text="Setup complete.", fg=GREEN)
-            self._show_next_steps()
+            self.status_label.config(text="Setup complete -- opening the setup wizard...", fg=GREEN)
             self._open_onboarding()
+            # Closing this window (instead of leaving it open with "next
+            # step" buttons) hands off cleanly to onboarding_wizard.py --
+            # manager.py, which spawned this process, notices it exit and
+            # brings itself back to the front automatically (see its
+            # _apply_status), so there's no need for a manual "Open
+            # Manager" button here either. The desktop shortcut is already
+            # created automatically by run_setup() itself. A short delay
+            # so the "Setup complete" status is actually visible for a
+            # moment instead of the window just vanishing.
+            self.after(1200, self.destroy)
         else:
             self.status_label.config(text=f"Setup failed: {error}", fg=RED)
             if isinstance(error, setup_wizard.VirtualizationError):
@@ -224,18 +228,6 @@ class SetupApp(tk.Tk):
         else:
             messagebox.showerror("Setup failed", f"{message}\n\nSee the log for details.")
 
-    def _show_next_steps(self) -> None:
-        self.next_steps_frame.pack(fill="x", padx=20, pady=(0, 18))
-        tk.Label(self.next_steps_frame, text="Next step:", font=FONT_HEADING, bg=BG, fg=TEXT).pack(anchor="w", pady=(0, 6))
-        ttk.Button(
-            self.next_steps_frame, text="Open iiSU-PC Manager", style="Accent.TButton",
-            command=lambda: self._launch_bridge_script("manager.py"),
-        ).pack(side="left")
-        ttk.Button(
-            self.next_steps_frame, text="Create Desktop Shortcut", style="Ghost.TButton",
-            command=self._create_shortcut,
-        ).pack(side="left", padx=(10, 0))
-
     def _open_onboarding(self) -> None:
         """Runs right after a successful setup, unprompted -- roms_dir still
         holds the template's placeholder value at this point, so without
@@ -243,27 +235,10 @@ class SetupApp(tk.Tk):
         their own way to a settings screen. Walks through ROM directory,
         emulator folders, display, and hotkeys one step at a time instead
         of dropping manager.py's settings pages on someone who's never seen
-        this app before; that Manager is still there afterward via "Open
-        iiSU-PC Manager" for anything this doesn't cover."""
+        this app before; manager.py itself is still there afterward (it
+        hid itself while Setup was running and brings itself back once
+        this window closes -- see manager.py's _apply_status)."""
         subprocess.Popen([sys.executable, "onboarding_wizard.py"], cwd=str(BRIDGE_DIR))
-
-    def _create_shortcut(self) -> None:
-        try:
-            path = create_shortcut.create_desktop_shortcut(self.apk_path)
-        except Exception as e:
-            messagebox.showerror("Couldn't create shortcut", str(e))
-            return
-        messagebox.showinfo("Shortcut created", f"Created {path.name} on your desktop.")
-
-    def _launch_bridge_script(self, script_name: str) -> None:
-        # CREATE_NO_WINDOW: this only ever launches manager.py, a GUI app
-        # with nothing worth showing in a console -- a console window
-        # alongside it would just be clutter with no content.
-        subprocess.Popen(
-            [sys.executable, script_name],
-            cwd=str(BRIDGE_DIR),
-            creationflags=subprocess.CREATE_NO_WINDOW,
-        )
 
 
 if __name__ == "__main__":

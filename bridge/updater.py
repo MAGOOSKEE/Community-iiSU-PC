@@ -1,5 +1,5 @@
 """
-Checks for updates to iiSU-PC itself, run first thing by start_iisu_pc.py
+Checks for updates to Community-iiSU-PC itself, run first thing by start_iisu_pc.py
 so a normal day-to-day start always at least knows whether it's running
 stale code -- and, for a git checkout, gets current automatically.
 
@@ -37,10 +37,10 @@ Two install shapes, two different checks:
 Best-effort throughout: no internet, GitHub/the remote being unreachable,
 or git not being on PATH all skip silently (well, loudly to the log, but
 never fatally) -- this is a nice-to-have layered on top of starting
-iiSU-PC, never a prerequisite for it. A successful pull/update also can't
+Community-iiSU-PC, never a prerequisite for it. A successful pull/update also can't
 take effect in the process that just applied it (Python already loaded
 the old files into memory) -- it always says so, since the honest fix is
-"restart iiSU-PC," not pretending to hot-swap running code. Likewise, if
+"restart Community-iiSU-PC," not pretending to hot-swap running code. Likewise, if
 any file couldn't be overwritten (Windows keeping something open is the
 realistic case -- an in-use build-tools binary, say), VERSION is left
 unbumped on purpose, so an incomplete update is retried in full next
@@ -57,7 +57,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent.parent
 GIT_DIR = PROJECT_ROOT / ".git"
 VERSION_PATH = PROJECT_ROOT / "VERSION"
-GITHUB_REPO = "MAGOOSKEE/iiSU-PC"
+GITHUB_REPO = "MAGOOSKEE/Community-iiSU-PC"
 GIT_TIMEOUT = 10.0
 HTTP_TIMEOUT = 5.0
 DOWNLOAD_TIMEOUT = 30.0
@@ -114,7 +114,7 @@ def check_and_apply_git_update() -> None:
 
     pull = _run_git(["pull", "--ff-only", "origin", branch])
     if pull is not None and pull.returncode == 0:
-        print(f"[updater] updated to the latest {branch}. This run is still using the old code -- restart iiSU-PC to pick it up.")
+        print(f"[updater] updated to the latest {branch}. This run is still using the old code -- restart Community-iiSU-PC to pick it up.")
     else:
         reason = pull.stderr.strip()[:300] if pull else "git not found or pull timed out"
         print(
@@ -155,7 +155,7 @@ def check_release_update() -> None:
         # meant to be "latest" for this project right now.
         req = urllib.request.Request(
             f"https://api.github.com/repos/{GITHUB_REPO}/releases",
-            headers={"User-Agent": "iiSU-PC", "Accept": "application/vnd.github+json"},
+            headers={"User-Agent": "Community-iiSU-PC", "Accept": "application/vnd.github+json"},
         )
         with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
             releases = json.loads(resp.read())
@@ -189,7 +189,7 @@ def check_release_update() -> None:
         staging_dir.mkdir(parents=True)
 
         zip_path = staging_dir / "release.zip"
-        zip_req = urllib.request.Request(zip_url, headers={"User-Agent": "iiSU-PC"})
+        zip_req = urllib.request.Request(zip_url, headers={"User-Agent": "Community-iiSU-PC"})
         with urllib.request.urlopen(zip_req, timeout=DOWNLOAD_TIMEOUT) as resp, open(zip_path, "wb") as f:
             shutil.copyfileobj(resp, f)
 
@@ -215,7 +215,7 @@ def check_release_update() -> None:
             return
 
         VERSION_PATH.write_text(latest + "\n", encoding="utf-8")
-        print(f"[updater] updated to {latest}. This run is still using the old code -- restart iiSU-PC to pick it up.")
+        print(f"[updater] updated to {latest}. This run is still using the old code -- restart Community-iiSU-PC to pick it up.")
     except Exception as e:
         print(f"[updater] update download/apply failed ({e}) -- this install is unchanged, still on {current}")
     finally:

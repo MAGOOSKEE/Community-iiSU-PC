@@ -6,7 +6,8 @@ no reused SDK download, no reused AVD, no leftover config.
 Stops the AVD/bridge first (if running) via bridge/stop_iisu_pc.py, then
 removes:
   - bridge/'s generated state: the portable SDK+AVD copy, config.json,
-    caches, the extracted icon, and the last emulator.log/bridge.log/stop.log
+    caches, the extracted icon, and the last emulator.log/bridge.log/
+    stop.log/launch_history.log
   - installer/'s generated state: its own SDK download, the patch
     keystore, the preserved build-tools copy, working directories
   - the actual AVD(s) under ~/.android/avd/ (and the stray per-AVD log
@@ -33,7 +34,6 @@ Usage:
 """
 
 import shutil
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -94,8 +94,14 @@ def stop_running_instance() -> None:
         stop_iisu_pc.main()
     except Exception as e:
         print(f"[uninstall] couldn't run a clean stop ({e}) -- falling back to a process sweep")
-        subprocess.run(["taskkill", "/IM", "emulator.exe", "/T", "/F"], capture_output=True)
-        subprocess.run(["taskkill", "/IM", "qemu-system-x86_64.exe", "/T", "/F"], capture_output=True)
+        # Matched by command line, not by bare image name -- taskkill /IM
+        # emulator.exe (or qemu-system-x86_64.exe) would also take down an
+        # unrelated Android Studio emulator instance or another qemu-based
+        # tool on the same PC. Every process this project launches runs out
+        # of android-sdk-portable/, which scopes this to just this AVD (see
+        # the matching, normally-used sweep in stop_iisu_pc.py).
+        import stop_iisu_pc
+        stop_iisu_pc.kill_by_cmdline_match("android-sdk-portable")
 
 
 def detect_avd_name() -> str:
@@ -121,6 +127,7 @@ def collect_targets(avd_name: str) -> list[Path]:
         BRIDGE_DIR / "emulator.log",
         BRIDGE_DIR / "bridge.log",
         BRIDGE_DIR / "stop.log",
+        BRIDGE_DIR / "launch_history.log",
         BRIDGE_DIR / ".iisu_icon.ico",
         BRIDGE_DIR / "_icon_extract_tmp",
         INSTALLER_DIR / "android-sdk",
@@ -143,7 +150,7 @@ def collect_targets(avd_name: str) -> list[Path]:
         import create_shortcut
         targets.append(create_shortcut.desktop_dir() / create_shortcut.SHORTCUT_NAME)
     except Exception:
-        targets.append(Path.home() / "Desktop" / "iiSU-PC.lnk")
+        targets.append(Path.home() / "Desktop" / "Community-iiSU-PC.lnk")
 
     return targets
 
@@ -168,7 +175,7 @@ def print_preview(targets: list[Path]) -> None:
 
 
 def main() -> None:
-    print("=== iiSU-PC uninstall ===\n")
+    print("=== Community-iiSU-PC uninstall ===\n")
     print("This removes the Android VM, its SDK, your bridge config, the signing")
     print("keystore, and the desktop shortcut. It does NOT touch your ROM library,")
     print("your PC emulators, or the iiSU APK you supplied in installer/input/.\n")

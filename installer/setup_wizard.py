@@ -1,5 +1,5 @@
 """
-First-time setup for iiSU-PC: bootstraps a self-contained Android SDK and
+First-time setup for Community-iiSU-PC: bootstraps a self-contained Android SDK and
 AVD (sdk_bootstrap.py), patches a copy of iiSU that you supply yourself
 (patch_iisu.py) to redirect its ROM launches to a PC-side bridge, installs
 it, and points the bridge/ folder at the result.
@@ -372,7 +372,7 @@ def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_a
 
     install_default_redirectors()
 
-    print("[setup] shutting the AVD back down (iiSU-PC.bat will bring it up properly from here on)...")
+    print("[setup] shutting the AVD back down (Community-iiSU-PC Manager.bat will bring it up properly from here on)...")
     subprocess.run(["adb", "emu", "kill"], capture_output=True, text=True)
     deadline = time.time() + 15
     while time.time() < deadline and is_avd_connected():
@@ -488,7 +488,7 @@ def create_desktop_shortcut(apk_path: Path) -> None:
         shortcut_path = create_shortcut.create_desktop_shortcut(apk_path)
         print(f"[setup] created a desktop shortcut: {shortcut_path}")
     except Exception as e:
-        print(f"[setup] couldn't create a desktop shortcut ({e}) -- you can still use iiSU-PC.bat directly")
+        print(f"[setup] couldn't create a desktop shortcut ({e}) -- you can still use Community-iiSU-PC Manager.bat directly")
 
 
 def run_setup(apk_path: Path, on_stage: Callable[[str, int, int], None] | None = None) -> None:
@@ -510,7 +510,7 @@ def run_setup(apk_path: Path, on_stage: Callable[[str, int, int], None] | None =
         if on_stage:
             on_stage(label, index + 1, total)
 
-    print("=== iiSU-PC first-time setup ===\n")
+    print("=== Community-iiSU-PC first-time setup ===\n")
     stage(0)
     require_java()
     ensure_pillow()
@@ -561,7 +561,7 @@ def run_setup(apk_path: Path, on_stage: Callable[[str, int, int], None] | None =
 
     print("\n=== Setup complete ===")
     print(f"iiSU is installed and the bridge is configured for AVD '{DEFAULT_AVD_NAME}'.")
-    print("Run 'iiSU-PC.bat' (one folder up) to configure and launch.")
+    print("Run 'Community-iiSU-PC Manager.bat' (one folder up) to configure and launch.")
 
 
 def main() -> None:

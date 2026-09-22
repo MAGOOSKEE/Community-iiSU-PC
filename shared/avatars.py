@@ -27,7 +27,7 @@ def fetch_avatar_bytes(username: str) -> bytes | None:
     try:
         req = urllib.request.Request(
             GITHUB_AVATAR_URL.format(username=username),
-            headers={"User-Agent": "iiSU-PC"},
+            headers={"User-Agent": "Community-iiSU-PC"},
         )
         with urllib.request.urlopen(req, timeout=FETCH_TIMEOUT) as resp:
             return resp.read()

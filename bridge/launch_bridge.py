@@ -133,6 +133,13 @@ def resolve_vk(key: str) -> int:
 def _is_key_down(vk: int) -> bool:
     return bool(user32.GetAsyncKeyState(vk) & 0x8000)
 
+# Loopback only: the AVD reaches this over its host-loopback alias
+# (10.0.2.2), which is routed to the host's own 127.0.0.1 regardless of
+# which local address this actually binds -- there's no reason for this to
+# be reachable from the LAN. The protocol has no authentication at all
+# (anything that can open the socket can make this launch an arbitrary
+# configured emulator, or hand an arbitrary app_id to Steam's URI handler),
+# so binding 0.0.0.0 would expose the bridge unnecessarily.
 HOST = "127.0.0.1"
 
 INTENT_CMP_RE = re.compile(r"cmp=(\S+)")
@@ -335,7 +342,7 @@ def save_path_cache(cache: dict) -> None:
         pass
 
 
-def log_launch(line: str, notify: bool = False, notify_title: str = "iiSU-PC") -> None:
+def log_launch(line: str, notify: bool = False, notify_title: str = "Community-iiSU-PC") -> None:
     """Appends one line to launch_history.log with a timestamp -- every
     launch attempt gets logged here regardless of outcome, not just
     failures, so there's always a record to check against ("did this

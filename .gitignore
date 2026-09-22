@@ -36,3 +36,20 @@ __pycache__/
 # OS/editor cruft
 .DS_Store
 Thumbs.db
+/bridge/bridge.log
+/bridge/stop.log
+
+# Local/build artifacts
+/.claude/
+/Homelab-Knowledge-Base.md
+/iiSU-PC-PROJECT-CONTEXT.md
+/dist/
+/tools/
+/stub-duckstation/
+/iiSU-PC/
+/iiSU-analysis/
+/iiSU-decompiled/
+/iiSU-smali/
+/iiSU-Alpha-*.apk
+/iiSU-patched*.apk
+/iiSU-patched*.apk.idsig

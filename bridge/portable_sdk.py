@@ -1,6 +1,6 @@
 """
 Self-contained, portable Android SDK + AVD storage under the bridge folder
-itself (android-sdk-portable/), so iiSU-PC never depends on wherever
+itself (android-sdk-portable/), so Community-iiSU-PC never depends on wherever
 Android Studio happened to install its SDK/AVD.
 
 Why: emulator.exe launched against the system-wide install under

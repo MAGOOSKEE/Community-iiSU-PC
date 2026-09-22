@@ -84,7 +84,7 @@ $contextFont = New-Object System.Drawing.Font("Segoe UI Semibold", 14)
 $flavorFont = New-Object System.Drawing.Font("Segoe UI", 10, [System.Drawing.FontStyle]::Italic)
 
 $title = New-Object System.Windows.Forms.Label
-$title.Text = "iiSU-PC"
+$title.Text = "Community-iiSU-PC"
 $title.ForeColor = $accent
 $title.Font = $titleFont
 $title.AutoSize = $true
@@ -143,7 +143,7 @@ def show(context: str) -> subprocess.Popen | None:
     aren't available for any reason -- a missing overlay is a cosmetic
     regression, never a reason to fail an actual start or game launch.
 
-    context is a short status line (e.g. "Booting iiSU-PC..." or
+    context is a short status line (e.g. "Booting Community-iiSU-PC..." or
     "Waiting on DuckStation...") describing what's actually happening;
     paired with a randomly-picked, purely-for-fun line underneath."""
     script = (

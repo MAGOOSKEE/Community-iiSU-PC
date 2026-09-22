@@ -1,8 +1,8 @@
-# iiSU-PC Setup
+# Community-iiSU-PC Setup
 
 Runs iiSU (an Android emulation frontend) inside a Windows-hosted Android VM, patched so launching a game in iiSU hands off to a real PC emulator instead of an Android one.
 
-**This does not include iiSU itself.** iiSU is closed-source, third-party software this project has no affiliation with -- you need your own copy of its APK. This tool patches *your* copy, the same way any APK-patching/modding tool works; it never bundles or redistributes iiSU's binary.
+**This does not include iiSU itself.** iiSU is closed-source, third-party software this project has no direct affiliation with. You will need your own copy of its APK. This tool patches *your* copy, the same way any APK-patching/modding tool works; it never bundles or redistributes iiSU's binary.
 
 ## Requirements
 
@@ -10,14 +10,14 @@ Runs iiSU (an Android emulation frontend) inside a Windows-hosted Android VM, pa
 - A JDK on PATH (`java` and `keytool` need to work from a terminal) -- e.g. [Eclipse Temurin](https://adoptium.net/)
 - Python 3.11+
 - Your own copy of the iiSU APK
-- Whichever PC emulators you actually want to use (DuckStation, Dolphin, PCSX2, etc.) -- install these yourself
+- Whichever PC emulators you want to use (DuckStation, Dolphin, PCSX2, etc.) install these yourself
 - A few GB of free disk space and a decent internet connection (first run downloads the Android SDK + a system image)
-- **CPU VIRTUALIZATION MUST BE TURNED ON!** Do this in your bios. 
+- **CPU VIRTUALIZATION MUST BE TURNED ON!** Do this in your bios. Ensure that Hyper-V or the Windows Hypervisor Platform and Virtual Machine Platform are enabled also.
 
 ## First-time setup
 
 1. Drop your iiSU APK into `installer/input/`, or just point Setup at it with Browse.
-2. Run **`iiSU-PC Manager.bat`** (in `bridge/`) and click **Run Setup** on its Home page.
+2. Run **`Community-iiSU-PC Manager.bat`** and click **Run Setup** on its Home page.
 
 Setup checks your APK is actually iiSU and that you have enough disk space, then downloads and sets up a self-contained Android SDK and virtual device, patches your APK, installs it, installs a redirector app for every console `shared/emulator_defaults.py` knows about, and creates a desktop shortcut. It shows which step it's on, since first run can take a while and several GB.
 
@@ -25,7 +25,7 @@ Once it's done, a short onboarding wizard walks you through your ROM directory, 
 
 ## Day to day use
 
-Double-click the **desktop shortcut**, or run **`iiSU-PC Manager.bat`** (in `bridge/`) for the full Manager -- one window, navigated with the hamburger (☰) sidebar:
+Double-click the **desktop shortcut**, or run **`Community-iiSU-PC Manager.bat`** for the full Manager -- one window, navigated with the hamburger menu sidebar:
 
 - **Home** -- AVD/bridge status, Open/Stop, a running status line, and quick buttons to your ROMs folder and logs.
 - **ROM Directory** -- configure the host folder containing your ROM library.
@@ -39,11 +39,11 @@ Double-click the **desktop shortcut**, or run **`iiSU-PC Manager.bat`** (in `bri
 - **Credits** -- who built this and how (see below).
 - **Uninstall** -- below a divider at the bottom of the sidebar.
 
-Every start checks for updates (`bridge/updater.py`) and re-syncs your ROM library into the VM automatically -- both are no-ops when there's nothing to do, so neither adds noticeable time on repeat starts. iiSU still needs to notice new games: hit "Rescan full library" in its Library settings.
+On startup, Community-iiSU-PC re-syncs your ROM library into the VM automatically. Automatic project updates are opt-in and can be enabled from the Manager's Diagnostics page; **Check for Updates Now** only checks whether an update is available and does not download or install it. iiSU still needs to notice new games: hit "Rescan full library" in its Library settings.
 
-A fullscreen overlay (`bridge/boot_overlay.py`) covers the AVD boot and the emulator hand-off, showing what's happening ("Booting iiSU-PC...", "Waiting on DuckStation...") instead of raw desktop. It's off while the debug console checkbox is on.
+A fullscreen overlay (`bridge/boot_overlay.py`) covers the AVD boot and the emulator hand-off, showing what's happening ("Booting Community-iiSU-PC...", "Waiting on DuckStation...") instead of raw desktop. It's off while the debug console checkbox is on.
 
-Inside the VM, `Ctrl+Alt+Q` force-quits the current game and returns to iiSU; `Ctrl+Alt+X` closes iiSU and shuts down the VM entirely (both rebindable in Advanced). Holding **Back+Start** together on a controller for 2.5s does the same full shutdown.
+By default, **Escape** controls game quitting and shutdown: tap it while a game is running to force-quit the game and return to iiSU, tap it while already in iiSU to shut down Community-iiSU-PC, or hold it for 5 seconds at any time to shut down iiSU and the VM entirely. The keyboard controls are rebindable in Advanced. Holding **Back+Start** together on a controller for 2.5s also performs a full shutdown.
 
 ## Windows Apps
 
@@ -87,7 +87,7 @@ installer/
 
 bridge/
   manager.py               day-to-day settings, Windows Apps, Android storage, backup/restore, diagnostics
-  iiSU-PC Manager.bat       launches manager.py
+  Community-iiSU-PC Manager.bat       launches manager.py
   emulator_dialogs.py      dialogs shared by manager.py and onboarding_wizard.py
   onboarding_wizard.py     step-by-step first-run setup
   bridge_config.py         shared config.json loader
@@ -103,7 +103,13 @@ bridge/
   console_names.py         resolves a ROM folder name to one of iiSU's known consoles
   create_shortcut.py       creates the desktop shortcut
   winapi.py                shared Win32 window-management helpers
+
+tests/                    unit tests for the pure routing/mapping logic (no AVD needed)
 ```
+
+## Running tests
+
+`python -m unittest discover -s tests` runs the unit tests covering the console/emulator routing logic (`shared/emulator_defaults.py`, `bridge/console_names.py`, `bridge/launch_bridge.py`'s `find_emulator_for_package`). Stdlib-only, no AVD or adb needed -- these only check the pure mapping/decision logic, not an actual end-to-end launch.
 
 ## If something breaks
 
@@ -116,7 +122,7 @@ bridge/
 
 ## Credits
 
-- **[MAGOOSKEE](https://github.com/MAGOOSKEE)** -- project owner, built and maintains iiSU-PC.
+- **[MAGOOSKEE](https://github.com/MAGOOSKEE)** -- project owner, built and maintains Community-iiSU-PC.
 - **[Claude](https://github.com/claude)** (Anthropic) -- AI coding assistant; wrote and refactored most of this codebase in collaboration with MAGOOSKEE.
 
 Both are shown with live GitHub avatars on the Manager's Credits page.
