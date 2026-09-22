@@ -23,6 +23,10 @@ user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintyp
 user32.GetWindowThreadProcessId.restype = wintypes.DWORD
 user32.IsWindowVisible.argtypes = [wintypes.HWND]
 user32.IsWindowVisible.restype = wintypes.BOOL
+user32.IsWindow.argtypes = [wintypes.HWND]
+user32.IsWindow.restype = wintypes.BOOL
+user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+user32.PostMessageW.restype = wintypes.BOOL
 user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]
 user32.GetWindowTextLengthW.restype = ctypes.c_int
 user32.GetWindowTextW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
@@ -52,7 +56,15 @@ user32.GetWindowLongPtrW.restype = ctypes.c_ssize_t
 user32.SetWindowLongPtrW.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
 user32.SetWindowLongPtrW.restype = ctypes.c_ssize_t
 kernel32.GetCurrentThreadId.restype = wintypes.DWORD
+kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+kernel32.OpenProcess.restype = wintypes.HANDLE
+kernel32.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
+kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+kernel32.CloseHandle.restype = wintypes.BOOL
 
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+WM_CLOSE = 0x0010
 SW_HIDE = 0
 SW_MAXIMIZE = 3
 SW_MINIMIZE = 6
@@ -95,6 +107,162 @@ def _window_title(hwnd) -> str:
     return buf.value
 
 
+def list_visible_windows() -> set[int]:
+    """Return handles for the currently visible, titled top-level windows.
+
+    Native Windows apps may hand their UI to a different process than the one
+    returned by Popen, so launch_bridge can snapshot this set before launch and
+    identify the new top-level window afterward without relying on a PID.
+    """
+    windows: set[int] = set()
+
+    def callback(hwnd, _lparam):
+        if user32.IsWindowVisible(hwnd) and _window_title(hwnd):
+            windows.add(int(hwnd))
+        return True
+
+    user32.EnumWindows(WNDENUMPROC(callback), 0)
+    return windows
+
+
+def wait_for_new_visible_window(existing: set[int], timeout: float = 10.0) -> int | None:
+    """Wait for a visible, titled top-level window not in `existing`."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        current = list_visible_windows()
+        new_windows = current - existing
+        if new_windows:
+            # EnumWindows order is not guaranteed, but a newly launched normal
+            # desktop app ordinarily contributes a single new top-level window.
+            return next(iter(new_windows))
+        time.sleep(0.2)
+    return None
+
+
+
+
+def window_process_name(hwnd: int) -> str:
+    """Return the executable filename that owns a top-level window, if available."""
+    pid = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    if not pid.value:
+        return ""
+
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
+    if not handle:
+        return ""
+    try:
+        size = wintypes.DWORD(32768)
+        buf = ctypes.create_unicode_buffer(size.value)
+        if not kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+            return ""
+        return buf.value.rsplit("\\", 1)[-1]
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def wait_for_new_visible_window_excluding_processes(
+    existing: set[int],
+    excluded_processes: set[str],
+    timeout: float = 60.0,
+    stable_seconds: float = 1.5,
+) -> int | None:
+    """Wait for a persistent new window whose owner is not a launcher process.
+
+    This is intended for protocol launches such as Steam. Steam's own
+    "Launching..." popup is a new visible HWND too, but it belongs to
+    steam.exe/steamwebhelper.exe rather than to the launched game.
+    """
+    excluded = {name.casefold() for name in excluded_processes}
+    deadline = time.time() + timeout
+    first_seen: dict[int, float] = {}
+
+    while time.time() < deadline:
+        now = time.time()
+        current = list_visible_windows()
+        candidates = current - existing
+
+        for hwnd in list(first_seen):
+            if hwnd not in candidates or not user32.IsWindow(hwnd):
+                first_seen.pop(hwnd, None)
+
+        for hwnd in candidates:
+            process_name = window_process_name(hwnd)
+            if process_name and process_name.casefold() in excluded:
+                continue
+            first_seen.setdefault(hwnd, now)
+            if now - first_seen[hwnd] >= stable_seconds:
+                return hwnd
+
+        time.sleep(0.2)
+    return None
+
+
+def wait_for_stable_new_visible_window(
+    existing: set[int],
+    timeout: float = 45.0,
+    stable_seconds: float = 2.0,
+    ignore_first_seconds: float = 1.0,
+) -> int | None:
+    """Wait for a *persistent* new top-level window.
+
+    URI launchers such as Steam commonly create a short-lived "Launching..."
+    popup before the real game window. Returning the first new HWND makes that
+    popup look like the game: when it disappears, launch_bridge restores iiSU
+    too early. A candidate must therefore remain visible/alive for
+    `stable_seconds` before it is accepted.
+    """
+    deadline = time.time() + timeout
+    started = time.time()
+    first_seen: dict[int, float] = {}
+
+    while time.time() < deadline:
+        now = time.time()
+        current = list_visible_windows()
+        new_windows = current - existing
+
+        # Forget candidates that vanished; a Steam launch popup normally lands here.
+        for hwnd in list(first_seen):
+            if hwnd not in new_windows or not user32.IsWindow(hwnd):
+                first_seen.pop(hwnd, None)
+
+        if now - started >= ignore_first_seconds:
+            for hwnd in new_windows:
+                first_seen.setdefault(hwnd, now)
+                if now - first_seen[hwnd] >= stable_seconds:
+                    return hwnd
+
+        time.sleep(0.2)
+    return None
+
+
+def close_window(hwnd: int) -> bool:
+    """Ask a top-level window to close normally, like clicking its X button."""
+    if not hwnd or not user32.IsWindow(hwnd):
+        return False
+    return bool(user32.PostMessageW(hwnd, WM_CLOSE, 0, 0))
+
+
+def wait_for_window_to_close(
+    hwnd: int,
+    poll_interval: float = 0.25,
+    timeout: float | None = None,
+) -> bool:
+    """Wait for a top-level HWND to be destroyed.
+
+    Returns True when the HWND closes. If timeout is provided, returns False
+    when that many seconds elapse while the HWND is still valid.
+    """
+    deadline = time.monotonic() + timeout if timeout is not None else None
+
+    while user32.IsWindow(hwnd):
+        if deadline is not None and time.monotonic() >= deadline:
+            return False
+        time.sleep(poll_interval)
+
+    return True
+
+
 def find_window_by_pid(pid: int) -> int | None:
     def matches(hwnd):
         owner_pid = wintypes.DWORD()
@@ -102,6 +270,38 @@ def find_window_by_pid(pid: int) -> int | None:
         return owner_pid.value == pid and user32.IsWindowVisible(hwnd)
 
     return _find_window(matches)
+
+
+def wait_for_visible_window_by_pid(
+    pid: int,
+    timeout: float = 5.0,
+    stable_seconds: float = 0.5,
+) -> int | None:
+    """Wait for a visible window owned by `pid` to remain stable.
+
+    Native games can destroy and recreate their top-level HWND during display
+    mode or resolution changes. This lets launch_bridge reacquire the
+    replacement window without adopting an unrelated application's HWND.
+    """
+    deadline = time.monotonic() + timeout
+    candidate: int | None = None
+    first_seen: float | None = None
+
+    while time.monotonic() < deadline:
+        hwnd = find_window_by_pid(pid)
+
+        if hwnd is None or not user32.IsWindow(hwnd):
+            candidate = None
+            first_seen = None
+        elif hwnd != candidate:
+            candidate = hwnd
+            first_seen = time.monotonic()
+        elif first_seen is not None and time.monotonic() - first_seen >= stable_seconds:
+            return hwnd
+
+        time.sleep(0.2)
+
+    return None
 
 
 def find_window_by_title(substring: str) -> int | None:

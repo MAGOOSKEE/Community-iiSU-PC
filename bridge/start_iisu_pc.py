@@ -298,13 +298,19 @@ def sync_rom_library() -> None:
 
 
 def main() -> None:
-    updater.check_for_updates()
-
     try:
         config = load_config()
     except ConfigMissingError as e:
         print(f"[start] {e}")
         sys.exit(1)
+
+    # Automatic project updates are opt-in. Customized installations can
+    # therefore start safely without upstream files silently replacing local
+    # bridge/installer changes. Manager can expose this setting later.
+    if config.get("auto_updates", False):
+        updater.check_for_updates()
+    else:
+        print("[updater] automatic Community-iiSU-PC updates are disabled")
     avd_name = config["avd_name"]
     port = config["bridge_port"]
     debug_console = config.get("debug_show_console_windows", False)

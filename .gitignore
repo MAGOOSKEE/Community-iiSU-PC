@@ -17,11 +17,17 @@
 /bridge/.path_cache.json
 /bridge/.runtime_state.json
 /bridge/emulator.log
-/bridge/bridge.log
-/bridge/stop.log
-/bridge/launch_history.log
 /bridge/.iisu_icon.ico
 /bridge/_icon_extract_tmp/
+
+# Windows Apps / Manager runtime data
+/bridge/windows_apps.json
+/bridge/manager_debug.log
+/bridge/bridge_debug.log
+/bridge/launch_history.log
+/bridge/cache/
+/bridge/iidb/
+/bridge/restore_safety/
 
 # Python
 __pycache__/
@@ -30,12 +36,10 @@ __pycache__/
 # OS/editor cruft
 .DS_Store
 Thumbs.db
+/bridge/bridge.log
+/bridge/stop.log
 
-# This checkout's working directory also holds unrelated local files that
-# were never part of this project and must never be tracked here: personal
-# notes, other experiments living alongside it, and build/decompile output
-# containing iiSU's own copyrighted material. Explicit and anchored to the
-# repo root, so a future `git add -A` can't sweep any of it in by accident.
+# Local/build artifacts
 /.claude/
 /Homelab-Knowledge-Base.md
 /iiSU-PC-PROJECT-CONTEXT.md
