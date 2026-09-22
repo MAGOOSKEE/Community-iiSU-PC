@@ -1,6 +1,6 @@
 """
 Applies the iiSU-PC interposer patch to a copy of the iiSU APK: decompiles
-it, injects the LaunchBridge classes (smali_patch/), redirects its
+it, injects the iiSU-PC bridge classes (smali_patch/), redirects its
 ROM-launch startActivity call sites to LaunchBridge.launch(), rebuilds,
 zipaligns, and signs the result with a freshly-generated debug keystore.
 
@@ -139,11 +139,103 @@ def patch_main_activity(path: Path) -> int:
     return patched
 
 
+
+def patch_primary_home_actions_holder(decompiled_dir: Path) -> Path:
+    """Expose iiSU's existing injected je6 PrimaryHomeActions instance.
+
+    je6 already owns the synchronized WeakReference<MainActivity>. This patch
+    exposes only the je6 object itself through a static field so MediaBridge can
+    call je6.a() and reuse iiSU's existing activity lifecycle tracking.
+
+    Anchored on class/method text rather than line numbers and idempotent.
+    """
+    candidates = []
+    for path in decompiled_dir.rglob("je6.smali"):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if ".class public final Lje6;" in text and ".method public final a()Lcom/iisulauncher/launcher/MainActivity;" in text:
+            candidates.append(path)
+
+    if len(candidates) != 1:
+        raise RuntimeError(
+            f"Expected exactly one iiSU PrimaryHomeActions je6.smali, found {len(candidates)}. "
+            "iiSU's code has likely changed and this patch needs updating by hand."
+        )
+
+    path = candidates[0]
+    text = path.read_text(encoding="utf-8", errors="replace")
+
+    static_field = ".field public static volatile c:Lje6;"
+    if static_field not in text:
+        field_anchor = "# instance fields"
+        if field_anchor not in text:
+            raise RuntimeError("Found je6.smali but could not find its instance-fields anchor.")
+        text = text.replace(
+            field_anchor,
+            "# iiSU-PC: expose this existing injected PrimaryHomeActions holder.\n"
+            f"{static_field}\n\n"
+            f"{field_anchor}",
+            1,
+        )
+
+    sput = "    sput-object p0, Lje6;->c:Lje6;"
+    if sput not in text:
+        ctor_start = text.find(".method public constructor <init>()V")
+        if ctor_start < 0:
+            raise RuntimeError("Found je6.smali but could not find its constructor.")
+
+        ctor_end = text.find(".end method", ctor_start)
+        if ctor_end < 0:
+            raise RuntimeError("Found je6 constructor but not its .end method.")
+
+        ctor = text[ctor_start:ctor_end]
+        super_call = "    invoke-direct {p0}, Ljava/lang/Object;-><init>()V"
+        if super_call not in ctor:
+            raise RuntimeError("Found je6 constructor but could not find its Object constructor call.")
+
+        patched_ctor = ctor.replace(
+            super_call,
+            super_call
+            + "\n\n"
+            + "    # iiSU-PC: expose this same Hilt-created holder; MainActivity itself\n"
+            + "    # remains referenced only by je6's existing WeakReference.\n"
+            + sput,
+            1,
+        )
+        text = text[:ctor_start] + patched_ctor + text[ctor_end:]
+
+    path.write_text(text, encoding="utf-8")
+    return path
+
 def inject_launch_bridge(decompiled_dir: Path) -> None:
     dest = decompiled_dir / "smali" / BRIDGE_PACKAGE_SMALI_DIR
     dest.mkdir(parents=True, exist_ok=True)
     for smali_file in SMALI_PATCH_DIR.glob("*.smali"):
         shutil.copyfile(smali_file, dest / smali_file.name)
+
+
+def patch_manifest_for_media_bridge(decompiled_dir: Path) -> None:
+    """Register the explicit ADB-invoked MediaBridge receiver.
+
+    No intent filter is needed: Manager addresses the component explicitly.
+    exported=true is required because `adb shell am broadcast` originates
+    outside iiSU's app UID.  Re-running the patch remains idempotent.
+    """
+    manifest = decompiled_dir / "AndroidManifest.xml"
+    text = manifest.read_text(encoding="utf-8")
+    receiver_name = "com.iisulauncher.pcbridge.MediaBridgeReceiver"
+    if receiver_name in text:
+        return
+
+    marker = "</application>"
+    if marker not in text:
+        raise RuntimeError("Could not find </application> in AndroidManifest.xml.")
+
+    receiver = (
+        '        <receiver android:name="com.iisulauncher.pcbridge.MediaBridgeReceiver" '
+        'android:enabled="true" android:exported="true" />\n'
+    )
+    text = text.replace(marker, receiver + marker, 1)
+    manifest.write_text(text, encoding="utf-8")
 
 
 def fix_extract_native_libs(decompiled_dir: Path) -> None:
@@ -192,8 +284,13 @@ def patch_apk(
     patched_count = patch_main_activity(main_activity)
     print(f"[patch] redirected {patched_count} startActivity call(s) to LaunchBridge in {main_activity.relative_to(decompiled_dir)}")
 
-    print("[patch] injecting LaunchBridge classes...")
+    print("[patch] exposing iiSU's existing PrimaryHomeActions holder...")
+    primary_home_actions = patch_primary_home_actions_holder(decompiled_dir)
+    print(f"[patch] patched PrimaryHomeActions holder in {primary_home_actions.relative_to(decompiled_dir)}")
+
+    print("[patch] injecting iiSU-PC bridge classes...")
     inject_launch_bridge(decompiled_dir)
+    patch_manifest_for_media_bridge(decompiled_dir)
     fix_extract_native_libs(decompiled_dir)
 
     print("[patch] rebuilding...")

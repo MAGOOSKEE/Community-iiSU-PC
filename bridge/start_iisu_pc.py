@@ -1,5 +1,5 @@
 """
-One-shot launcher for the whole iiSU-PC setup: checks for updates to the
+One-shot launcher for the whole Community-iiSU-PC setup: checks for updates to the
 project itself (updater.py), then starts the AVD if it isn't already
 running, then starts the launch bridge if it isn't already running.
 Covers a cold boot with a fullscreen black overlay (boot_overlay.py) the
@@ -298,13 +298,19 @@ def sync_rom_library() -> None:
 
 
 def main() -> None:
-    updater.check_for_updates()
-
     try:
         config = load_config()
     except ConfigMissingError as e:
         print(f"[start] {e}")
         sys.exit(1)
+
+    # Automatic project updates are opt-in. Customized installations can
+    # therefore start safely without upstream files silently replacing local
+    # bridge/installer changes. Manager can expose this setting later.
+    if config.get("auto_updates", False):
+        updater.check_for_updates()
+    else:
+        print("[updater] automatic Community-iiSU-PC updates are disabled")
     avd_name = config["avd_name"]
     port = config["bridge_port"]
     debug_console = config.get("debug_show_console_windows", False)
@@ -318,7 +324,7 @@ def main() -> None:
     # to cover) and when debug_console is on (it would just hide the
     # console windows that setting exists to show).
     show_overlay = not is_avd_running(avd_name) and not debug_console
-    overlay = boot_overlay.show("Booting iiSU-PC, please wait...") if show_overlay else None
+    overlay = boot_overlay.show("Booting Community-iiSU-PC, please wait...") if show_overlay else None
     try:
         _run_start_sequence(config, avd_name, port, debug_console, state)
     finally:
@@ -347,7 +353,7 @@ def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: b
         # some point), or just not fullscreen. A brand-new bridge process
         # always re-launches iiSU and re-applies fullscreen as part of its
         # own startup (see launch_bridge.main()); doing nothing here in the
-        # "already running" case meant relaunching iiSU-PC while a bridge
+        # "already running" case meant relaunching Community-iiSU-PC while a bridge
         # was already alive -- whether genuinely left running on purpose,
         # or a stale one Stop failed to clean up -- was a silent no-op:
         # exactly the "shortcut sometimes only opens the emulator, not

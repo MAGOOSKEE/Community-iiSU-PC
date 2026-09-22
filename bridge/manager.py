@@ -18,6 +18,10 @@ approach create_shortcut.py already takes for iiSU's own icon.
 """
 
 import json
+import urllib.request
+import hashlib
+import shutil
+import uuid
 import atexit
 import zipfile
 import socket
@@ -26,10 +30,13 @@ import queue
 import re
 import subprocess
 import tempfile
+import time
+import sys
+import traceback
+from datetime import datetime
 import sys
 import threading
 import traceback
-from datetime import datetime
 import tkinter as tk
 import webbrowser
 from pathlib import Path
@@ -165,6 +172,17 @@ BRIDGE_DIR = Path(__file__).parent
 PROJECT_ROOT = BRIDGE_DIR.parent
 INSTALLER_DIR = PROJECT_ROOT / "installer"
 WINDOWS_APPS_PATH = BRIDGE_DIR / "windows_apps.json"
+IIDB_DIR = BRIDGE_DIR / "iidb"
+IIDB_LIBRARY_DIR = IIDB_DIR / "library"
+IIDB_REGISTRY_PATH = IIDB_DIR / "installed_media.json"
+IIDB_API_BASE = "https://iidb.iisu.network/api/v1"
+IIDB_THUMB_CACHE_DIR = IIDB_DIR / "cache" / "thumbnails"
+IIDB_AUDIO_CACHE_DIR = IIDB_DIR / "cache" / "audio"
+MEDIABRIDGE_INBOX = "/storage/emulated/0/Android/media/com.iisulauncher/iiSULauncher/mediabridge/inbox"
+MEDIABRIDGE_COMPONENT = "com.iisulauncher/com.iisulauncher.pcbridge.MediaBridgeReceiver"
+MEDIABRIDGE_INSTALL_ACTION = "com.iisulauncher.pcbridge.INSTALL_ROM_ASSET"
+MEDIABRIDGE_PING_ACTION = "com.iisulauncher.pcbridge.PING"
+MEDIABRIDGE_RESCAN_ACTION = "com.iisulauncher.pcbridge.RESCAN_LIBRARY"
 
 sys.path.insert(0, str(PROJECT_ROOT))
 from shared import theme
@@ -197,6 +215,7 @@ NAV_ITEMS = [
     ("roms", "\U0001F4C1", "ROM Directory"),
     ("emulators", "\U0001F3AE", "Emulators"),
     ("windows_apps", "\U0001FA9F", "Windows Apps"),
+    ("media_library", "\U0001F5BC", "Media Library"),
     ("android_storage", "\U0001F4F1", "Android Storage"),
     ("display", "\U0001F5A5", "Display"),
     ("backup_restore", "\U0001F4BE", "Backup & Restore"),
@@ -249,6 +268,8 @@ class Manager(tk.Tk):
         self.uninstall_log_queue: queue.Queue = queue.Queue()
         self._last_avd_up: bool | None = None
         self._last_bridge_up: bool | None = None
+        self._media_ping_inflight = False
+        self._media_last_ping_at = 0.0
         self._setup_process: subprocess.Popen | None = None
         self._uninstall_targets_cache: list[Path] = []
         self.nav_buttons: dict[str, tk.Label] = {}
@@ -315,6 +336,7 @@ class Manager(tk.Tk):
         self._build_home_page()
         self._build_settings_pages()
         self._build_windows_apps_page()
+        self._build_media_library_page()
         self._build_diagnostics_page()
         self._build_backup_restore_page()
         self._build_android_storage_page()
@@ -384,6 +406,8 @@ class Manager(tk.Tk):
             self._refresh_uninstall_preview()
         elif key == "android_storage":
             self._android_storage_refresh()
+        elif key == "media_library":
+            self._media_library_refresh()
 
     # -- Home page -------------------------------------------------
 
@@ -612,6 +636,7 @@ class Manager(tk.Tk):
 
         self._refresh_primary_button()
         self._refresh_save_lock(avd_up, bridge_up)
+        self._update_media_connection_indicator(avd_up)
 
     def _refresh_save_lock(self, avd_up: bool | None, bridge_up: bool | None) -> None:
         """Settings apply on the next Start (roms_dir/search_roots/
@@ -940,6 +965,60 @@ class Manager(tk.Tk):
             command=lambda: self._diagnostics_open_path(BRIDGE_DIR / "bridge_debug.log")
         ).pack(side="left", padx=(8, 0))
 
+        update_frame = tk.Frame(frame, bg=PANEL_BG)
+        update_frame.pack(fill="x", padx=24, pady=(0, 12))
+
+        update_top = tk.Frame(update_frame, bg=PANEL_BG)
+        update_top.pack(fill="x", padx=14, pady=(12, 4))
+
+        tk.Label(
+            update_top, text="Community-iiSU-PC Updates",
+            bg=PANEL_BG, fg=TEXT, font=FONT_BODY, anchor="w"
+        ).pack(side="left")
+
+        self.auto_updates_var = tk.BooleanVar(
+            value=bool(self.config_data.get("auto_updates", False))
+        )
+        tk.Checkbutton(
+            update_top,
+            text="Automatically apply updates on startup",
+            variable=self.auto_updates_var,
+            command=self._diagnostics_set_auto_updates,
+            bg=PANEL_BG,
+            fg=TEXT,
+            selectcolor=BG,
+            activebackground=PANEL_BG,
+            activeforeground=TEXT,
+            font=FONT_BODY,
+        ).pack(side="right")
+
+        tk.Label(
+            update_frame,
+            text=(
+                "Off is recommended for customized installations. When enabled, startup may "
+                "fast-forward a Git checkout or apply a newer release over tracked project files."
+            ),
+            bg=PANEL_BG, fg=TEXT_DIM, font=FONT_BODY, anchor="w", justify="left",
+            wraplength=880,
+        ).pack(fill="x", padx=14, pady=(0, 8))
+
+        update_actions = tk.Frame(update_frame, bg=PANEL_BG)
+        update_actions.pack(fill="x", padx=14, pady=(0, 12))
+        tk.Button(
+            update_actions,
+            text="Check for Updates Now",
+            command=self._diagnostics_check_for_updates_now,
+        ).pack(side="left")
+
+        self.update_check_status_var = tk.StringVar(
+            value="This check is read-only: it never downloads or installs an update."
+        )
+        tk.Label(
+            update_actions,
+            textvariable=self.update_check_status_var,
+            bg=PANEL_BG, fg=TEXT_DIM, font=FONT_BODY, anchor="w",
+        ).pack(side="left", padx=(12, 0))
+
         self.diagnostics_summary_var = tk.StringVar(
             value="Diagnostics have not been run yet."
         )
@@ -958,6 +1037,121 @@ class Manager(tk.Tk):
         tree.column("details", width=650, minwidth=300, stretch=True)
         tree.pack(fill="both", expand=True, padx=24, pady=(0, 24))
         self.diagnostics_tree = tree
+
+    def _diagnostics_set_auto_updates(self) -> None:
+        """Persist the startup auto-update preference immediately."""
+        enabled = bool(self.auto_updates_var.get())
+        self.config_data["auto_updates"] = enabled
+        try:
+            save_config(self.config_data)
+        except Exception as exc:
+            self.auto_updates_var.set(not enabled)
+            self.config_data["auto_updates"] = not enabled
+            messagebox.showerror(
+                "Community-iiSU-PC Updates",
+                f"Couldn't save the update setting:\n\n{exc}",
+            )
+            return
+
+        state = "enabled" if enabled else "disabled"
+        self.update_check_status_var.set(
+            f"Automatic startup updates are {state}. "
+            "Check for Updates Now remains read-only."
+        )
+
+    def _diagnostics_check_for_updates_now(self) -> None:
+        """Check upstream state without downloading or applying an update."""
+        if getattr(self, "_update_check_inflight", False):
+            return
+        self._update_check_inflight = True
+        self.update_check_status_var.set("Checking for updates (read-only)...")
+
+        def worker() -> None:
+            try:
+                import updater
+
+                if updater.is_git_checkout():
+                    branch = updater.current_branch()
+                    if branch is None:
+                        message = "Can't compare updates: this Git checkout is on a detached HEAD."
+                    else:
+                        # `git fetch` updates only Git's remote-tracking metadata. It does
+                        # not modify the working tree, download a release archive, merge,
+                        # pull, checkout, or install anything.
+                        fetch = updater._run_git(["fetch", "origin", branch])
+                        if fetch is None or fetch.returncode != 0:
+                            reason = (
+                                fetch.stderr.strip()[:200]
+                                if fetch else "git not found or fetch timed out"
+                            )
+                            message = f"Couldn't check GitHub: {reason}"
+                        else:
+                            local = updater._run_git(["rev-parse", "HEAD"])
+                            remote = updater._run_git(["rev-parse", f"origin/{branch}"])
+                            local_sha = (
+                                local.stdout.strip()
+                                if local and local.returncode == 0 else None
+                            )
+                            remote_sha = (
+                                remote.stdout.strip()
+                                if remote and remote.returncode == 0 else None
+                            )
+                            if not local_sha or not remote_sha:
+                                message = "Couldn't compare local and remote commits."
+                            elif local_sha == remote_sha:
+                                message = f"Up to date on {branch}. Nothing was downloaded or installed."
+                            else:
+                                count = updater._run_git(
+                                    ["rev-list", "--count", f"HEAD..origin/{branch}"]
+                                )
+                                behind = (
+                                    count.stdout.strip()
+                                    if count and count.returncode == 0 else "one or more"
+                                )
+                                message = (
+                                    f"Update available: {behind} new commit(s) on {branch}. "
+                                    "Nothing was downloaded or installed."
+                                )
+                else:
+                    current = (
+                        updater.VERSION_PATH.read_text(encoding="utf-8").strip()
+                        if updater.VERSION_PATH.is_file() else None
+                    )
+                    req = urllib.request.Request(
+                        f"https://api.github.com/repos/{updater.GITHUB_REPO}/releases",
+                        headers={
+                            "User-Agent": "Community-iiSU-PC",
+                            "Accept": "application/vnd.github+json",
+                        },
+                    )
+                    with urllib.request.urlopen(req, timeout=updater.HTTP_TIMEOUT) as resp:
+                        releases = json.loads(resp.read())
+                    if not releases:
+                        message = "No Community-iiSU-PC releases are published yet."
+                    else:
+                        latest = releases[0]["tag_name"]
+                        if current == latest:
+                            message = f"Up to date ({current}). Nothing was downloaded or installed."
+                        elif current is None:
+                            message = (
+                                f"Latest release: {latest}. This install has no VERSION file "
+                                "for comparison. Nothing was downloaded or installed."
+                            )
+                        else:
+                            message = (
+                                f"Update available: {latest} (installed: {current}). "
+                                "Nothing was downloaded or installed."
+                            )
+            except Exception as exc:
+                message = f"Update check failed: {exc}"
+
+            def finish() -> None:
+                self._update_check_inflight = False
+                self.update_check_status_var.set(message)
+
+            self.after(0, finish)
+
+        threading.Thread(target=worker, daemon=True).start()
 
     @staticmethod
     def _diagnostics_open_path(path: Path) -> None:
@@ -1772,6 +1966,1395 @@ class Manager(tk.Tk):
         entry.selection_range(0, "end")
         self.wait_window(dialog)
         return result["value"]
+
+    # -- Installed Media Registry -------------------------------------------------
+
+    @staticmethod
+    def _media_registry_empty() -> dict:
+        return {"version": 1, "games": {}}
+
+    def _load_media_registry(self) -> dict:
+        if not IIDB_REGISTRY_PATH.is_file():
+            return self._media_registry_empty()
+        try:
+            data = json.loads(IIDB_REGISTRY_PATH.read_text(encoding="utf-8"))
+            if not isinstance(data, dict) or data.get("version") != 1 or not isinstance(data.get("games"), dict):
+                raise ValueError("Unsupported or invalid installed media registry")
+            return data
+        except Exception as exc:
+            _manager_log_write(f"MEDIA REGISTRY read error: {exc}")
+            raise RuntimeError(f"Couldn't read installed media registry:\n{IIDB_REGISTRY_PATH}\n\n{exc}") from exc
+
+    def _save_media_registry(self, registry: dict) -> None:
+        IIDB_DIR.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps(registry, indent=2, ensure_ascii=False) + "\n"
+        temp = IIDB_REGISTRY_PATH.with_suffix(".json.tmp")
+        temp.write_text(payload, encoding="utf-8")
+        os.replace(temp, IIDB_REGISTRY_PATH)
+
+    @staticmethod
+    def _sha256_file(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as fh:
+            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    @staticmethod
+    def _media_game_key(tab_id: str, rom_id: str) -> str:
+        return f"{tab_id}|{rom_id}"
+
+    def _register_installed_media(self, *, tab_id: str, rom_id: str, display_name: str,
+                                  asset_dir: str, asset_type: str, slot: int,
+                                  source_file: Path, iidb_asset_id=None,
+                                  iidb_parent_id=None, remote_filename: str | None = None) -> dict:
+        """Persist one successfully installed asset and a durable Windows copy."""
+        source_file = Path(source_file)
+        if not source_file.is_file():
+            raise FileNotFoundError(source_file)
+        extension = source_file.suffix.lower().lstrip(".") or "bin"
+        safe_tab = re.sub(r"[^A-Za-z0-9._-]+", "_", tab_id).strip("._") or "unknown"
+        safe_game = re.sub(r'[<>:"/\\|?*]+', "_", display_name).strip(" .") or "game"
+        asset_id = str(iidb_asset_id) if iidb_asset_id is not None else self._sha256_file(source_file)[:16]
+        relative = Path(safe_tab) / safe_game / asset_type / f"{asset_id}.{extension}"
+        durable = IIDB_LIBRARY_DIR / relative
+        durable.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            same_file = source_file.resolve() == durable.resolve()
+        except OSError:
+            same_file = False
+        if not same_file:
+            shutil.copy2(source_file, durable)
+        sha256 = self._sha256_file(durable)
+
+        registry = self._load_media_registry()
+        key = self._media_game_key(tab_id, rom_id)
+        game = registry["games"].setdefault(key, {
+            "tab_id": tab_id, "rom_id": rom_id, "display_name": display_name,
+            "asset_dir": asset_dir, "assets": []
+        })
+        game.update({"tab_id": tab_id, "rom_id": rom_id, "display_name": display_name, "asset_dir": asset_dir})
+        assets = game.setdefault("assets", [])
+        # One restorable current asset per logical slot. Superseding an asset does not
+        # leave an old entry that Restore All could accidentally reinstall afterward.
+        assets[:] = [a for a in assets if not (a.get("asset_type") == asset_type and int(a.get("slot", 1)) == int(slot))]
+        record = {
+            "iidb_asset_id": iidb_asset_id,
+            "iidb_parent_id": iidb_parent_id,
+            "asset_type": asset_type,
+            "slot": int(slot),
+            "file": relative.as_posix(),
+            "sha256": sha256,
+            "extension": extension,
+            "remote_filename": remote_filename or self._media_remote_filename(asset_type, int(slot), extension),
+            "installed_at": datetime.now().isoformat(timespec="seconds"),
+        }
+        assets.append(record)
+        self._save_media_registry(registry)
+        _manager_log_write(f"MEDIA REGISTRY recorded {display_name!r} {asset_type}[{slot}] sha256={sha256}")
+        return record
+
+    @staticmethod
+    def _media_remote_filename(asset_type: str, slot: int, extension: str) -> str:
+        base = {
+            "hero": f"hero_{slot}", "screenshot": f"slide_{slot}", "title": "title",
+            "icon": "icon", "home_icon": "home_icon", "soundbite": "music",
+            "portrait": "portrait",
+        }.get(asset_type)
+        if not base:
+            raise ValueError(f"Unsupported media asset type: {asset_type}")
+        return f"{base}.{extension}"
+
+    def _mediabridge_ping(self) -> tuple[bool, str]:
+        result = self._adb_command("shell", "am", "broadcast", "-a", MEDIABRIDGE_PING_ACTION,
+                                   "-n", MEDIABRIDGE_COMPONENT, timeout=15)
+        output = ((result.stdout or "") + "\n" + (result.stderr or "")).strip()
+        return result.returncode == 0 and "result=1" in output and "IISUPC_MEDIABRIDGE_READY_V1" in output, output
+
+    def _mediabridge_rescan_library(self) -> tuple[bool, str]:
+        """Trigger iiSU's native Full Library Rescan through MediaBridge."""
+        result = self._adb_command(
+            "shell", "am", "broadcast",
+            "-a", MEDIABRIDGE_RESCAN_ACTION,
+            "-n", MEDIABRIDGE_COMPONENT,
+            timeout=60,
+        )
+        output = ((result.stdout or "") + "\n" + (result.stderr or "")).strip()
+        ok = (
+            result.returncode == 0
+            and "result=1" in output
+            and "IISUPC_MEDIABRIDGE_RESCAN_STARTED_V1" in output
+        )
+        return ok, output
+
+    def _mediabridge_install_file(self, game: dict, asset: dict, local_file: Path) -> tuple[bool, str]:
+        extension = str(asset.get("extension") or local_file.suffix.lstrip(".")).lower()
+        stage_name = f"iisupc-{uuid.uuid4().hex}.{extension}"
+        stage_remote = f"{MEDIABRIDGE_INBOX}/{stage_name}"
+        mkdir = self._adb_shell_direct(f"mkdir -p {self._android_remote_quote(MEDIABRIDGE_INBOX)}", timeout=15)
+        if mkdir.returncode != 0:
+            return False, (mkdir.stderr or mkdir.stdout or "Could not create MediaBridge inbox").strip()
+        pushed = self._adb_command("push", str(local_file), stage_remote, timeout=300)
+        if pushed.returncode != 0:
+            return False, (pushed.stderr or pushed.stdout or "adb push failed").strip()
+        try:
+            # adb shell ultimately passes this through Android's shell. Build one
+            # explicitly quoted command so values containing spaces, URI punctuation,
+            # percent escapes, etc. remain one --es value. This is especially
+            # important for asset_dir paths such as "Planet Coaster".
+            extras = (
+                ("tab_id", game.get("tab_id")),
+                ("rom_id", game.get("rom_id")),
+                ("asset_dir", game.get("asset_dir")),
+                ("source", stage_remote),
+                ("asset_type", asset.get("asset_type")),
+                ("extension", extension),
+            )
+            missing = [name for name, value in extras if value is None or str(value) == ""]
+            if missing:
+                return False, "Manager registry is missing required field(s): " + ", ".join(missing)
+            command = (
+                f"am broadcast -a {self._android_remote_quote(MEDIABRIDGE_INSTALL_ACTION)} "
+                f"-n {self._android_remote_quote(MEDIABRIDGE_COMPONENT)} "
+                + " ".join(
+                    f"--es {self._android_remote_quote(name)} {self._android_remote_quote(str(value))}"
+                    for name, value in extras
+                )
+            )
+            result = self._adb_shell_direct(command, timeout=60)
+            output = ((result.stdout or "") + "\n" + (result.stderr or "")).strip()
+            ok = result.returncode == 0 and "result=1" in output and "IISUPC_MEDIABRIDGE_INSTALLED_V1" in output
+            return ok, output
+        finally:
+            self._adb_shell_direct(f"rm -f {self._android_remote_quote(stage_remote)}", timeout=15)
+
+    def _media_asset_remote_path(self, game: dict, asset: dict) -> str:
+        remote_filename = asset.get("remote_filename")
+        if not remote_filename:
+            extension = str(asset.get("extension") or Path(str(asset.get("file", ""))).suffix.lstrip(".") or "bin").lower()
+            remote_filename = self._media_remote_filename(
+                str(asset.get("asset_type", "")), int(asset.get("slot", 1)), extension
+            )
+        return str(game["asset_dir"]).rstrip("/") + "/" + str(remote_filename)
+
+    @staticmethod
+    def _media_local_file(asset: dict) -> Path:
+        # Registry v1 paths are relative to iidb/library. Tolerate the early
+        # bootstrap form that accidentally included a leading "library/".
+        relative = Path(str(asset.get("file", "")))
+        parts = relative.parts
+        if parts and parts[0].lower() == "library":
+            relative = Path(*parts[1:])
+        return IIDB_LIBRARY_DIR / relative
+
+    def _media_check_asset(self, game: dict, asset: dict) -> tuple[str, str]:
+        local_file = self._media_local_file(asset)
+        if not local_file.is_file():
+            return "LOCAL_MISSING", f"Local copy missing: {local_file}"
+        local_hash = self._sha256_file(local_file)
+        expected = str(asset.get("sha256", "")).lower()
+        if expected and local_hash.lower() != expected:
+            return "LOCAL_CHANGED", "Local library file no longer matches its registry hash"
+        remote = self._media_asset_remote_path(game, asset)
+        result = self._adb_shell_direct(f"sha256sum {self._android_remote_quote(remote)}", timeout=20)
+        if result.returncode != 0:
+            return "REMOTE_MISSING", remote
+        remote_hash = (result.stdout or "").strip().split(None, 1)[0].lower()
+        if remote_hash == local_hash.lower():
+            return "OK", remote_hash
+        return "REMOTE_CHANGED", remote_hash or "Different file"
+
+    def _build_media_library_page(self) -> None:
+        frame = self.pages["media_library"]
+        self._clear(frame)
+        self._page_header(frame, "Media Library", "Durable iiDB artwork history and one-click recovery after iiSU rescans.")
+        connection_row = tk.Frame(frame, bg=BG)
+        connection_row.pack(fill="x", padx=24, pady=(0, 10))
+        self.media_connection_dot = StatusDot(connection_row)
+        self.media_connection_dot.pack(side="left", padx=(0, 8))
+        self.media_connection_var = tk.StringVar(value="Checking VM connection...")
+        tk.Label(connection_row, textvariable=self.media_connection_var, bg=BG, fg=TEXT_DIM,
+                 font=FONT_BODY, anchor="w").pack(side="left")
+        card = Card(frame)
+        card.pack(fill="x", padx=24, pady=(0, 12))
+        inner = tk.Frame(card, bg=PANEL_BG)
+        inner.pack(fill="x", padx=16, pady=14)
+        self.media_library_summary_var = tk.StringVar(value="Loading installed media registry...")
+        tk.Label(inner, textvariable=self.media_library_summary_var, bg=PANEL_BG, fg=TEXT,
+                 font=FONT_HEADING, anchor="w").pack(fill="x")
+        self.media_library_detail_var = tk.StringVar(value="")
+        tk.Label(inner, textvariable=self.media_library_detail_var, bg=PANEL_BG, fg=TEXT_DIM,
+                 font=FONT_BODY, anchor="w", justify="left", wraplength=800).pack(fill="x", pady=(5, 0))
+        row = tk.Frame(frame, bg=BG)
+        row.pack(fill="x", padx=24, pady=(0, 10))
+        ttk.Button(row, text="Check iiSU Media", style="Ghost.TButton", command=self._media_library_check).pack(side="left")
+        ttk.Button(row, text="Restore Missing", style="Accent.TButton", command=lambda: self._media_library_restore(False)).pack(side="left", padx=(8, 0))
+        ttk.Button(row, text="Restore All", style="Ghost.TButton", command=lambda: self._media_library_restore(True)).pack(side="left", padx=(8, 0))
+        ttk.Button(row, text="Open Local Library", style="Ghost.TButton", command=self._media_library_open).pack(side="left", padx=(8, 0))
+        ttk.Button(row, text="Browse iiDB", style="Accent.TButton", command=self._iidb_open_browser).pack(side="right")
+
+        # Game-first hierarchy plus a local preview pane. The viewer reads the
+        # durable Media Library copy -- the exact file Manager will restore/commit
+        # through MediaBridge -- rather than fetching a fresh iiDB preview.
+        media_body = tk.PanedWindow(frame, orient="horizontal", bg=BG, sashwidth=5, bd=0)
+        media_body.pack(fill="both", expand=True, padx=24, pady=(0, 20))
+        tree_frame = tk.Frame(media_body, bg=BG)
+        preview_frame = tk.Frame(media_body, bg=PANEL_BG)
+        media_body.add(tree_frame, minsize=500)
+        media_body.add(preview_frame, minsize=250)
+
+        columns = ("slot", "status", "file")
+        self.media_library_tree = ttk.Treeview(tree_frame, columns=columns, show="tree headings", height=15)
+        self.media_library_tree.heading("#0", text="Game / Asset")
+        self.media_library_tree.column("#0", width=240, stretch=True)
+        for col, title, width in (("slot","Slot",60),("status","Status",130),("file","Local file",300)):
+            self.media_library_tree.heading(col, text=title)
+            self.media_library_tree.column(col, width=width, stretch=(col == "file"))
+        self.media_library_tree.pack(fill="both", expand=True)
+        self.media_library_tree.bind("<<TreeviewSelect>>", self._media_library_asset_selected)
+
+        tk.Label(preview_frame, text="Asset Viewer", bg=PANEL_BG, fg=TEXT,
+                 font=FONT_HEADING, anchor="w").pack(fill="x", padx=12, pady=(12, 6))
+        self.media_library_preview_label = tk.Label(
+            preview_frame, text="Select an asset\nto preview",
+            bg=BG, fg=TEXT_DIM, font=FONT_BODY, justify="center", compound="top"
+        )
+        self.media_library_preview_label.pack(fill="both", expand=True, padx=12, pady=(0, 8))
+        self.media_library_preview_detail_var = tk.StringVar(value="")
+        tk.Label(
+            preview_frame, textvariable=self.media_library_preview_detail_var,
+            bg=PANEL_BG, fg=TEXT_DIM, font=FONT_BODY, justify="left",
+            anchor="w", wraplength=260
+        ).pack(fill="x", padx=12, pady=(0, 8))
+        preview_controls = tk.Frame(preview_frame, bg=PANEL_BG)
+        preview_controls.pack(fill="x", padx=12, pady=(0, 12))
+        self.media_library_audio_player = tk.Frame(preview_controls, bg="#E9EDF2", bd=0)
+        self.media_library_audio_play_var = tk.StringVar(value="▶")
+        self.media_library_audio_time_var = tk.StringVar(value="0:00 / 0:00")
+        self.media_library_audio_play_button = tk.Button(
+            self.media_library_audio_player, textvariable=self.media_library_audio_play_var,
+            command=self._media_library_toggle_audio, bg="#E9EDF2", fg="#111111",
+            activebackground="#DCE2E9", activeforeground="#111111", relief="flat",
+            bd=0, font=("Segoe UI Symbol", 12, "bold"), width=2, cursor="hand2")
+        self.media_library_audio_play_button.pack(side="left", padx=(10,4), pady=8)
+        tk.Label(self.media_library_audio_player, textvariable=self.media_library_audio_time_var,
+                 bg="#E9EDF2", fg="#202020", font=("Segoe UI",9)).pack(side="left", padx=(0,7))
+        self.media_library_audio_seek = ttk.Scale(
+            self.media_library_audio_player, from_=0, to=1000, orient="horizontal",
+            command=self._media_library_seek_preview)
+        self.media_library_audio_seek.pack(side="left", fill="x", expand=True, padx=(0,8))
+        tk.Label(self.media_library_audio_player, text="🔊", bg="#E9EDF2", fg="#111111",
+                 font=("Segoe UI Emoji",10)).pack(side="left", padx=(0,3))
+        self.media_library_audio_volume = ttk.Scale(
+            self.media_library_audio_player, from_=0, to=1000, orient="horizontal",
+            command=self._media_library_set_volume)
+        self.media_library_audio_volume.set(850)
+        self.media_library_audio_volume.pack(side="left", padx=(0,10))
+        self.media_library_open_file_button = ttk.Button(
+            preview_controls, text="Open File", style="Ghost.TButton",
+            command=self._media_library_open_selected_file
+        )
+        self.media_library_open_file_button.pack(fill="x")
+        self._media_library_tree_assets = {}
+        self._media_library_selected = None
+        self._media_library_preview_photo = None
+        self._media_library_audio_alias = None
+        self._media_library_audio_state = "stopped"
+        self._media_library_audio_length_ms = 0
+        self._media_library_audio_after = None
+        self._media_library_audio_loading = False
+        self._media_library_seek_internal = False
+        self._media_library_audio_token = None
+
+        self._media_library_refresh()
+        self._update_media_connection_indicator(self._last_avd_up)
+
+    def _media_library_records(self):
+        registry = self._load_media_registry()
+        for key, game in registry.get("games", {}).items():
+            if not isinstance(game, dict):
+                continue
+            for asset in game.get("assets", []):
+                if isinstance(asset, dict):
+                    yield key, game, asset
+
+    def _update_media_connection_indicator(self, avd_up: bool | None) -> None:
+        if not hasattr(self, "media_connection_var"):
+            return
+        if avd_up is not True:
+            self.media_connection_dot.set_state("unknown" if avd_up is None else "down")
+            self.media_connection_var.set("VM status unknown" if avd_up is None else "VM Disconnected")
+            return
+        # Avoid launching a PING every 2-second global status poll. A five-second
+        # cadence is responsive enough for a visual readiness indicator.
+        now = time.monotonic()
+        if self._media_ping_inflight or now - self._media_last_ping_at < 5.0:
+            return
+        self._media_ping_inflight = True
+        self.media_connection_dot.set_state("unknown")
+        self.media_connection_var.set("VM Connected • Checking MediaBridge…")
+        def worker():
+            try:
+                ok, _detail = self._mediabridge_ping()
+            except Exception:
+                ok = False
+            def done():
+                self._media_ping_inflight = False
+                self._media_last_ping_at = time.monotonic()
+                if not hasattr(self, "media_connection_var"):
+                    return
+                if ok:
+                    self.media_connection_dot.set_state("up")
+                    self.media_connection_var.set("VM Connected • MediaBridge Ready")
+                else:
+                    self.media_connection_dot.set_state("down")
+                    self.media_connection_var.set("VM Connected • MediaBridge Unavailable")
+            self.after(0, done)
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _media_library_tree_open_games(self) -> set[str]:
+        if not hasattr(self, "media_library_tree"):
+            return set()
+        result=set()
+        for iid in self.media_library_tree.get_children(""):
+            try:
+                if self.media_library_tree.item(iid, "open"):
+                    result.add(str(self.media_library_tree.item(iid, "text")))
+            except Exception:
+                pass
+        return result
+
+    def _media_library_populate_tree(self, rows, checked: bool = False) -> None:
+        """Populate one parent row per game and child rows for individual assets.
+
+        rows may contain either (key, game, asset) or
+        (key, game, asset, status, info). Expansion state is preserved by game name.
+        """
+        tree=self.media_library_tree
+        open_games=self._media_library_tree_open_games()
+        selected_record = getattr(self, "_media_library_selected", None)
+        for item in tree.get_children(""):
+            tree.delete(item)
+        self._media_library_tree_assets = {}
+        grouped={}
+        for row in rows:
+            key,game,asset=row[:3]
+            status=row[3] if len(row) >= 4 else "Saved"
+            grouped.setdefault(key,{"game":game,"items":[]})["items"].append((asset,status))
+        for gidx,(key,bucket) in enumerate(grouped.items()):
+            game=bucket["game"]; items=bucket["items"]
+            name=game.get("display_name","Unknown")
+            bad=sum(1 for _asset,status in items if status not in {"OK","Saved"})
+            if checked:
+                overall="All OK" if bad == 0 else f"{bad} need attention"
+            else:
+                overall="Saved"
+            count=len(items)
+            parent=tree.insert("","end",iid=f"game-{gidx}",text=name,
+                               values=("",f"{count} asset{'s' if count != 1 else ''} • {overall}",""),
+                               open=(name in open_games))
+            for aidx,(asset,status) in enumerate(items):
+                label=str(asset.get("asset_type","?")).replace("_"," ").title()
+                display_status=str(status).replace("_"," ").title()
+                child_iid=f"game-{gidx}-asset-{aidx}"
+                tree.insert(parent,"end",iid=child_iid,text=label,
+                            values=(asset.get("slot",1),display_status,asset.get("file","")))
+                self._media_library_tree_assets[child_iid]=(game,asset)
+
+    def _media_library_clear_preview(self, text: str = "Select an asset\nto preview") -> None:
+        self._media_library_stop_audio()
+        self._media_library_selected = None
+        self._media_library_preview_photo = None
+        if hasattr(self, "media_library_preview_label"):
+            self.media_library_preview_label.configure(image="", text=text)
+        if hasattr(self, "media_library_preview_detail_var"):
+            self.media_library_preview_detail_var.set("")
+        if hasattr(self, "media_library_audio_player"):
+            self.media_library_audio_player.pack_forget()
+
+    def _media_library_asset_selected(self, _event=None) -> None:
+        selected = self.media_library_tree.selection()
+        if not selected:
+            self._media_library_clear_preview()
+            return
+        record = self._media_library_tree_assets.get(selected[0])
+        if record is None:
+            self._media_library_clear_preview("Select one of this game's\nassets to preview")
+            return
+
+        self._media_library_stop_audio()
+        game, asset = record
+        self._media_library_selected = (game, asset)
+        local = self._media_local_file(asset)
+        asset_type = str(asset.get("asset_type", "?"))
+        slot = int(asset.get("slot", 1))
+        detail = [
+            str(game.get("display_name", "Unknown")),
+            f"{asset_type.replace('_', ' ').title()} • Slot {slot}",
+            local.name,
+        ]
+        try:
+            detail.append(self._iidb_human_size(local.stat().st_size))
+        except OSError:
+            pass
+        self.media_library_preview_detail_var.set("\n".join(x for x in detail if x))
+
+        self.media_library_audio_player.pack_forget()
+        self._media_library_preview_photo = None
+
+        if not local.is_file():
+            self.media_library_preview_label.configure(image="", text="Local library file\nis missing")
+            return
+
+        if asset_type == "soundbite":
+            self.media_library_preview_label.configure(image="", text="♪\nSoundbite")
+            self.media_library_audio_time_var.set("0:00 / 0:00")
+            self.media_library_audio_play_var.set("▶")
+            self.media_library_audio_seek.set(0)
+            self.media_library_audio_player.pack(fill="x", pady=(0,8), before=self.media_library_open_file_button)
+            return
+
+        try:
+            from PIL import Image, ImageTk
+            image = Image.open(local).convert("RGB")
+            width, height = image.size
+            image.thumbnail((280, 380))
+            photo = ImageTk.PhotoImage(image)
+            self._media_library_preview_photo = photo
+            self.media_library_preview_label.configure(image=photo, text="")
+            current = self.media_library_preview_detail_var.get()
+            self.media_library_preview_detail_var.set(current + f"\n{width}×{height}")
+        except ImportError:
+            self.media_library_preview_label.configure(
+                image="", text="Image preview requires Pillow.\n\nThe saved file can still be\nopened with Open File."
+            )
+        except Exception as exc:
+            self.media_library_preview_label.configure(image="", text="Preview unavailable")
+            _manager_log_write(f"MEDIA LIBRARY preview failed path={str(local)!r}: {exc}")
+
+    def _media_library_open_selected_file(self) -> None:
+        record = getattr(self, "_media_library_selected", None)
+        if not record:
+            return
+        _game, asset = record
+        local = self._media_local_file(asset)
+        if not local.is_file():
+            messagebox.showwarning("Media Library", f"Local file not found:\n{local}")
+            return
+        try:
+            os.startfile(str(local))
+        except Exception as exc:
+            messagebox.showerror("Media Library", f"Couldn't open:\n{local}\n\n{exc}")
+
+    @staticmethod
+    def _media_library_format_ms(value: int) -> str:
+        seconds=max(0,int(value)//1000)
+        return f"{seconds//60}:{seconds%60:02d}"
+
+    def _media_library_audio_load(self, path: Path) -> dict:
+        """Load a standard PCM WAV for the native Windows waveOut previewer."""
+        import wave
+        with wave.open(str(path), "rb") as wav:
+            channels=wav.getnchannels()
+            width=wav.getsampwidth()
+            rate=wav.getframerate()
+            frames=wav.getnframes()
+            comptype=wav.getcomptype()
+            if comptype!="NONE":
+                raise RuntimeError(f"Unsupported WAV compression: {comptype}")
+            if width not in (1,2):
+                raise RuntimeError(f"Unsupported WAV sample width: {width*8}-bit")
+            if channels not in (1,2):
+                raise RuntimeError(f"Unsupported WAV channel count: {channels}")
+            pcm=wav.readframes(frames)
+        return {
+            "path":path, "channels":channels, "width":width, "rate":rate,
+            "frames":frames, "pcm":pcm,
+            "length_ms":int((frames*1000)/rate) if rate else 0,
+            "block_align":channels*width,
+        }
+
+    def _media_library_waveout_error(self, code: int, operation: str) -> None:
+        if code:
+            raise RuntimeError(f"Windows waveOut {operation} failed (MMRESULT {code})")
+
+    def _media_library_waveout_open(self, audio: dict) -> None:
+        import ctypes
+        from ctypes import wintypes
+
+        class WAVEFORMATEX(ctypes.Structure):
+            _fields_=[
+                ("wFormatTag",wintypes.WORD),
+                ("nChannels",wintypes.WORD),
+                ("nSamplesPerSec",wintypes.DWORD),
+                ("nAvgBytesPerSec",wintypes.DWORD),
+                ("nBlockAlign",wintypes.WORD),
+                ("wBitsPerSample",wintypes.WORD),
+                ("cbSize",wintypes.WORD),
+            ]
+        class WAVEHDR(ctypes.Structure):
+            _fields_=[
+                ("lpData",ctypes.c_void_p),
+                ("dwBufferLength",wintypes.DWORD),
+                ("dwBytesRecorded",wintypes.DWORD),
+                ("dwUser",ctypes.c_size_t),
+                ("dwFlags",wintypes.DWORD),
+                ("dwLoops",wintypes.DWORD),
+                ("lpNext",ctypes.c_void_p),
+                ("reserved",ctypes.c_size_t),
+            ]
+
+        winmm=ctypes.WinDLL("winmm")
+        fmt=WAVEFORMATEX()
+        fmt.wFormatTag=1
+        fmt.nChannels=audio["channels"]
+        fmt.nSamplesPerSec=audio["rate"]
+        fmt.wBitsPerSample=audio["width"]*8
+        fmt.nBlockAlign=audio["block_align"]
+        fmt.nAvgBytesPerSec=audio["rate"]*audio["block_align"]
+        fmt.cbSize=0
+
+        handle=ctypes.c_void_p()
+        result=winmm.waveOutOpen(ctypes.byref(handle),0xFFFFFFFF,ctypes.byref(fmt),0,0,0)
+        self._media_library_waveout_error(result,"open")
+
+        self._media_library_waveout_handle=handle
+        self._media_library_waveout_winmm=winmm
+        self._media_library_waveout_header_type=WAVEHDR
+        self._media_library_waveout_fmt=fmt
+        self._media_library_set_volume(self.media_library_audio_volume.get())
+
+    def _media_library_waveout_submit_from(self, position_ms: int) -> None:
+        import ctypes
+        audio=self._media_library_audio_data
+        handle=self._media_library_waveout_handle
+        winmm=self._media_library_waveout_winmm
+        WAVEHDR=self._media_library_waveout_header_type
+
+        frame=max(0,min(audio["frames"],int(position_ms*audio["rate"]/1000)))
+        byte_offset=frame*audio["block_align"]
+        chunk=audio["pcm"][byte_offset:]
+        if not chunk:
+            self._media_library_audio_state="stopped"
+            return
+
+        buf=ctypes.create_string_buffer(chunk)
+        hdr=WAVEHDR()
+        hdr.lpData=ctypes.cast(buf,ctypes.c_void_p)
+        hdr.dwBufferLength=len(chunk)
+        hdr.dwBytesRecorded=0
+        hdr.dwUser=0
+        hdr.dwFlags=0
+        hdr.dwLoops=0
+        hdr.lpNext=None
+        hdr.reserved=0
+
+        result=winmm.waveOutPrepareHeader(handle,ctypes.byref(hdr),ctypes.sizeof(hdr))
+        self._media_library_waveout_error(result,"prepare")
+        result=winmm.waveOutWrite(handle,ctypes.byref(hdr),ctypes.sizeof(hdr))
+        if result:
+            winmm.waveOutUnprepareHeader(handle,ctypes.byref(hdr),ctypes.sizeof(hdr))
+            self._media_library_waveout_error(result,"write")
+
+        # Keep both objects alive until playback is reset/unprepared.
+        self._media_library_waveout_buffer=buf
+        self._media_library_waveout_header=hdr
+        self._media_library_audio_base_ms=position_ms
+        self._media_library_audio_started_at=time.monotonic()
+
+    def _media_library_waveout_release_buffer(self) -> None:
+        import ctypes
+        handle=getattr(self,"_media_library_waveout_handle",None)
+        hdr=getattr(self,"_media_library_waveout_header",None)
+        winmm=getattr(self,"_media_library_waveout_winmm",None)
+        if handle and hdr is not None and winmm:
+            winmm.waveOutReset(handle)
+            winmm.waveOutUnprepareHeader(handle,ctypes.byref(hdr),ctypes.sizeof(hdr))
+        self._media_library_waveout_header=None
+        self._media_library_waveout_buffer=None
+
+    def _media_library_toggle_audio(self)->None:
+        if getattr(self,"_media_library_audio_loading",False):return
+        state=getattr(self,"_media_library_audio_state","stopped")
+        handle=getattr(self,"_media_library_waveout_handle",None)
+
+        if state=="playing" and handle:
+            result=self._media_library_waveout_winmm.waveOutPause(handle)
+            try:self._media_library_waveout_error(result,"pause")
+            except Exception as exc:
+                messagebox.showerror("Media Library",f"Soundbite preview failed.\n\n{exc}");return
+            elapsed=int((time.monotonic()-self._media_library_audio_started_at)*1000)
+            self._media_library_audio_base_ms=min(
+                self._media_library_audio_length_ms,
+                self._media_library_audio_base_ms+elapsed)
+            self._media_library_audio_state="paused"
+            self.media_library_audio_play_var.set("▶")
+            return
+
+        if state=="paused" and handle:
+            result=self._media_library_waveout_winmm.waveOutRestart(handle)
+            try:self._media_library_waveout_error(result,"resume")
+            except Exception as exc:
+                messagebox.showerror("Media Library",f"Soundbite preview failed.\n\n{exc}");return
+            self._media_library_audio_started_at=time.monotonic()
+            self._media_library_audio_state="playing"
+            self.media_library_audio_play_var.set("Ⅱ")
+            self._media_library_schedule_audio_tick()
+            return
+
+        if state=="stopped" and getattr(self,"_media_library_audio_data",None):
+            self._media_library_seek_to_ms(0,autoplay=True)
+            return
+
+        self._media_library_play_soundbite()
+
+    def _media_library_play_soundbite(self)->None:
+        record=getattr(self,"_media_library_selected",None)
+        if not record:return
+        _game,asset=record
+        if str(asset.get("asset_type","")).lower()!="soundbite":return
+        local=self._media_local_file(asset)
+        if not local.is_file():
+            messagebox.showwarning("Media Library",f"Local soundbite not found:\n{local}");return
+
+        self._media_library_stop_audio()
+        self._media_library_audio_loading=True
+        self.media_library_audio_play_var.set("…")
+        try:
+            audio=self._media_library_audio_load(local)
+            self._media_library_audio_data=audio
+            self._media_library_audio_length_ms=audio["length_ms"]
+            self.media_library_audio_seek.configure(to=max(1,audio["length_ms"]))
+            self._media_library_waveout_open(audio)
+            self._media_library_waveout_submit_from(0)
+            self._media_library_audio_state="playing"
+            self.media_library_audio_play_var.set("Ⅱ")
+            self.media_library_audio_time_var.set(
+                f"0:00 / {self._media_library_format_ms(audio['length_ms'])}")
+            self._media_library_schedule_audio_tick()
+        except Exception as exc:
+            self._media_library_stop_audio()
+            messagebox.showerror(
+                "Media Library",
+                "Soundbite preview failed.\n\n"
+                "The saved original is still intact and will continue to be used by iiSU.\n\n"
+                f"{exc}")
+        finally:
+            self._media_library_audio_loading=False
+
+    def _media_library_schedule_audio_tick(self)->None:
+        if self._media_library_audio_after is not None:
+            try:self.after_cancel(self._media_library_audio_after)
+            except Exception:pass
+        self._media_library_audio_after=self.after(100,self._media_library_audio_tick)
+
+    def _media_library_audio_position_ms(self)->int:
+        base=int(getattr(self,"_media_library_audio_base_ms",0))
+        if getattr(self,"_media_library_audio_state","stopped")=="playing":
+            base+=int((time.monotonic()-getattr(self,"_media_library_audio_started_at",time.monotonic()))*1000)
+        return max(0,min(int(getattr(self,"_media_library_audio_length_ms",0)),base))
+
+    def _media_library_audio_tick(self)->None:
+        self._media_library_audio_after=None
+        if getattr(self,"_media_library_audio_state","stopped") not in ("playing","paused"):return
+        position=self._media_library_audio_position_ms()
+        length=int(getattr(self,"_media_library_audio_length_ms",0))
+        self._media_library_seek_internal=True
+        try:self.media_library_audio_seek.set(position)
+        finally:self._media_library_seek_internal=False
+        self.media_library_audio_time_var.set(
+            f"{self._media_library_format_ms(position)} / {self._media_library_format_ms(length)}")
+        if length and position>=length:
+            self._media_library_audio_state="stopped"
+            self._media_library_audio_base_ms=0
+            self.media_library_audio_play_var.set("▶")
+            self._media_library_seek_internal=True
+            try:self.media_library_audio_seek.set(0)
+            finally:self._media_library_seek_internal=False
+            self.media_library_audio_time_var.set(f"0:00 / {self._media_library_format_ms(length)}")
+            return
+        self._media_library_schedule_audio_tick()
+
+    def _media_library_seek_to_ms(self,target:int,autoplay:bool|None=None)->None:
+        if not getattr(self,"_media_library_audio_data",None):return
+        target=max(0,min(int(getattr(self,"_media_library_audio_length_ms",0)),int(target)))
+        old_state=getattr(self,"_media_library_audio_state","stopped")
+        if autoplay is None:autoplay=(old_state=="playing")
+        try:
+            self._media_library_waveout_release_buffer()
+            self._media_library_waveout_submit_from(target)
+            if not autoplay:
+                result=self._media_library_waveout_winmm.waveOutPause(self._media_library_waveout_handle)
+                self._media_library_waveout_error(result,"pause")
+                self._media_library_audio_state="paused"
+                self.media_library_audio_play_var.set("▶")
+            else:
+                self._media_library_audio_state="playing"
+                self.media_library_audio_play_var.set("Ⅱ")
+                self._media_library_schedule_audio_tick()
+        except Exception as exc:
+            messagebox.showerror("Media Library",f"Couldn't seek soundbite.\n\n{exc}")
+
+    def _media_library_seek_preview(self,value)->None:
+        if self._media_library_seek_internal:return
+        if not getattr(self,"_media_library_audio_data",None):return
+        try:target=int(float(value))
+        except Exception:return
+        # ttk.Scale invokes command continuously while dragging. Debounce so
+        # waveOut isn't repeatedly torn down for every pixel of mouse motion.
+        pending=getattr(self,"_media_library_seek_after",None)
+        if pending is not None:
+            try:self.after_cancel(pending)
+            except Exception:pass
+        self._media_library_seek_after=self.after(
+            120,lambda t=target:self._media_library_seek_commit(t))
+
+    def _media_library_seek_commit(self,target:int)->None:
+        self._media_library_seek_after=None
+        self._media_library_seek_to_ms(target)
+
+    def _media_library_set_volume(self,value)->None:
+        handle=getattr(self,"_media_library_waveout_handle",None)
+        if not handle:return
+        try:
+            level=max(0,min(1000,int(float(value))))
+            word=int(level*0xFFFF/1000)
+            packed=(word<<16)|word
+            result=self._media_library_waveout_winmm.waveOutSetVolume(handle,packed)
+            self._media_library_waveout_error(result,"volume")
+        except Exception:
+            pass
+
+    def _media_library_stop_audio(self,reset_ui:bool=True)->None:
+        import ctypes
+        if self._media_library_audio_after is not None:
+            try:self.after_cancel(self._media_library_audio_after)
+            except Exception:pass
+            self._media_library_audio_after=None
+        pending=getattr(self,"_media_library_seek_after",None)
+        if pending is not None:
+            try:self.after_cancel(pending)
+            except Exception:pass
+            self._media_library_seek_after=None
+        handle=getattr(self,"_media_library_waveout_handle",None)
+        winmm=getattr(self,"_media_library_waveout_winmm",None)
+        hdr=getattr(self,"_media_library_waveout_header",None)
+        if handle and winmm:
+            try:
+                winmm.waveOutReset(handle)
+                if hdr is not None:
+                    winmm.waveOutUnprepareHeader(handle,ctypes.byref(hdr),ctypes.sizeof(hdr))
+                winmm.waveOutClose(handle)
+            except Exception:pass
+        self._media_library_waveout_handle=None
+        self._media_library_waveout_header=None
+        self._media_library_waveout_buffer=None
+        self._media_library_waveout_winmm=None
+        self._media_library_audio_data=None
+        self._media_library_audio_state="stopped"
+        self._media_library_audio_loading=False
+        self._media_library_audio_length_ms=0
+        self._media_library_audio_base_ms=0
+        if reset_ui and hasattr(self,"media_library_audio_play_var"):
+            self.media_library_audio_play_var.set("▶")
+            self.media_library_audio_time_var.set("0:00 / 0:00")
+            self._media_library_seek_internal=True
+            try:self.media_library_audio_seek.set(0)
+            finally:self._media_library_seek_internal=False
+
+    def _media_library_refresh(self) -> None:
+        if not hasattr(self, "media_library_tree"):
+            return
+        try:
+            rows = list(self._media_library_records())
+        except Exception as exc:
+            self.media_library_summary_var.set("Installed media registry error")
+            self.media_library_detail_var.set(str(exc)); return
+        games = len({key for key, _, _ in rows})
+        total_bytes = 0
+        for _key, _game, asset in rows:
+            local = self._media_local_file(asset)
+            try: total_bytes += local.stat().st_size
+            except OSError: pass
+        self._media_library_populate_tree(rows, checked=False)
+        self.media_library_summary_var.set(f"{games} game{'s' if games != 1 else ''} • {len(rows)} saved asset{'s' if len(rows) != 1 else ''} • {total_bytes / (1024*1024):.1f} MB")
+        self.media_library_detail_var.set(f"Registry: {IIDB_REGISTRY_PATH}\nLibrary: {IIDB_LIBRARY_DIR}")
+
+    def _media_library_open(self) -> None:
+        IIDB_LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
+        os.startfile(str(IIDB_LIBRARY_DIR))
+
+    def _media_library_check(self) -> None:
+        ready, detail = self._adb_device_ready()
+        if not ready:
+            messagebox.showwarning("Media Library", "Start the Android VM before checking iiSU media.\n\n" + detail); return
+        self.media_library_summary_var.set("Checking iiSU media...")
+        def worker():
+            rows=[]
+            try:
+                for key, game, asset in self._media_library_records():
+                    status, info = self._media_check_asset(game, asset); rows.append((key,game,asset,status,info))
+                self.after(0, self._media_library_show_check_results, rows)
+            except Exception as exc:
+                self.after(0, lambda e=str(exc): messagebox.showerror("Media Library", e))
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _media_library_show_check_results(self, rows) -> None:
+        missing=sum(1 for _key,_game,_asset,status,_info in rows if status != "OK")
+        self._media_library_populate_tree(rows, checked=True)
+        self.media_library_summary_var.set(f"Check complete • {len(rows)-missing} correct • {missing} need attention")
+
+    def _media_library_restore(self, restore_all: bool) -> None:
+        ready, detail = self._adb_device_ready()
+        if not ready:
+            messagebox.showwarning("Media Library", "Start the Android VM before restoring media.\n\n" + detail); return
+        ping_ok, ping_detail = self._mediabridge_ping()
+        if not ping_ok:
+            messagebox.showerror("Media Library", "MediaBridge V1 is not ready. Repatch iiSU first.\n\n" + ping_detail); return
+        if restore_all and not messagebox.askyesno("Restore All Media", "Reinstall every saved media asset through MediaBridge?\n\nThis intentionally replaces the corresponding iiSU media slots with the saved copies."):
+            return
+        self.media_library_summary_var.set("Preparing restore...")
+        def worker():
+            restored=skipped=failed=0; failures=[]
+            for _key, game, asset in self._media_library_records():
+                local = self._media_local_file(asset)
+                if not local.is_file(): failed += 1; failures.append(f"{game.get('display_name')}: local copy missing"); continue
+                if not restore_all:
+                    status, _ = self._media_check_asset(game, asset)
+                    if status == "OK": skipped += 1; continue
+                    if status.startswith("LOCAL_"): failed += 1; failures.append(f"{game.get('display_name')}: {status}"); continue
+                ok, output = self._mediabridge_install_file(game, asset, local)
+                if ok: restored += 1
+                else:
+                    failed += 1
+                    match = re.search(r'IISUPC_MEDIABRIDGE_ERROR_V1:([A-Z0-9_]+)', output or "")
+                    detail = f"MediaBridge: {match.group(1)}" if match else (output or "Unknown restore error")
+                    failures.append(f"{game.get('display_name')} {asset.get('asset_type')}: {detail}")
+            def done():
+                self._media_library_refresh()
+                self.media_library_summary_var.set(f"Restore complete • {restored} restored • {skipped} already correct • {failed} failed")
+                if failures: messagebox.showwarning("Media Restore", "Some assets could not be restored:\n\n" + "\n".join(failures[:10]))
+                else: messagebox.showinfo("Media Restore", f"Restore complete.\n\nRestored: {restored}\nAlready correct: {skipped}")
+            self.after(0, done)
+        threading.Thread(target=worker, daemon=True).start()
+
+    # -- iiDB browser ---------------------------------------------------------------
+
+    @staticmethod
+    def _iidb_json_get(path: str, params: dict | None = None, timeout: int = 15):
+        """Read one iiDB JSON endpoint. iiDB is currently an unauthenticated public API,
+        but it is not treated as a stable contract; callers validate fields defensively."""
+        import urllib.parse
+        import urllib.request
+        url = IIDB_API_BASE + path
+        if params:
+            url += "?" + urllib.parse.urlencode(params)
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "iiSU-PC Manager",
+            "Accept": "application/json",
+        })
+        with urllib.request.urlopen(req, timeout=timeout) as response:
+            raw = response.read()
+        return json.loads(raw.decode("utf-8"))
+
+    @staticmethod
+    def _iidb_find_dicts(value):
+        """Yield dictionaries nested in a JSON response, preserving API flexibility."""
+        if isinstance(value, dict):
+            yield value
+            for child in value.values():
+                yield from Manager._iidb_find_dicts(child)
+        elif isinstance(value, list):
+            for child in value:
+                yield from Manager._iidb_find_dicts(child)
+
+    @staticmethod
+    def _iidb_human_size(value) -> str:
+        try:
+            size = float(value)
+        except (TypeError, ValueError):
+            return ""
+        for unit in ("B", "KB", "MB", "GB"):
+            if size < 1024 or unit == "GB":
+                return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+            size /= 1024
+        return ""
+
+    def _iidb_open_browser(self) -> None:
+        if getattr(self, "_iidb_browser_window", None) is not None:
+            try:
+                if self._iidb_browser_window.winfo_exists():
+                    self._iidb_browser_window.lift(); self._iidb_browser_window.focus_force(); return
+            except Exception:
+                pass
+
+        win = tk.Toplevel(self)
+        self._iidb_browser_window = win
+        win.title("Browse iiDB Media")
+        win.geometry("1180x760")
+        win.minsize(940, 620)
+        win.configure(bg=BG)
+        def close_browser():
+            self._iidb_stop_audio()
+            self._iidb_browser_window = None
+            win.destroy()
+        win.protocol("WM_DELETE_WINDOW", close_browser)
+
+        top = tk.Frame(win, bg=BG); top.pack(fill="x", padx=18, pady=(16, 10))
+        title_row=tk.Frame(top,bg=BG); title_row.pack(fill="x")
+        tk.Label(title_row, text="Browse iiDB", bg=BG, fg=TEXT, font=FONT_TITLE).pack(side="left")
+        self.iidb_cart_count_var=tk.StringVar(value="Cart (0)")
+        ttk.Button(title_row,textvariable=self.iidb_cart_count_var,style="Accent.TButton",command=self._iidb_open_cart).pack(side="right")
+        tk.Label(top, text="Search, preview, collect, and install iiDB media through MediaBridge.",
+                 bg=BG, fg=TEXT_DIM, font=FONT_BODY).pack(anchor="w", pady=(2, 10))
+        search_row = tk.Frame(top, bg=BG); search_row.pack(fill="x")
+        self.iidb_search_var = tk.StringVar(); entry = ttk.Entry(search_row, textvariable=self.iidb_search_var)
+        entry.pack(side="left", fill="x", expand=True)
+        ttk.Button(search_row, text="Search", style="Accent.TButton", command=self._iidb_search).pack(side="left", padx=(8, 0))
+        self.iidb_status_var = tk.StringVar(value="Search for a game to begin. No VM connection is required.")
+        tk.Label(top, textvariable=self.iidb_status_var, bg=BG, fg=TEXT_DIM, font=FONT_BODY, anchor="w").pack(fill="x", pady=(8, 0))
+        entry.bind("<Return>", lambda _e: self._iidb_search())
+
+        body = tk.PanedWindow(win, orient="horizontal", bg=BG, sashwidth=5, bd=0); body.pack(fill="both", expand=True, padx=18, pady=(0, 18))
+        left = tk.Frame(body, bg=PANEL_BG); right = tk.Frame(body, bg=PANEL_BG); body.add(left, minsize=300); body.add(right, minsize=600)
+        tk.Label(left, text="Search Results", bg=PANEL_BG, fg=TEXT, font=FONT_HEADING, anchor="w").pack(fill="x", padx=12, pady=(12, 6))
+        self.iidb_results_tree = ttk.Treeview(left, columns=("name","subtitle"), show="headings", height=18)
+        self.iidb_results_tree.heading("name", text="Game"); self.iidb_results_tree.heading("subtitle", text="Platform / Details")
+        self.iidb_results_tree.column("name", width=190); self.iidb_results_tree.column("subtitle", width=130)
+        self.iidb_results_tree.pack(fill="both", expand=True, padx=12, pady=(0, 12)); self.iidb_results_tree.bind("<<TreeviewSelect>>", self._iidb_result_selected)
+
+        self.iidb_game_title_var = tk.StringVar(value="Select a game"); self.iidb_game_detail_var = tk.StringVar(value="")
+        tk.Label(right, textvariable=self.iidb_game_title_var, bg=PANEL_BG, fg=TEXT, font=FONT_HEADING, anchor="w").pack(fill="x", padx=12, pady=(12, 2))
+        tk.Label(right, textvariable=self.iidb_game_detail_var, bg=PANEL_BG, fg=TEXT_DIM, font=FONT_BODY, anchor="w").pack(fill="x", padx=12)
+        self.iidb_category_frame = tk.Frame(right, bg=PANEL_BG); self.iidb_category_frame.pack(fill="x", padx=12, pady=(10, 8))
+
+        lower = tk.PanedWindow(right, orient="horizontal", bg=PANEL_BG, sashwidth=4, bd=0); lower.pack(fill="both", expand=True, padx=12, pady=(0, 12))
+        list_frame = tk.Frame(lower, bg=PANEL_BG); preview_frame = tk.Frame(lower, bg=PANEL_BG); lower.add(list_frame, minsize=430); lower.add(preview_frame, minsize=240)
+        cols=("type","resolution","size","filename"); self.iidb_assets_tree = ttk.Treeview(list_frame, columns=cols, show="headings", height=17)
+        for col,title,width in (("type","Type",90),("resolution","Resolution",100),("size","Size",75),("filename","Filename",180)):
+            self.iidb_assets_tree.heading(col,text=title); self.iidb_assets_tree.column(col,width=width,stretch=(col=="filename"))
+        self.iidb_assets_tree.pack(fill="both", expand=True); self.iidb_assets_tree.bind("<<TreeviewSelect>>", self._iidb_asset_selected)
+
+        self.iidb_preview_label = tk.Label(preview_frame, text="Select an asset\nto preview", bg=BG, fg=TEXT_DIM, font=FONT_BODY, justify="center", compound="top")
+        self.iidb_preview_label.pack(fill="both", expand=True, padx=(10,0))
+        self.iidb_preview_detail_var = tk.StringVar(value="")
+        tk.Label(preview_frame, textvariable=self.iidb_preview_detail_var, bg=PANEL_BG, fg=TEXT_DIM, font=FONT_BODY, justify="left", anchor="w", wraplength=250).pack(fill="x", padx=(10,0), pady=(8,0))
+        controls=tk.Frame(preview_frame,bg=PANEL_BG); controls.pack(fill="x",padx=(10,0),pady=(8,0))
+        self.iidb_audio_button=ttk.Button(controls,text="Play Soundbite",style="Ghost.TButton",command=self._iidb_play_selected_soundbite)
+        self.iidb_stop_audio_button=ttk.Button(controls,text="Stop",style="Ghost.TButton",command=self._iidb_stop_audio)
+        self.iidb_cart_asset_var=tk.StringVar(value="Add to Cart")
+        self.iidb_cart_asset_button=ttk.Button(controls,textvariable=self.iidb_cart_asset_var,style="Accent.TButton",command=self._iidb_toggle_selected_cart)
+        self.iidb_cart_asset_button.pack(fill="x")
+
+        self._iidb_search_results=[]; self._iidb_assets=[]; self._iidb_filtered_assets=[]; self._iidb_current_parent_id=None
+        self._iidb_current_game=None; self._iidb_selected_asset=None; self._iidb_preview_photo=None; self._iidb_cart={}; self._iidb_audio_alias=None
+        entry.focus_set()
+
+    def _iidb_search(self) -> None:
+        query=self.iidb_search_var.get().strip()
+        if not query:return
+        self.iidb_status_var.set(f"Searching iiDB for {query!r}…")
+        for item in self.iidb_results_tree.get_children(): self.iidb_results_tree.delete(item)
+        def worker():
+            try:
+                data=self._iidb_json_get("/search/suggestions",{"q":query,"mode":"default","parent_limit":14,"platform_limit":4})
+                found=[];seen=set()
+                for d in self._iidb_find_dicts(data):
+                    kind=str(d.get("kind","")).lower(); pid=d.get("parent_id",d.get("id")); name=d.get("name") or d.get("title")
+                    if pid is None or not name:continue
+                    if kind and "parent" not in kind and "game" not in kind:continue
+                    key=str(pid)
+                    if key in seen:continue
+                    seen.add(key);found.append({"id":pid,"name":str(name),"subtitle":str(d.get("subtitle") or d.get("platform_name") or ""),"raw":d})
+                self.after(0,lambda:self._iidb_show_search_results(found))
+            except Exception as exc:self.after(0,lambda e=str(exc):self.iidb_status_var.set("iiDB search failed: "+e))
+        threading.Thread(target=worker,daemon=True).start()
+
+    def _iidb_show_search_results(self, results) -> None:
+        self._iidb_search_results=results
+        for item in self.iidb_results_tree.get_children():self.iidb_results_tree.delete(item)
+        for idx,row in enumerate(results):self.iidb_results_tree.insert("","end",iid=f"iidb-result-{idx}",values=(row["name"],row["subtitle"]))
+        self.iidb_status_var.set(f"Found {len(results)} game result{'s' if len(results)!=1 else ''}.") if results else self.iidb_status_var.set("No game results found.")
+
+    def _iidb_result_selected(self, _event=None) -> None:
+        selected=self.iidb_results_tree.selection()
+        if not selected:return
+        try:idx=int(selected[0].rsplit("-",1)[1]);row=self._iidb_search_results[idx]
+        except Exception:return
+        self._iidb_stop_audio(); self._iidb_current_parent_id=row["id"]; self._iidb_current_game=row; self._iidb_selected_asset=None
+        self.iidb_game_title_var.set(row["name"]);self.iidb_game_detail_var.set(f"iiDB parent ID: {row['id']} • Loading asset catalog…");self.iidb_status_var.set(f"Loading {row['name']} metadata and previews…")
+        for item in self.iidb_assets_tree.get_children():self.iidb_assets_tree.delete(item)
+        for child in self.iidb_category_frame.winfo_children():child.destroy()
+        parent_id=row["id"]
+        def worker():
+            try:
+                landing=self._iidb_json_get(f"/parents/{parent_id}/landing");assets=[];skip=0;limit=50;seen=set()
+                while True:
+                    page=self._iidb_json_get("/assets/browse/enriched",{"skip":skip,"limit":limit,"parent_id":parent_id},timeout=20);page_assets=[]
+                    for d in self._iidb_find_dicts(page):
+                        if d.get("type") and (d.get("raw_url") or d.get("preview_url") or d.get("library_preview_url")):
+                            marker=(str(d.get("id",d.get("asset_id"))),str(d.get("filename")))
+                            if marker not in seen:seen.add(marker);page_assets.append(d)
+                    assets.extend(page_assets)
+                    if len(page_assets)<limit or len(assets)>=1000:break
+                    skip+=limit
+                self.after(0,lambda:self._iidb_show_parent(row,landing,assets))
+            except Exception as exc:self.after(0,lambda e=str(exc):self.iidb_status_var.set("Couldn't load iiDB game: "+e))
+        threading.Thread(target=worker,daemon=True).start()
+
+    @staticmethod
+    def _iidb_type_label(asset_type: str) -> str:
+        return {"iisu_boxart":"iiSU Box Arts","boxart":"Box Arts","icon":"Icons","logo":"Logos","banner":"Banners","hero":"Heroes","screenshot":"Screenshots","soundbite":"Soundbites"}.get(str(asset_type).lower(),str(asset_type).replace("_"," ").title())
+
+    def _iidb_show_parent(self,row,landing,assets)->None:
+        if str(self._iidb_current_parent_id)!=str(row["id"]):return
+        self._iidb_assets=assets;counts={}
+        for a in assets:
+            t=str(a.get("type","")).lower();counts[t]=counts.get(t,0)+1
+        total=len(assets)
+        for d in self._iidb_find_dicts(landing):
+            if isinstance(d.get("asset_count"),(int,float)):total=int(d["asset_count"]);break
+        self.iidb_game_detail_var.set(f"iiDB parent ID: {row['id']} • {total} assets")
+        for child in self.iidb_category_frame.winfo_children():child.destroy()
+        buttons=[("All",len(assets),None)]+[(self._iidb_type_label(t),counts[t],t) for t in ["iisu_boxart","boxart","icon","logo","banner","hero","screenshot","soundbite"] if counts.get(t)]
+        for i,(label,count,typ) in enumerate(buttons):
+            b=ttk.Button(self.iidb_category_frame,text=f"{label} ({count})",style="Ghost.TButton",command=lambda x=typ:self._iidb_filter_assets(x))
+            b.grid(row=i//4,column=i%4,sticky="ew",padx=(0,5),pady=2)
+        for c in range(4):self.iidb_category_frame.grid_columnconfigure(c,weight=1)
+        self._iidb_filter_assets(None);self.iidb_status_var.set(f"Loaded {len(assets)} asset records for {row['name']}. Select a category or asset to preview.")
+
+    def _iidb_filter_assets(self,asset_type)->None:
+        self._iidb_filtered_assets=[a for a in self._iidb_assets if asset_type is None or str(a.get("type","")).lower()==asset_type]
+        for item in self.iidb_assets_tree.get_children():self.iidb_assets_tree.delete(item)
+        for idx,a in enumerate(self._iidb_filtered_assets):
+            resolution=a.get("resolution") or (f"{a.get('width')}×{a.get('height')}" if a.get("width") and a.get("height") else "")
+            self.iidb_assets_tree.insert("","end",iid=f"iidb-asset-{idx}",values=(self._iidb_type_label(a.get("type","")),resolution,self._iidb_human_size(a.get("size")),a.get("filename") or a.get("id") or ""))
+
+    def _iidb_cart_key(self,asset):
+        return f"{self._iidb_current_parent_id}|{asset.get('id',asset.get('asset_id',asset.get('filename','?')))}"
+
+    def _iidb_asset_selected(self,_event=None)->None:
+        selected=self.iidb_assets_tree.selection()
+        if not selected:return
+        try:idx=int(selected[0].rsplit("-",1)[1]);asset=self._iidb_filtered_assets[idx]
+        except Exception:return
+        self._iidb_stop_audio();self._iidb_selected_asset=asset
+        aid=asset.get("id",asset.get("asset_id","?"));typ=self._iidb_type_label(asset.get("type",""));resolution=asset.get("resolution") or (f"{asset.get('width')}×{asset.get('height')}" if asset.get("width") and asset.get("height") else "");duration=asset.get("duration_ms")
+        detail=f"{typ}\nAsset ID: {aid}\n{resolution}\n{self._iidb_human_size(asset.get('size'))}"
+        if duration:detail+=f"\nDuration: {float(duration)/1000:.1f}s"
+        self.iidb_preview_detail_var.set(detail.strip());self._iidb_refresh_cart_button()
+        if str(asset.get("type","")).lower()=="soundbite":
+            self.iidb_preview_label.configure(image="",text="Soundbite\n\nUse Play Soundbite below to preview audio.");self._iidb_preview_photo=None
+            self.iidb_audio_button.pack(fill="x",pady=(0,5));self.iidb_stop_audio_button.pack(fill="x",pady=(0,5));return
+        self.iidb_audio_button.pack_forget();self.iidb_stop_audio_button.pack_forget()
+        url=asset.get("preview_url") or asset.get("library_preview_url")
+        if not url:self.iidb_preview_label.configure(image="",text="No image preview\navailable");self._iidb_preview_photo=None;return
+        self.iidb_preview_label.configure(image="",text="Loading preview…");token=(str(self._iidb_current_parent_id),str(aid),str(url));self._iidb_preview_token=token
+        def worker():
+            try:
+                import urllib.request
+                IIDB_THUMB_CACHE_DIR.mkdir(parents=True,exist_ok=True);suffix=Path(str(url).split("?",1)[0]).suffix.lower()
+                if suffix not in {".jpg",".jpeg",".png",".webp"}:suffix=".img"
+                cache=IIDB_THUMB_CACHE_DIR/(hashlib.sha256(str(url).encode()).hexdigest()[:24]+suffix)
+                if not cache.is_file():
+                    req=urllib.request.Request(str(url),headers={"User-Agent":"iiSU-PC Manager"})
+                    with urllib.request.urlopen(req,timeout=15) as response:cache.write_bytes(response.read())
+                from PIL import Image,ImageTk
+                image=Image.open(cache).convert("RGB");image.thumbnail((250,360));photo=ImageTk.PhotoImage(image);self.after(0,lambda:self._iidb_set_preview(token,photo))
+            except Exception as exc:self.after(0,lambda e=str(exc):self._iidb_preview_failed(token,e))
+        threading.Thread(target=worker,daemon=True).start()
+
+    def _iidb_set_preview(self,token,photo)->None:
+        if getattr(self,"_iidb_preview_token",None)!=token:return
+        self._iidb_preview_photo=photo;self.iidb_preview_label.configure(image=photo,text="")
+
+    def _iidb_preview_failed(self,token,error)->None:
+        if getattr(self,"_iidb_preview_token",None)!=token:return
+        self._iidb_preview_photo=None;self.iidb_preview_label.configure(image="",text="Preview unavailable");self.iidb_status_var.set("Preview failed: "+error)
+
+    def _iidb_refresh_cart_button(self):
+        asset=getattr(self,"_iidb_selected_asset",None)
+        if not asset:return
+        self.iidb_cart_asset_var.set("✓ In Cart — Remove" if self._iidb_cart_key(asset) in self._iidb_cart else "Add to Cart")
+
+    def _iidb_toggle_selected_cart(self):
+        asset=getattr(self,"_iidb_selected_asset",None);game=getattr(self,"_iidb_current_game",None)
+        if not asset or not game:return
+        key=self._iidb_cart_key(asset)
+        if key in self._iidb_cart:self._iidb_cart.pop(key,None)
+        else:self._iidb_cart[key]={"parent_id":game["id"],"game_name":game["name"],"game_subtitle":game.get("subtitle","") ,"asset":dict(asset)}
+        self.iidb_cart_count_var.set(f"Cart ({len(self._iidb_cart)})");self._iidb_refresh_cart_button()
+
+    @staticmethod
+    def _iidb_install_mapping(asset_type: str) -> tuple[str, bool]:
+        """Map iiDB categories to the iiSU MediaBridge logical slot.
+
+        bool=True means the category supports numbered slots. Windows box art is
+        intentionally mapped to iiSU's icon slot because that is the behavior
+        verified against the current iiSU Windows platform implementation.
+        """
+        mapping = {
+            "hero": ("hero", True),
+            "screenshot": ("screenshot", True),
+            "banner": ("screenshot", True),
+            "logo": ("title", False),
+            "icon": ("home_icon", False),
+            "iisu_boxart": ("icon", False),
+            "boxart": ("icon", False),
+            "soundbite": ("soundbite", False),
+        }
+        if asset_type not in mapping:
+            raise ValueError(f"Unsupported iiDB asset type: {asset_type}")
+        return mapping[asset_type]
+
+    def _iidb_windows_target(self, game_name: str) -> dict:
+        """Resolve an iiDB game to an existing Windows .pcgame placeholder."""
+        import urllib.parse
+        rom_dir = self._windows_rom_dir(show_error=False)
+        if rom_dir is None or not rom_dir.is_dir():
+            raise RuntimeError("The configured Windows ROM directory is unavailable.")
+        wanted = game_name.strip().casefold()
+        matches = [p for p in rom_dir.glob("*.pcgame") if p.stem.casefold() == wanted]
+        if not matches:
+            raise RuntimeError(
+                f"No matching Windows game was found for {game_name!r}.\n\n"
+                f"Expected an existing placeholder named {game_name}.pcgame in:\n{rom_dir}\n\n"
+                "Install All currently requires an exact Windows game-name match so it cannot write media to the wrong iiSU entry."
+            )
+        if len(matches) > 1:
+            raise RuntimeError(f"More than one matching .pcgame exists for {game_name!r}.")
+        display_name = matches[0].stem
+        document = f"primary:Roms/windows/{matches[0].name}"
+        rom_id = (
+            "content://com.android.externalstorage.documents/tree/primary%3ARoms/document/"
+            + urllib.parse.quote(document, safe="")
+        )
+        asset_dir = (
+            "/storage/emulated/0/Android/media/com.iisulauncher/iiSULauncher/"
+            f"assets/media/roms/consoles/windows/{display_name}"
+        )
+        return {"tab_id":"windows", "rom_id":rom_id, "display_name":display_name, "asset_dir":asset_dir}
+
+    @staticmethod
+    def _iidb_asset_extension(asset: dict, url: str) -> str:
+        import urllib.parse
+        filename = str(asset.get("filename") or "")
+        suffix = Path(filename).suffix.lower().lstrip(".")
+        if not suffix:
+            suffix = Path(urllib.parse.urlparse(url).path).suffix.lower().lstrip(".")
+        if not suffix:
+            mime = str(asset.get("mime_type") or "").lower()
+            suffix = {"image/png":"png", "image/jpeg":"jpg", "image/webp":"webp",
+                      "audio/mpeg":"mp3", "audio/wav":"wav", "audio/x-wav":"wav",
+                      "audio/ogg":"ogg"}.get(mime, "bin")
+        return re.sub(r"[^a-z0-9]+", "", suffix) or "bin"
+
+    def _iidb_download_original(self, item: dict, target: dict, logical_type: str) -> Path:
+        import urllib.request
+        asset = item["asset"]
+        url = asset.get("raw_url")
+        if not url:
+            raise RuntimeError("iiDB did not provide a raw/original URL for this asset.")
+        extension = self._iidb_asset_extension(asset, str(url))
+        aid = str(asset.get("id", asset.get("asset_id", "unknown")))
+        safe_game = re.sub(r'[<>:"/\\|?*]+', '_', target["display_name"]).strip(" .") or "game"
+        safe_id = re.sub(r"[^A-Za-z0-9._-]+", "_", aid) or "asset"
+        durable = IIDB_LIBRARY_DIR / "windows" / safe_game / logical_type / f"{safe_id}.{extension}"
+        durable.parent.mkdir(parents=True, exist_ok=True)
+        temp = durable.with_suffix(durable.suffix + ".download")
+        req = urllib.request.Request(str(url), headers={"User-Agent":"iiSU-PC Manager", "Accept":"*/*"})
+        try:
+            with urllib.request.urlopen(req, timeout=60) as response, temp.open("wb") as out:
+                shutil.copyfileobj(response, out, length=1024*1024)
+            if not temp.is_file() or temp.stat().st_size <= 0:
+                raise RuntimeError("iiDB returned an empty original file.")
+            os.replace(temp, durable)
+        finally:
+            try:
+                if temp.exists(): temp.unlink()
+            except OSError:
+                pass
+        return durable
+
+    def _iidb_build_install_plan(self) -> list[dict]:
+        """Validate cart targets and assign deterministic iiSU slots."""
+        if not self._iidb_cart:
+            raise RuntimeError("The iiDB cart is empty.")
+        plan=[]; numbered={}; singles=set()
+        target_cache={}
+        for key, item in self._iidb_cart.items():
+            game_name=item["game_name"]
+            target=target_cache.get(game_name)
+            if target is None:
+                target=self._iidb_windows_target(game_name); target_cache[game_name]=target
+            raw_type=str(item["asset"].get("type","")).lower()
+            logical, is_numbered=self._iidb_install_mapping(raw_type)
+            group=(target["rom_id"],logical)
+            if is_numbered:
+                slot=numbered.get(group,0)+1; numbered[group]=slot
+            else:
+                if group in singles:
+                    raise RuntimeError(
+                        f"The cart contains more than one asset for the single iiSU slot {logical!r} "
+                        f"on {target['display_name']}. Remove one before installing."
+                    )
+                singles.add(group); slot=1
+            plan.append({"key":key,"item":item,"target":target,"logical_type":logical,"slot":slot})
+        return plan
+
+    def _iidb_install_cart(self, cart_window=None) -> None:
+        try:
+            plan=self._iidb_build_install_plan()
+        except Exception as exc:
+            messagebox.showerror("Install iiDB Media", str(exc), parent=cart_window or self._iidb_browser_window); return
+        ready, detail=self._adb_device_ready()
+        if not ready:
+            messagebox.showwarning("Install iiDB Media", "Start the Android VM before installing iiDB media.\n\n"+detail, parent=cart_window or self._iidb_browser_window); return
+        ping_ok, ping_detail=self._mediabridge_ping()
+        if not ping_ok:
+            messagebox.showerror("Install iiDB Media", "MediaBridge V1 is not ready. Repatch iiSU first.\n\n"+ping_detail, parent=cart_window or self._iidb_browser_window); return
+        summary=[]
+        for p in plan:
+            a=p["item"]["asset"]
+            summary.append(f"• {p['target']['display_name']} — {self._iidb_type_label(a.get('type',''))} → {p['logical_type']} slot {p['slot']}")
+        if not messagebox.askyesno("Install iiDB Media", "Install these iiDB originals into iiSU?\n\n"+"\n".join(summary)+"\n\nThe originals will also be saved permanently in the iiDB Media Library for recovery.", parent=cart_window or self._iidb_browser_window):
+            return
+        self.iidb_status_var.set(f"Installing {len(plan)} iiDB asset{'s' if len(plan)!=1 else ''}…")
+        def worker():
+            installed=[]; failures=[]
+            for index,p in enumerate(plan,1):
+                item=p["item"]; asset=item["asset"]; target=p["target"]
+                aid=asset.get("id",asset.get("asset_id"))
+                try:
+                    self.after(0, lambda i=index,n=len(plan),g=target['display_name']: self.iidb_status_var.set(f"Install All • {i}/{n} • {g}"))
+                    durable=self._iidb_download_original(item,target,p["logical_type"])
+                    ext=durable.suffix.lower().lstrip(".")
+                    install_asset={"asset_type":p["logical_type"],"slot":p["slot"],"extension":ext}
+                    ok,output=self._mediabridge_install_file(target,install_asset,durable)
+                    if not ok:
+                        match=re.search(r'IISUPC_MEDIABRIDGE_ERROR_V1:([A-Z0-9_]+)',output or "")
+                        raise RuntimeError("MediaBridge: "+match.group(1) if match else (output or "MediaBridge install failed"))
+                    record=self._register_installed_media(
+                        tab_id=target["tab_id"],rom_id=target["rom_id"],display_name=target["display_name"],
+                        asset_dir=target["asset_dir"],asset_type=p["logical_type"],slot=p["slot"],
+                        source_file=durable,iidb_asset_id=aid,iidb_parent_id=item.get("parent_id"),
+                        remote_filename=self._media_remote_filename(p["logical_type"],p["slot"],ext))
+                    installed.append((p,record))
+                except Exception as exc:
+                    failures.append((p,str(exc)))
+            rescan_ok = None
+            rescan_detail = ""
+            if installed:
+                try:
+                    self.after(0, lambda: self.iidb_status_var.set("Install All • Refreshing iiSU library…"))
+                    rescan_ok, rescan_detail = self._mediabridge_rescan_library()
+                except Exception as exc:
+                    rescan_ok = False
+                    rescan_detail = str(exc)
+            def done():
+                for p,_record in installed:self._iidb_cart.pop(p["key"],None)
+                self.iidb_cart_count_var.set(f"Cart ({len(self._iidb_cart)})");self._iidb_refresh_cart_button();self._media_library_refresh()
+                refresh_text = " • iiSU refreshed" if rescan_ok is True else (" • iiSU refresh failed" if rescan_ok is False else "")
+                self.iidb_status_var.set(f"Install All complete • {len(installed)} installed • {len(failures)} failed{refresh_text}")
+                warnings=[]
+                if failures:
+                    details="\n".join(f"• {p['target']['display_name']} / {self._iidb_type_label(p['item']['asset'].get('type',''))}: {err}" for p,err in failures[:10])
+                    warnings.append(f"Asset install failures:\n{details}")
+                if rescan_ok is False:
+                    warnings.append(
+                        "The media files were installed and registered, but iiSU's automatic Full Library Rescan did not start. "
+                        "The successful installs were kept.\n\n" + (rescan_detail or "No MediaBridge rescan detail was returned.")
+                    )
+                if warnings:
+                    messagebox.showwarning(
+                        "Install iiDB Media",
+                        f"Installed: {len(installed)}\nFailed: {len(failures)}\n\n" + "\n\n".join(warnings),
+                        parent=cart_window or self._iidb_browser_window
+                    )
+                else:
+                    messagebox.showinfo(
+                        "Install iiDB Media",
+                        f"Install complete.\n\nInstalled: {len(installed)}\nFailed: 0\n\niiSU's Full Library Rescan was started automatically.\n\n"
+                        "The installed originals are registered for Check / Restore Missing / Restore All.",
+                        parent=cart_window or self._iidb_browser_window
+                    )
+                if cart_window is not None:
+                    try: cart_window.destroy()
+                    except Exception: pass
+            self.after(0,done)
+        threading.Thread(target=worker,daemon=True).start()
+
+    def _iidb_open_cart(self):
+        win=tk.Toplevel(self._iidb_browser_window);win.title(f"iiDB Cart ({len(self._iidb_cart)})");win.geometry("880x500");win.configure(bg=BG)
+        tk.Label(win,text="iiDB Cart",bg=BG,fg=TEXT,font=FONT_TITLE).pack(anchor="w",padx=16,pady=(16,4))
+        tk.Label(win,text="Install All downloads originals to the durable Media Library, then installs them through MediaBridge.",bg=BG,fg=TEXT_DIM,font=FONT_BODY).pack(anchor="w",padx=16,pady=(0,10))
+        tree=ttk.Treeview(win,columns=("game","type","asset","details"),show="headings")
+        for c,t,w in (("game","Game",190),("type","Category",130),("asset","Asset ID",100),("details","Resolution / Duration",240)):
+            tree.heading(c,text=t);tree.column(c,width=w,stretch=(c in {"game","details"}))
+        tree.pack(fill="both",expand=True,padx=16,pady=(0,10))
+        keys=list(self._iidb_cart.keys())
+        for i,k in enumerate(keys):
+            item=self._iidb_cart[k];a=item["asset"];detail=a.get("resolution") or (f"{a.get('width')}×{a.get('height')}" if a.get("width") and a.get("height") else "")
+            if a.get("duration_ms"):detail=(detail+" • " if detail else "")+f"{float(a['duration_ms'])/1000:.1f}s"
+            tree.insert("","end",iid=f"cart-{i}",values=(item["game_name"],self._iidb_type_label(a.get("type","")),a.get("id",a.get("asset_id","")),detail))
+        row=tk.Frame(win,bg=BG);row.pack(fill="x",padx=16,pady=(0,16))
+        def remove_selected():
+            selected=tree.selection()
+            for iid in selected:
+                try:k=keys[int(iid.rsplit("-",1)[1])]
+                except Exception:continue
+                self._iidb_cart.pop(k,None);tree.delete(iid)
+            self.iidb_cart_count_var.set(f"Cart ({len(self._iidb_cart)})");self._iidb_refresh_cart_button()
+        def clear_all():
+            self._iidb_cart.clear()
+            for iid in tree.get_children():tree.delete(iid)
+            self.iidb_cart_count_var.set("Cart (0)");self._iidb_refresh_cart_button()
+        ttk.Button(row,text="Remove Selected",style="Ghost.TButton",command=remove_selected).pack(side="left")
+        ttk.Button(row,text="Clear Cart",style="Ghost.TButton",command=clear_all).pack(side="left",padx=(8,0))
+        ttk.Button(row,text="Install All",style="Accent.TButton",command=lambda:self._iidb_install_cart(win)).pack(side="right")
+        ttk.Button(row,text="Close",style="Ghost.TButton",command=win.destroy).pack(side="right",padx=(0,8))
+
+    def _iidb_play_selected_soundbite(self):
+        asset=getattr(self,"_iidb_selected_asset",None)
+        if not asset or str(asset.get("type","")).lower()!="soundbite":return
+        url=asset.get("preview_url") or asset.get("raw_url") or asset.get("library_preview_url")
+        if not url:self.iidb_status_var.set("This soundbite has no playable URL.");return
+        self._iidb_stop_audio();self.iidb_status_var.set("Loading soundbite preview…")
+        token=(str(self._iidb_current_parent_id),str(asset.get("id",asset.get("asset_id","?"))),str(url));self._iidb_audio_token=token
+        def worker():
+            try:
+                import urllib.request
+                IIDB_AUDIO_CACHE_DIR.mkdir(parents=True,exist_ok=True);suffix=Path(str(url).split("?",1)[0]).suffix.lower()
+                if suffix not in {".mp3",".wav",".wma",".m4a",".aac",".ogg"}:suffix=".mp3"
+                cache=IIDB_AUDIO_CACHE_DIR/(hashlib.sha256(str(url).encode()).hexdigest()[:24]+suffix)
+                if not cache.is_file():
+                    req=urllib.request.Request(str(url),headers={"User-Agent":"iiSU-PC Manager"})
+                    with urllib.request.urlopen(req,timeout=20) as response:cache.write_bytes(response.read())
+                self.after(0,lambda:self._iidb_start_mci_audio(token,cache))
+            except Exception as exc:self.after(0,lambda e=str(exc):self.iidb_status_var.set("Soundbite preview failed: "+e))
+        threading.Thread(target=worker,daemon=True).start()
+
+    def _iidb_start_mci_audio(self,token,path):
+        if getattr(self,"_iidb_audio_token",None)!=token:return
+        try:
+            import ctypes
+            alias="iisupc_iidb_preview";winmm=ctypes.windll.winmm
+            winmm.mciSendStringW(f'close {alias}',None,0,None)
+            err=winmm.mciSendStringW(f'open "{str(path)}" alias {alias}',None,0,None)
+            if err:raise RuntimeError(f"Windows audio open failed (MCI {err})")
+            err=winmm.mciSendStringW(f'play {alias}',None,0,None)
+            if err:raise RuntimeError(f"Windows audio playback failed (MCI {err})")
+            self._iidb_audio_alias=alias;self.iidb_status_var.set("Playing soundbite preview. Use Stop to end playback.")
+        except Exception as exc:self.iidb_status_var.set("Soundbite preview failed: "+str(exc))
+
+    def _iidb_stop_audio(self):
+        alias=getattr(self,"_iidb_audio_alias",None)
+        if alias:
+            try:
+                import ctypes
+                ctypes.windll.winmm.mciSendStringW(f"stop {alias}",None,0,None);ctypes.windll.winmm.mciSendStringW(f"close {alias}",None,0,None)
+            except Exception:pass
+        self._iidb_audio_alias=None
 
     # -- Native Windows applications -------------------------------------------------
 
