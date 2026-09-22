@@ -1483,13 +1483,29 @@ def recover_from_request_exception(config: dict) -> None:
         return
 
     # A subprocess-backed emulator may also already be running. Its normal
-    # wait_and_restore_iisu thread owns frontend restoration, so do not bring
-    # iiSU over it merely because later request handling raised.
+    # wait_and_restore_iisu thread usually owns frontend restoration, so
+    # don't bring iiSU over it merely because later request handling
+    # raised -- but the exception may have occurred *before* handle_request
+    # reached the line that starts that thread (e.g. bring_emulator_to_
+    # foreground() itself raising right after the Popen succeeds), in which
+    # case nothing is watching this process at all and iiSU would stay
+    # suspended forever, even after the user closes the emulator normally.
+    # wait_and_restore_iisu is safe to run twice for the same process (both
+    # calls just block on the same Popen.wait()), so starting one here is a
+    # harmless no-op in the common case and the only fix for the rare one.
     if proc is not None and proc.poll() is None:
         debug_log(
             "request exception occurred while tracked subprocess is still "
-            f"running; leaving iiSU suspended for PID={proc.pid}"
+            f"running; leaving iiSU suspended for PID={proc.pid} and "
+            "ensuring a watcher thread is running for it"
         )
+        try:
+            emulator_name = friendly_emulator_name(Path(proc.args[0]))
+        except Exception:
+            emulator_name = "the running emulator"
+        threading.Thread(
+            target=wait_and_restore_iisu, args=(proc, config, emulator_name), daemon=True
+        ).start()
         return
 
     debug_log(
