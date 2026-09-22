@@ -14,7 +14,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "bridge"))
 
-from launch_bridge import find_emulator_for_package
+from launch_bridge import core_dll_from_pre_args, find_emulator_for_package
 from shared.emulator_defaults import build_emulators_map  # noqa: E402 -- path set up above
 
 
@@ -61,6 +61,26 @@ class FindEmulatorForPackageTests(unittest.TestCase):
     def test_retroarch_with_no_extension_and_no_core_resolves_to_none(self):
         profile = find_emulator_for_package("com.retroarch", self.emulators, None, None)
         self.assertIsNone(profile)
+
+
+class CoreDllFromPreArgsTests(unittest.TestCase):
+    def test_finds_core_dll_with_forward_slash(self):
+        self.assertEqual(
+            core_dll_from_pre_args(["-L", "cores/fceumm_libretro.dll", "-f"]),
+            "fceumm_libretro.dll",
+        )
+
+    def test_finds_core_dll_with_backslash(self):
+        self.assertEqual(
+            core_dll_from_pre_args(["-L", "cores\\fceumm_libretro.dll", "-f"]),
+            "fceumm_libretro.dll",
+        )
+
+    def test_no_cores_arg_returns_none(self):
+        self.assertIsNone(core_dll_from_pre_args(["--fullscreen"]))
+
+    def test_empty_pre_args_returns_none(self):
+        self.assertIsNone(core_dll_from_pre_args([]))
 
 
 if __name__ == "__main__":

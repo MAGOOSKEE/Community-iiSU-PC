@@ -1,0 +1,32 @@
+name: Tests
+
+# windows-latest, not ubuntu: bridge/winapi.py (and everything that
+# imports it -- launch_bridge.py, manager.py, onboarding_wizard.py, ...)
+# uses ctypes.windll at import time, so this project only imports
+# cleanly on Windows in the first place, same as it only ever runs on
+# Windows.
+on:
+  push:
+    branches: [dev, master]
+  pull_request:
+    branches: [dev, master]
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # Catches a plain syntax error in any file the small tests/ suite
+      # doesn't happen to import (most of bridge/manager.py and the
+      # installer/ GUI files aren't exercised by any test below), before
+      # it ships to someone's machine as a release.
+      - name: Compile-check every source file
+        run: python -m compileall -q bridge installer shared tests
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests -v
