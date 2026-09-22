@@ -45,6 +45,7 @@ import socket
 import subprocess
 import sys
 import threading
+import traceback
 import time
 import urllib.request
 import zipfile
@@ -69,16 +70,23 @@ from winapi import (
     find_window_by_title,
     force_foreground,
     hide_emulator_toolbar,
+    list_visible_windows,
+    close_window,
     make_fullscreen,
     nudge_focus_with_click,
     user32,
+    wait_for_new_visible_window,
+    wait_for_new_visible_window_excluding_processes,
     wait_for_window_by_pid,
+    wait_for_visible_window_by_pid,
+    wait_for_window_to_close,
 )
 
 STOP_SCRIPT = Path(__file__).parent / "stop_iisu_pc.py"
 STOP_LOG_PATH = Path(__file__).parent / "stop.log"
 PATH_CACHE_PATH = Path(__file__).parent / ".path_cache.json"
 LAUNCH_LOG_PATH = Path(__file__).parent / "launch_history.log"
+WINDOWS_APPS_PATH = Path(__file__).parent / "windows_apps.json"
 LIBRETRO_CORE_URL = "https://buildbot.libretro.com/nightly/windows/x86_64/latest/{core_dll}.zip"
 
 DETACHED_PROCESS = 0x00000008
@@ -115,7 +123,7 @@ NAMED_KEY_VK = {
     **{f"f{n}": 0x6F + n for n in range(1, 13)},
 }
 KEY_POLL_INTERVAL = 0.03  # seconds -- responsive without busy-looping
-DEFAULT_SHUTDOWN_HOLD_SECONDS = 5
+BOOTANIM_WAIT_SECONDS = 90  # generous cap; see launch_iisu's docstring
 
 
 def resolve_vk(key: str) -> int:
@@ -131,9 +139,7 @@ def _is_key_down(vk: int) -> bool:
 # be reachable from the LAN. The protocol has no authentication at all
 # (anything that can open the socket can make this launch an arbitrary
 # configured emulator, or hand an arbitrary app_id to Steam's URI handler),
-# so binding 0.0.0.0 would mean any other device on the same network, or a
-# malicious webpage in a browser on this same PC doing DNS rebinding
-# against 127.0.0.1, could reach it too.
+# so binding 0.0.0.0 would expose the bridge unnecessarily.
 HOST = "127.0.0.1"
 
 INTENT_CMP_RE = re.compile(r"cmp=(\S+)")
@@ -151,11 +157,170 @@ INTENT_DAT_RE = re.compile(r"dat=(\S+)")
 # special case below rather than forced into the exe_names/rom_path shape
 # every other profile uses.
 GAMENATIVE_PACKAGE = "app.gamenative"
+WINDOWS_LAUNCH_PACKAGES = {"com.winlator.cmod", "com.winlator", "com.cmodded.winlator"}
 
 # Set to the currently-running emulator Popen while a game is active, so the
 # quit hotkey listener (on its own thread) has something to terminate.
 current_process: subprocess.Popen | None = None
+# Native/URI launches may not have a useful Popen handle (Steam is the classic
+# case), so track the actual game HWND separately for quit-hotkey handling.
+current_native_window: int | None = None
+# Keep the owning PID too. Some Steam games destroy/recreate their top-level
+# HWND while the process itself keeps running; the PID is the stable fallback
+# for controller gating and the quit hotkey.
+current_native_pid: int | None = None
+# Becomes True immediately when iiSU hands a launch to the PC side. This
+# closes the Steam startup gap before a real native HWND/PID exists.
+game_handoff_active = False
+# Android media-stream volume captured when a PC game starts, so iiSU's
+# frontend music can be muted during play and restored afterward.
+saved_android_media_volume: int | None = None
+# If the quit hotkey is tapped after a native launch starts but before its
+# real HWND/PID has been discovered, remember the request instead of dropping
+# it. The game is closed as soon as tracking becomes available.
+pending_native_quit = False
 current_process_lock = threading.Lock()
+
+DEBUG_LOG_PATH = Path(__file__).resolve().parent / "bridge_debug.log"
+_debug_log_lock = threading.Lock()
+
+
+def debug_log(message: str) -> None:
+    """Append a timestamped diagnostic line to bridge_debug.log."""
+    try:
+        timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        with _debug_log_lock:
+            with DEBUG_LOG_PATH.open("a", encoding="utf-8") as fh:
+                fh.write(f"[{timestamp}] {message}\n")
+                fh.flush()
+    except Exception:
+        # Diagnostics must never be able to crash the bridge.
+        pass
+
+
+def _log_uncaught_exception(exc_type, exc_value, exc_tb) -> None:
+    formatted = "".join(traceback.format_exception(exc_type, exc_value, exc_tb))
+    debug_log("UNCAUGHT EXCEPTION\\n" + formatted.rstrip())
+    # Preserve normal console traceback behavior too.
+    sys.__excepthook__(exc_type, exc_value, exc_tb)
+
+
+def _log_thread_exception(args) -> None:
+    formatted = "".join(
+        traceback.format_exception(args.exc_type, args.exc_value, args.exc_traceback)
+    )
+    debug_log(
+        f"UNCAUGHT THREAD EXCEPTION in {getattr(args.thread, 'name', '<unknown>')}\\n"
+        + formatted.rstrip()
+    )
+
+
+
+
+
+
+def _window_pid(hwnd: int) -> int | None:
+    pid = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    return int(pid.value) if pid.value else None
+
+
+def _pid_is_running(pid: int | None) -> bool:
+    if not pid:
+        return False
+    # tasklist is available on supported Windows installs and avoids keeping
+    # another process HANDLE open for the whole game session.
+    try:
+        result = subprocess.run(
+            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            creationflags=0x08000000,  # CREATE_NO_WINDOW
+            timeout=2,
+        )
+        return result.returncode == 0 and f'"{pid}"' in result.stdout
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _terminate_native_pid(pid: int) -> bool:
+    try:
+        result = subprocess.run(
+            ["taskkill", "/F", "/PID", str(pid), "/T"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=0x08000000,  # CREATE_NO_WINDOW
+            timeout=5,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def _adb_media_volume_get() -> int | None:
+    """Read Android's MUSIC stream volume (stream 3) without showing a console."""
+    try:
+        result = subprocess.run(
+            ["adb", "shell", "media", "volume", "--stream", "3", "--get"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            creationflags=0x08000000,  # CREATE_NO_WINDOW
+            timeout=3,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    # Typical Android output: "volume is 7 in range [0..15]"
+    match = re.search(r"volume\s+is\s+(\d+)", result.stdout, re.IGNORECASE)
+    return int(match.group(1)) if match else None
+
+
+def _adb_media_volume_set(volume: int) -> bool:
+    try:
+        result = subprocess.run(
+            ["adb", "shell", "media", "volume", "--stream", "3", "--set", str(max(0, volume))],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=0x08000000,  # CREATE_NO_WINDOW
+            timeout=3,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+
+def begin_game_handoff() -> None:
+    """Immediately stop iiSU menu input and mute its Android media stream."""
+    debug_log("begin_game_handoff() entered")
+    global game_handoff_active, saved_android_media_volume, pending_native_quit
+    with current_process_lock:
+        # Treat every launch as a fresh handoff. A previous launch may have
+        # ended through a path that left the boolean set for a few moments.
+        game_handoff_active = True
+        pending_native_quit = False
+
+    # Do the volume work outside the lock; adb can take a moment to answer.
+    previous = _adb_media_volume_get()
+    if previous is not None:
+        saved_android_media_volume = previous
+        if previous != 0:
+            _adb_media_volume_set(0)
+    print("[bridge] iiSU input/audio suspended for PC game handoff")
+
+
+def end_game_handoff() -> None:
+    """Restore iiSU controller navigation and its previous Android volume."""
+    debug_log("end_game_handoff() entered")
+    global game_handoff_active, saved_android_media_volume, pending_native_quit
+    previous = saved_android_media_volume
+    saved_android_media_volume = None
+    if previous is not None:
+        _adb_media_volume_set(previous)
+    with current_process_lock:
+        game_handoff_active = False
+        pending_native_quit = False
+    print("[bridge] iiSU input/audio restored")
 
 
 def load_path_cache() -> dict:
@@ -407,22 +572,36 @@ def launch_iisu(config: dict) -> None:
     default home app, so this just launches it directly rather than
     depending on that.
 
-    Retries every second since `am start` can fail with a transient "does
-    not exist" error for a while right after a cold boot -- package
-    manager can still be resolving components even once Android's own
-    home screen is already visible (confirmed via `dumpsys package`: the
-    activity is genuinely registered, `am start` just tried too early).
+    Waits for init.svc.bootanim to report "stopped" first (the boot
+    animation ending, a cheap getprop check) before making any am start
+    attempt at all: measured live, am start reliably fails for the whole
+    stretch before that point, so trying earlier is a guaranteed-wasted
+    adb round trip, not a head start. Capped at BOOTANIM_WAIT_SECONDS so a
+    system image that never sets this property (or sets it oddly) still
+    falls through to the retry loop below rather than hanging.
 
-    Deliberately does NOT gate this on sys.boot_completed first (setup_
-    wizard.py's own separate wait_for_avd() uses that signal, but only for
-    the one-time install boot): boot_completed only flips once *every*
-    system app's BOOT_COMPLETED receiver has finished, which is well
-    after Android's own home screen is already interactive -- gating the
-    first am start attempt on that turned "wait however long it takes for
-    am start to actually succeed" (this loop
-    alone) into "wait for full boot_completed first, THEN start trying,"
-    adding a real, needless delay confirmed live (iiSU sitting on the
-    stock home screen for 1-2 minutes) instead of shortening one."""
+    Still does NOT gate on sys.boot_completed, unlike setup_wizard.py's
+    own separate wait_for_avd() (used only for the one-time install boot,
+    where waiting longer is fine): boot_completed only flips once *every*
+    system app's BOOT_COMPLETED receiver has finished, including this
+    project's own redirector stubs, and can lag well behind bootanim once
+    more of them are installed -- confirmed live on an earlier run
+    (iiSU sitting on the stock home screen for 1-2 minutes with
+    boot_completed still unset). Retries every second after that since
+    `am start` can still fail with a transient "does not exist" error for
+    a moment even once the system looks interactive -- package manager
+    can still be resolving components (confirmed via `dumpsys package`:
+    the activity is genuinely registered, `am start` just tried too
+    early)."""
+    deadline = time.monotonic() + BOOTANIM_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        result = subprocess.run(
+            ["adb", "shell", "getprop", "init.svc.bootanim"], capture_output=True, text=True
+        )
+        if result.stdout.strip() == "stopped":
+            break
+        time.sleep(1)
+
     component = config.get("iisu_component", DEFAULT_IISU_COMPONENT)
     result = None
     for _ in range(60):
@@ -454,6 +633,7 @@ def show_iisu_window(config: dict) -> None:
     work on this window (it clamps its own max size), so true fullscreen
     means stripping the title bar/border and resizing to the screen -- see
     winapi.make_fullscreen."""
+    end_game_handoff()
     hwnd = find_window_by_title(config["iisu_window_title"])
     if hwnd is None:
         print("[bridge] could not locate iiSU window")
@@ -520,6 +700,7 @@ def _register_hotkey(hotkey_config: dict, hotkey_id: int, purpose: str) -> str |
 
 
 def shutdown_everything() -> None:
+
     """Closes iiSU and shuts down the whole Android subsystem: terminates
     whatever PC emulator is currently running (if any), then hands off to
     stop_iisu_pc.py for the graceful AVD/bridge teardown and exits this
@@ -531,8 +712,23 @@ def shutdown_everything() -> None:
     -- unless config.json's "debug_show_console_windows" says otherwise."""
     with current_process_lock:
         proc = current_process
+        native_hwnd = current_native_window
+        native_pid = current_native_pid
+
     if proc is not None and proc.poll() is None:
         proc.terminate()
+
+    # Prefer the tracked PID for native games. A game can destroy/recreate its
+    # HWND during a resolution or display-mode change while its process remains
+    # alive, so the HWND alone is not sufficient for full shutdown.
+    if native_pid and _pid_is_running(native_pid):
+        if not _terminate_native_pid(native_pid):
+            if native_hwnd is not None and user32.IsWindow(native_hwnd):
+                close_window(native_hwnd)
+    elif native_hwnd is not None and user32.IsWindow(native_hwnd):
+        close_window(native_hwnd)
+
+    end_game_handoff()
 
     try:
         debug_console = load_config().get("debug_show_console_windows", False)
@@ -559,6 +755,7 @@ def shutdown_everything() -> None:
             )
         finally:
             stop_log_file.close()
+    debug_log("shutdown_everything(): about to os._exit(0)")
     os._exit(0)
 
 
@@ -595,86 +792,460 @@ def hotkey_listener(config: dict) -> None:
             shutdown_everything()
 
 
+def quit_tap_action(label: str = "quit") -> None:
+    """Runs whatever a quit tap means right now: force-quit the running
+    game and return to iiSU if one's active, or close iiSU and shut down
+    the AVD entirely if nothing's running. Shared by the keyboard quit
+    hotkey (quit_key_watcher) and the controller quit chord
+    (controller_bridge.ControllerBridge), so both trigger identical
+    behavior through one code path. label is just what gets printed/
+    logged to say what triggered it."""
+    with current_process_lock:
+        proc = current_process
+        native_hwnd = current_native_window
+        native_pid = current_native_pid
+        handoff_active = game_handoff_active
+    if native_hwnd is not None and user32.IsWindow(native_hwnd):
+        print(f"[bridge] {label}, quitting native game")
+        log_launch(f"QUIT: {label} -- native HWND {native_hwnd}, PID {native_pid}")
+        if native_pid and _pid_is_running(native_pid):
+            # Once a native game has been identified, its owning PID is
+            # authoritative. current_process may only be a launcher or
+            # wrapper executable that remains alive beside it.
+            if not _terminate_native_pid(native_pid):
+                print("[bridge] taskkill failed; falling back to WM_CLOSE")
+                close_window(native_hwnd)
+        else:
+            close_window(native_hwnd)
+        if proc is not None and proc.poll() is None and proc.pid != native_pid:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+    elif native_pid and _pid_is_running(native_pid):
+        print(f"[bridge] {label}, native game window changed -- terminating tracked PID {native_pid}")
+        log_launch(f"QUIT: {label} -- native HWND changed; terminating PID {native_pid}")
+        _terminate_native_pid(native_pid)
+        if proc is not None and proc.poll() is None and proc.pid != native_pid:
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+    elif proc is not None and proc.poll() is None:
+        # No native HWND/PID has been established, so this is still a
+        # normal subprocess-backed emulator/game launch.
+        print(f"[bridge] {label}, terminating emulator")
+        proc.terminate()
+    elif handoff_active:
+        # Steam may still be between URI invocation and creation of the
+        # game's real window. Queue the quit instead of either shutting
+        # down iiSU-PC or silently dropping the command.
+        #
+        # IMPORTANT: do not acquire current_process_lock here. This
+        # function already sampled the handoff state under that lock
+        # above; taking the same non-reentrant Lock a second time could
+        # permanently deadlock the calling thread.
+        global pending_native_quit
+        pending_native_quit = True
+        print(f"[bridge] {label} during native launch handoff -- quit queued")
+        log_launch(f"QUIT: {label} during native launch handoff; queued until HWND/PID is tracked")
+    else:
+        print(f"[bridge] {label} with no emulator/native game running -- closing iiSU and the AVD entirely...")
+        log_launch(f"QUIT: {label} -- no tracked emulator/native HWND; shutting down iiSU-PC")
+        shutdown_everything()
+
+
 def quit_key_watcher(config: dict) -> None:
     """Polls quit_hotkey's key (default: Escape, no modifiers) via
-    GetAsyncKeyState instead of RegisterHotKey, on its own thread.
-
-    A tap's meaning depends on whether an emulator is actually running:
-    with one running, it force-quits it and returns to iiSU (the original
-    quit_hotkey behavior); with none running -- already sitting at iiSU
-    itself -- there's nothing to "quit back to", so it closes iiSU and the
-    AVD entirely instead. This replaced tapping being a no-op with nothing
-    running (proc.terminate() guarded on proc not being None, so a tap did
-    genuinely nothing, confirmed live -- reported as "pressing Escape
-    doesn't close iiSU").
-
-    Holding the key for shutdown_hold_seconds (default 5) also closes
-    iiSU and the AVD entirely, *regardless* of whether an emulator is
-    running -- kept as a way to skip straight to shutdown without
-    quitting back to iiSU first, mid-game. RegisterHotKey can't express
-    "how long has this been held," so this needed its own polling loop
-    rather than reusing hotkey_listener's message-loop mechanism."""
+    GetAsyncKeyState instead of RegisterHotKey, on its own thread, and
+    runs quit_tap_action() on release. A tap's meaning depends on
+    whether an emulator is actually running: with one running, it
+    force-quits it and returns to iiSU; with none running, already
+    sitting at iiSU itself, there's nothing to quit back to, so it
+    closes iiSU and the AVD entirely instead."""
     hotkey_config = config["quit_hotkey"]
     key_name = hotkey_config.get("key", "escape")
     vk = resolve_vk(key_name)
     modifier_names = hotkey_config.get("modifiers", [])
     modifier_vks = [MODIFIER_VK[name] for name in modifier_names if name in MODIFIER_VK]
-    hold_seconds = config.get("shutdown_hold_seconds", DEFAULT_SHUTDOWN_HOLD_SECONDS)
     label = "+".join([*modifier_names, key_name]).upper()
 
-    print(
-        f"[bridge] {label}: tap to quit the running emulator (or close iiSU entirely if none is running); "
-        f"hold {hold_seconds}s to close iiSU and the AVD entirely regardless"
-    )
+    print(f"[bridge] {label}: tap to quit the running emulator (or close iiSU entirely if none is running)")
 
-    pressed_since: float | None = None
-    shutdown_fired = False
+    was_down = False
     while True:
         time.sleep(KEY_POLL_INTERVAL)
         is_down = _is_key_down(vk) and all(_is_key_down(m) for m in modifier_vks)
-        if is_down:
-            if pressed_since is None:
-                pressed_since = time.monotonic()
-                shutdown_fired = False
-            elif not shutdown_fired and time.monotonic() - pressed_since >= hold_seconds:
-                shutdown_fired = True
-                print(f"[bridge] {label} held {hold_seconds}s -- closing iiSU and the AVD entirely...")
-                shutdown_everything()
-        else:
-            if pressed_since is not None and not shutdown_fired:
+        if is_down and not was_down:
+            debug_log(f"quit hotkey DOWN: {label}")
+        elif was_down and not is_down:
+            debug_log(f"quit hotkey UP: {label}")
+            quit_tap_action(f"{label} tapped")
+        was_down = is_down
+
+
+
+def load_windows_apps() -> dict:
+    """Load native Windows app mappings fresh for every launch."""
+    if not WINDOWS_APPS_PATH.is_file():
+        return {}
+    try:
+        data = json.loads(WINDOWS_APPS_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as e:
+        log_launch(f"FAILED: could not read windows_apps.json ({e})", notify=True)
+        return {}
+    if not isinstance(data, dict):
+        log_launch("FAILED: windows_apps.json must contain a JSON object", notify=True)
+        return {}
+    return {str(name).casefold(): entry for name, entry in data.items()}
+
+
+def wait_and_restore_iisu_for_window(hwnd: int, config: dict, app_name: str) -> None:
+    """Track a native game across HWND recreation and restore iiSU on exit."""
+    global current_process, current_native_window, current_native_pid
+
+    with current_process_lock:
+        tracked_pid = current_native_pid
+
+    if not tracked_pid:
+        # Without a PID, the original HWND is our only reliable lifetime
+        # signal. Preserve the conservative behavior and wait for it to close.
+        wait_for_window_to_close(hwnd)
+    else:
+        tracked_hwnd = hwnd
+
+        while _pid_is_running(tracked_pid):
+            if tracked_hwnd is not None and user32.IsWindow(tracked_hwnd):
+                time.sleep(0.25)
+                continue
+
+            # The process is still alive but its tracked top-level window has
+            # disappeared. Games commonly recreate HWNDs during display-mode
+            # or resolution changes, so try to adopt a stable replacement
+            # owned by the same PID.
+            replacement = wait_for_visible_window_by_pid(
+                tracked_pid,
+                timeout=5.0,
+                stable_seconds=0.5,
+            )
+
+            if replacement is not None:
+                tracked_hwnd = replacement
                 with current_process_lock:
-                    proc = current_process
-                if proc is not None and proc.poll() is None:
-                    print(f"[bridge] {label} tapped, terminating emulator")
-                    proc.terminate()
-                else:
-                    print(f"[bridge] {label} tapped with no emulator running -- closing iiSU and the AVD entirely...")
-                    shutdown_everything()
-            pressed_since = None
+                    if current_native_pid != tracked_pid:
+                        return
+                    current_native_window = replacement
+                debug_log(
+                    f"native app replaced HWND: {app_name!r}; "
+                    f"tracked_pid={tracked_pid}; hwnd={replacement}"
+                )
+            else:
+                # The PID is still the authoritative lifetime signal. Keep
+                # waiting rather than treating a temporarily windowless game
+                # as exited, but clear current_native_window so the tracker
+                # never references a destroyed HWND.
+                tracked_hwnd = None
+                with current_process_lock:
+                    if current_native_pid == tracked_pid:
+                        current_native_window = None
+                time.sleep(0.25)
+
+    with current_process_lock:
+        if current_native_pid != tracked_pid:
+            return
+        current_native_window = None
+        current_native_pid = None
+        current_process = None
+
+    debug_log(f"native app exited: {app_name!r}; tracked_pid={tracked_pid}")
+    log_launch(f"EXITED: Windows app {app_name} process ended")
+    show_iisu_window(config)
+
+
+def launch_windows_app(app_name: str, config: dict) -> bool:
+    global pending_native_quit
+    """Launch a native Windows app or registered protocol URI from windows_apps.json."""
+
+    # Defend this launch path independently as well. handle_request() normally
+    # rejects overlapping launches, but launch_windows_app() must not overwrite
+    # active process/window tracking if called from another path.
+    if is_game_running():
+        log_launch(
+            f"IGNORED: Windows app '{app_name}' requested while a game is already running",
+            notify=True,
+            notify_title=app_name,
+        )
+        return True
+
+    app = load_windows_apps().get(app_name.casefold())
+    if app is None:
+        return False
+    if not isinstance(app, dict):
+        log_launch(f"FAILED: Windows app '{app_name}' has an invalid config entry", notify=True)
+        return True
+
+    # Backward compatibility: entries created before URI support have no
+    # explicit type and are treated as normal executable launches.
+    launch_type = str(app.get("type", "executable")).lower()
+    if launch_type not in {"executable", "uri"}:
+        log_launch(
+            f"FAILED: Windows app '{app_name}' has unknown launch type '{launch_type}'",
+            notify=True,
+            notify_title=app_name,
+        )
+        return True
+
+    executable = None
+    configured_args = []
+    working_dir = None
+    uri = None
+
+    if launch_type == "uri":
+        uri_value = app.get("uri")
+        if not isinstance(uri_value, str) or not uri_value.strip():
+            log_launch(f"FAILED: Windows app '{app_name}' has no URI configured", notify=True, notify_title=app_name)
+            return True
+        uri = uri_value.strip()
+        if not re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://\S+$", uri):
+            log_launch(f"FAILED: Windows app '{app_name}' has an invalid protocol URI", notify=True, notify_title=app_name)
+            return True
+    else:
+        exe_value = app.get("exe")
+        if not isinstance(exe_value, str) or not exe_value.strip():
+            log_launch(f"FAILED: Windows app '{app_name}' has no executable configured", notify=True)
+            return True
+
+        executable = Path(os.path.expandvars(os.path.expanduser(exe_value)))
+        if not executable.is_file():
+            log_launch(f"FAILED: Windows app '{app_name}' executable not found: {executable}", notify=True, notify_title=app_name)
+            return True
+
+        configured_args = app.get("args", [])
+        if not isinstance(configured_args, list) or not all(isinstance(arg, str) for arg in configured_args):
+            log_launch(f"FAILED: Windows app '{app_name}' args must be a list of strings", notify=True)
+            return True
+
+        working_dir_value = app.get("working_dir")
+        working_dir = Path(os.path.expandvars(os.path.expanduser(str(working_dir_value)))) if working_dir_value else executable.parent
+        if not working_dir.is_dir():
+            log_launch(f"FAILED: Windows app '{app_name}' working directory not found: {working_dir}", notify=True, notify_title=app_name)
+            return True
+
+    # Cut iiSU off immediately, before Steam or the executable is invoked.
+    # Native URI launches can take seconds before their real HWND exists.
+    begin_game_handoff()
+
+    existing_windows = list_visible_windows()
+    show_overlay = config.get("show_boot_overlay", True) and not config.get("debug_show_console_windows", False)
+    overlay = boot_overlay.show(f"Waiting on {app_name}...") if show_overlay else None
+    process = None
+    hwnd = None
+    try:
+        iisu_hwnd = find_window_by_title(config["iisu_window_title"])
+        if iisu_hwnd is not None:
+            user32.ShowWindow(iisu_hwnd, SW_MINIMIZE)
+        else:
+            print("[bridge] could not locate iiSU window to hide")
+
+        if launch_type == "uri":
+            print(f"[bridge] launching Windows URI: {uri}")
+            log_launch(f"LAUNCHED: Windows app {app_name} -- URI {uri}")
+            os.startfile(uri)
+        else:
+            args = [str(executable), *configured_args]
+            print(f"[bridge] launching Windows app: {args}")
+            log_launch(f"LAUNCHED: Windows app {app_name} -- {args}")
+            process = subprocess.Popen(args, cwd=str(working_dir))
+            with current_process_lock:
+                global current_process
+                current_process = process
+
+        # Determine any launcher or helper processes to exclude while waiting
+        # for the real top-level application window.
+        excluded_processes = {"steam.exe", "steamwebhelper.exe"}
+        app_excluded = app.get("excluded_processes") or app.get("exclude_processes")
+        if isinstance(app_excluded, list):
+            excluded_processes.update(str(p).lower() for p in app_excluded)
+
+        # Both URI handlers and executables often create transient launcher UI
+        # or splash screens before the real app window. Require the candidate
+        # window to survive for stable_seconds and ignore common launcher
+        # processes so a loading screen is not mistaken for the game itself.
+        hwnd = wait_for_new_visible_window_excluding_processes(
+            existing_windows,
+            excluded_processes,
+            timeout=60.0,
+            stable_seconds=1.5,
+        )
+        if hwnd is None:
+            log_launch(
+                f"FAILED: Windows app '{app_name}' launched but no new visible window was detected",
+                notify=True,
+                notify_title=app_name,
+            )
+            if process is not None:
+                with current_process_lock:
+                    if current_process is process:
+                        current_process = None
+                try:
+                    process.terminate()
+                except Exception:
+                    pass
+            show_iisu_window(config)
+            return True
+
+        native_pid = _window_pid(hwnd)
+        with current_process_lock:
+            global current_native_window, current_native_pid
+            current_native_window = hwnd
+            current_native_pid = native_pid
+        debug_log(f"TRACKING native app={app_name!r} HWND={hwnd} PID={native_pid}")
+        log_launch(f"TRACKING: Windows app {app_name} -- HWND {hwnd}, PID {native_pid}")
+        print(f"[bridge] tracking native game window HWND={hwnd}, PID={native_pid}")
+
+        # Start lifetime tracking immediately after publishing the native
+        # HWND/PID. Later foreground/quit handling may raise, but restoration
+        # must already have an owner once the game is globally tracked.
+        threading.Thread(
+            target=wait_and_restore_iisu_for_window,
+            args=(hwnd, config, app_name),
+            daemon=True,
+        ).start()
+
+        with current_process_lock:
+            quit_was_queued = pending_native_quit
+            pending_native_quit = False
+        if quit_was_queued:
+            print("[bridge] honoring quit command queued during native launch handoff")
+            log_launch(f"QUIT: force-quitting {app_name} immediately after native tracking became available")
+            if native_pid and _pid_is_running(native_pid):
+                if not _terminate_native_pid(native_pid) and user32.IsWindow(hwnd):
+                    close_window(hwnd)
+            elif user32.IsWindow(hwnd):
+                close_window(hwnd)
+        else:
+            force_foreground(hwnd)
+    except Exception as e:
+        debug_log(
+            f"FAILED: unexpected error while launching Windows app {app_name!r}\n"
+            + traceback.format_exc().rstrip()
+        )
+        log_launch(
+            f"FAILED: could not launch Windows app '{app_name}' ({e})",
+            notify=True,
+            notify_title=app_name,
+        )
+        with current_process_lock:
+            tracked_hwnd = current_native_window
+        if tracked_hwnd is None and process is not None:
+            with current_process_lock:
+                if current_process is process:
+                    current_process = None
+            try:
+                process.terminate()
+            except Exception:
+                pass
+        recover_from_request_exception(config)
+        return True
+    finally:
+        boot_overlay.close(overlay)
+
+    return True
 
 
 def launch_steam_game(app_id: str, config: dict) -> None:
-    """Best-effort, experimental: hands off to the real Steam install on
-    this PC via its "steam://rungameid/<id>" URI, which Steam registers as
-    a URL protocol handler on install -- no need to locate steam.exe under
-    search_roots at all, matching how a person would launch it manually.
+    """Launch a GameNative Steam title and track its native Windows game window."""
+    global current_native_window, current_native_pid, pending_native_quit
 
-    Unlike every other emulator here, this doesn't go through
-    subprocess.Popen: Steam owns the actual launch (and may need to update
-    the game, show its own overlay, etc. first), so there's no child
-    process handle to wait on the way current_process/wait_and_restore_
-    iisu() does for a real subprocess -- iiSU's window is minimized before
-    handing off, but nothing here brings it back automatically once the
-    game exits. Untested against a real GameNative Steam-ROM stub (this
-    project has no way to generate one to test with) -- if Steam doesn't
-    launch at all, the most likely cause is app_id arriving in a format
-    this doesn't expect; check the raw intent dump this prints for what
-    iiSU actually sent."""
-    iisu_hwnd = find_window_by_title(config["iisu_window_title"])
-    if iisu_hwnd is not None:
-        user32.ShowWindow(iisu_hwnd, SW_MINIMIZE)
-    print(f"[bridge] launching Steam app {app_id}...")
-    os.startfile(f"steam://rungameid/{app_id}")
+    # GameNative ultimately launches a normal Windows Steam game, so use the
+    # same handoff/tracking lifecycle as native URI entries from windows_apps.
+    begin_game_handoff()
+
+    existing_windows = list_visible_windows()
+    show_overlay = config.get("show_boot_overlay", True) and not config.get("debug_show_console_windows", False)
+    overlay = boot_overlay.show(f"Waiting on Steam app {app_id}...") if show_overlay else None
+    hwnd = None
+
+    try:
+        iisu_hwnd = find_window_by_title(config["iisu_window_title"])
+        if iisu_hwnd is not None:
+            user32.ShowWindow(iisu_hwnd, SW_MINIMIZE)
+        else:
+            print("[bridge] could not locate iiSU window to hide")
+
+        print(f"[bridge] launching Steam app {app_id}...")
+        os.startfile(f"steam://rungameid/{app_id}")
+
+        # Steam itself may create transient launcher windows before the game's
+        # real top-level window. Ignore Steam-owned UI and adopt the persistent
+        # window created by the actual game process.
+        hwnd = wait_for_new_visible_window_excluding_processes(
+            existing_windows,
+            {"steam.exe", "steamwebhelper.exe"},
+            timeout=60.0,
+            stable_seconds=1.5,
+        )
+        if hwnd is None:
+            log_launch(
+                f"FAILED: Steam app {app_id} launched but no new visible game window was detected",
+                notify=True,
+            )
+            show_iisu_window(config)
+            return
+
+        native_pid = _window_pid(hwnd)
+        with current_process_lock:
+            current_native_window = hwnd
+            current_native_pid = native_pid
+
+        debug_log(
+            f"TRACKING GameNative Steam app={app_id!r} HWND={hwnd} PID={native_pid}"
+        )
+        log_launch(
+            f"TRACKING: Steam app {app_id} via GameNative -- HWND {hwnd}, PID {native_pid}"
+        )
+        print(
+            f"[bridge] tracking GameNative Steam window HWND={hwnd}, PID={native_pid}"
+        )
+
+        # Publish tracking and establish its restoration watcher before any
+        # later foreground or queued-quit operation can raise.
+        threading.Thread(
+            target=wait_and_restore_iisu_for_window,
+            args=(hwnd, config, f"Steam app {app_id}"),
+            daemon=True,
+        ).start()
+
+        with current_process_lock:
+            quit_was_queued = pending_native_quit
+            pending_native_quit = False
+
+        if quit_was_queued:
+            print("[bridge] honoring quit command queued during GameNative Steam handoff")
+            log_launch(
+                f"QUIT: force-quitting Steam app {app_id} immediately after native tracking became available"
+            )
+            if native_pid and _pid_is_running(native_pid):
+                if not _terminate_native_pid(native_pid) and user32.IsWindow(hwnd):
+                    close_window(hwnd)
+            elif user32.IsWindow(hwnd):
+                close_window(hwnd)
+        else:
+            force_foreground(hwnd)
+
+    except Exception as e:
+        debug_log(
+            f"FAILED: unexpected error while launching GameNative Steam app {app_id!r}\n"
+            + traceback.format_exc().rstrip()
+        )
+        log_launch(
+            f"FAILED: could not launch Steam app {app_id} via GameNative ({e})",
+            notify=True,
+        )
+        recover_from_request_exception(config)
+        return
+    finally:
+        boot_overlay.close(overlay)
 
 
 def handle_request(raw_intent: str) -> None:
@@ -688,6 +1259,40 @@ def handle_request(raw_intent: str) -> None:
     except ConfigMissingError as e:
         print(f"[bridge] {e}")
         return
+
+    # Refuse a second launch while one is already tracked. Without this,
+    # a double-fired selection can overwrite the current tracking state and
+    # leave the first game running but unreachable by the normal quit flow.
+    if is_game_running():
+        log_launch(
+            "IGNORED: launch request while a game is already running",
+            notify=True,
+        )
+        return
+
+    # Native Windows applications: iiSU's Windows platform routes .pcgame
+    # placeholders through Winlator. The placeholder basename is our app ID.
+    cmp_match = INTENT_CMP_RE.search(raw_intent)
+    if cmp_match:
+        component = cmp_match.group(1)
+        package = component.split("/")[0]
+        if package in WINDOWS_LAUNCH_PACKAGES:
+            shortcut_match = re.search(r"^EXTRA:shortcut_path=(.+)$", raw_intent, re.MULTILINE)
+            if not shortcut_match:
+                log_launch(f"FAILED: Windows launch from '{package}' had no shortcut_path extra", notify=True)
+                return
+
+            shortcut_path = shortcut_match.group(1).strip()
+            app_name = Path(shortcut_path.replace("\\", "/")).stem
+            print(f"[bridge] Windows app requested: {app_name}")
+
+            if not launch_windows_app(app_name, config):
+                log_launch(
+                    f"FAILED: Windows app '{app_name}' is not registered in windows_apps.json",
+                    notify=True,
+                    notify_title=app_name,
+                )
+            return
 
     cmp_match = INTENT_CMP_RE.search(raw_intent)
     dat_match = INTENT_DAT_RE.search(raw_intent)
@@ -715,19 +1320,6 @@ def handle_request(raw_intent: str) -> None:
 
     component = cmp_match.group(1)
     package = component.split("/")[0]
-
-    # Refuse a second launch while one is already tracked, rather than
-    # silently overwriting current_process -- that used to leave the
-    # earlier emulator running but untracked: the quit hotkey and
-    # is_game_running() would only ever see the newest one, so the
-    # original process couldn't be quit through the normal hotkey and
-    # would still be running after what looked like a full shutdown.
-    # Reachable in practice from a double-fired launch (e.g. input lag on
-    # a controller causing two quick selections in iiSU before the first
-    # emulator's window has even appeared).
-    if is_game_running():
-        log_launch(f"IGNORED: launch request for '{package}' while a game is already running", notify=True)
-        return
 
     if package == GAMENATIVE_PACKAGE:
         app_id = extras.get("app_id")
@@ -801,7 +1393,7 @@ def handle_request(raw_intent: str) -> None:
     # it, that moment shows raw desktop. Skipped when debug_show_console_
     # windows is on, since a fullscreen overlay would just hide the
     # console windows that setting exists to show.
-    show_overlay = not config.get("debug_show_console_windows", False)
+    show_overlay = config.get("show_boot_overlay", True) and not config.get("debug_show_console_windows", False)
     overlay = boot_overlay.show(f"Waiting on {friendly_emulator_name(executable)}...") if show_overlay else None
     try:
         iisu_hwnd = find_window_by_title(config["iisu_window_title"])
@@ -816,20 +1408,116 @@ def handle_request(raw_intent: str) -> None:
         with current_process_lock:
             global current_process
             current_process = process
+
+        # Establish lifetime tracking before any foreground/focus operation
+        # that can raise. Once current_process is visible globally, there must
+        # already be a watcher capable of restoring iiSU when it exits.
+        threading.Thread(
+            target=wait_and_restore_iisu,
+            args=(process, config, friendly_emulator_name(executable)),
+            daemon=True,
+        ).start()
+
         bring_emulator_to_foreground(process.pid)
     finally:
         boot_overlay.close(overlay)
-    threading.Thread(
-        target=wait_and_restore_iisu, args=(process, config, friendly_emulator_name(executable)), daemon=True
-    ).start()
 
 
 def is_game_running() -> bool:
+    """True while any PC-side game is active.
+
+    ControllerBridge uses this to decide whether controller navigation should
+    be forwarded into iiSU. Native/URI launches such as Steam often have no
+    useful Popen handle, so current_native_window must count as a running game
+    too; otherwise the hidden iiSU frontend continues receiving controller
+    KeyEvents while the Steam game is in front.
+    """
     with current_process_lock:
-        return current_process is not None and current_process.poll() is None
+        if game_handoff_active:
+            return True
+        process_running = current_process is not None and current_process.poll() is None
+        native_hwnd = current_native_window
+        native_pid = current_native_pid
+
+    # Keep slower PID probing outside the lock.
+    native_running = (
+        (native_hwnd is not None and user32.IsWindow(native_hwnd))
+        or _pid_is_running(native_pid)
+    )
+    return process_running or native_running
+
+
+def recover_from_request_exception(config: dict) -> None:
+    """Recover frontend state after an unexpected request-handler exception.
+
+    If a native game is already tracked and alive, leave iiSU suspended and
+    let that game's lifecycle watcher restore it when the game exits. If the
+    request failed before a viable native game was established, restore iiSU
+    immediately so input/audio cannot remain stuck in handoff state.
+    """
+    with current_process_lock:
+        native_hwnd = current_native_window
+        native_pid = current_native_pid
+        proc = current_process
+
+    native_alive = (
+        (native_hwnd is not None and user32.IsWindow(native_hwnd))
+        or _pid_is_running(native_pid)
+    )
+
+    if native_alive:
+        debug_log(
+            "request exception occurred after native tracking was established; "
+            f"leaving iiSU suspended for HWND={native_hwnd}, PID={native_pid}"
+        )
+        return
+
+    # A subprocess-backed emulator may also already be running. Its normal
+    # wait_and_restore_iisu thread usually owns frontend restoration, so
+    # don't bring iiSU over it merely because later request handling
+    # raised -- but the exception may have occurred *before* handle_request
+    # reached the line that starts that thread (e.g. bring_emulator_to_
+    # foreground() itself raising right after the Popen succeeds), in which
+    # case nothing is watching this process at all and iiSU would stay
+    # suspended forever, even after the user closes the emulator normally.
+    # wait_and_restore_iisu is safe to run twice for the same process (both
+    # calls just block on the same Popen.wait()), so starting one here is a
+    # harmless no-op in the common case and the only fix for the rare one.
+    if proc is not None and proc.poll() is None:
+        debug_log(
+            "request exception occurred while tracked subprocess is still "
+            f"running; leaving iiSU suspended for PID={proc.pid} and "
+            "ensuring a watcher thread is running for it"
+        )
+        try:
+            emulator_name = friendly_emulator_name(Path(proc.args[0]))
+        except Exception:
+            emulator_name = "the running emulator"
+        threading.Thread(
+            target=wait_and_restore_iisu, args=(proc, config, emulator_name), daemon=True
+        ).start()
+        return
+
+    debug_log(
+        "request exception left no live tracked game; restoring iiSU "
+        "and ending any incomplete handoff"
+    )
+    show_iisu_window(config)
 
 
 def main() -> None:
+    # Install bridge-specific crash logging only when this module is actually
+    # running the bridge. manager.py imports helpers from launch_bridge and
+    # must retain its own sys/threading exception hooks.
+    sys.excepthook = _log_uncaught_exception
+    if hasattr(threading, "excepthook"):
+        threading.excepthook = _log_thread_exception
+
+    debug_log("=" * 72)
+    debug_log(
+        f"launch_bridge starting; PID={os.getpid()}; Python={sys.version.split()[0]}"
+    )
+
     try:
         config = load_config()
     except ConfigMissingError as e:
@@ -839,7 +1527,12 @@ def main() -> None:
     threading.Thread(target=hotkey_listener, args=(config,), daemon=True).start()
     threading.Thread(target=quit_key_watcher, args=(config,), daemon=True).start()
 
-    threading.Thread(target=ControllerBridge(is_game_running, shutdown_everything).run, daemon=True).start()
+    controller_bridge = ControllerBridge(
+        is_game_running,
+        lambda label: quit_tap_action(label),
+        config.get("controller_quit_chord"),
+    )
+    threading.Thread(target=controller_bridge.run, daemon=True).start()
 
     # Launch iiSU directly rather than leaving the stock Android home
     # screen showing, whether this is a fresh boot or the bridge is being
@@ -869,7 +1562,22 @@ def main() -> None:
                     chunks.append(chunk)
                 payload = b"".join(chunks).decode("utf-8", errors="replace")
                 if payload:
-                    handle_request(payload)
+                    try:
+                        handle_request(payload)
+                    except Exception:
+                        debug_log(
+                            "UNCAUGHT EXCEPTION while handling bridge request\n"
+                            + traceback.format_exc().rstrip()
+                        )
+                        log_launch(
+                            "FAILED: unexpected error while handling launch request",
+                            notify=True,
+                        )
+                        # Do not force iiSU over a game that successfully
+                        # launched before a later request-handling exception.
+                        # The recovery helper restores iiSU only when no live
+                        # tracked game remains.
+                        recover_from_request_exception(config)
 
 
 if __name__ == "__main__":

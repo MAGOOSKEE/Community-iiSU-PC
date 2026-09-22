@@ -19,15 +19,14 @@ through Windows (XInput polling isn't exclusive, so this doesn't conflict
 with it), so there's nothing useful for this to send until you're back at
 iiSU.
 
-Also watches for Back+Start held together for SHUTDOWN_HOLD_SECONDS on any
-pad, regardless of whether a game is running, and closes iiSU and shuts
-down the VM entirely when it sees that -- the same action as the
-shutdown_hotkey in config.json, but reachable without a keyboard. Back+
-Start (View+Menu on newer Xbox controllers) is the standard "recover to
-dashboard" chord on other consoles and isn't used for anything else here,
-and it's the one two-button combo guaranteed available through legacy
-XInput (the Guide/Xbox button itself is deliberately not exposed by
-XInputGetState).
+Also watches for a configurable button chord (config.json's
+controller_quit_chord, Select+Start by default) pressed together on any
+pad, regardless of whether a game is running, and runs the same action a
+tap of the keyboard quit hotkey does (see launch_bridge.quit_tap_action):
+force-quit the running game and return to iiSU, or close iiSU and shut
+down the VM entirely if nothing's running. Fires once per press, not on
+a hold, and the chord can be remapped to any combination of buttons from
+BUTTON_NAME_TO_BIT via manager.py's Advanced page.
 
 Also separately watches (via the legacy winmm joystick API, not XInput --
 see detect_unmapped_sony_controller) for a DualSense/DS4 that's plugged in
@@ -94,8 +93,56 @@ TRIGGER_THRESHOLD = 128
 STICK_DEADZONE = 12000
 POLL_HZ = 60
 
-SHUTDOWN_CHORD = XINPUT_GAMEPAD_BACK | XINPUT_GAMEPAD_START
-SHUTDOWN_HOLD_SECONDS = 2.5
+# Every button the quit chord can be remapped to, by the name manager.py's
+# Advanced page uses. "select" matches XInput's BACK bit, which different
+# controller generations label Back, View, or Select -- same physical
+# button, same bit, just a naming difference.
+BUTTON_NAME_TO_BIT = {
+    "dpad_up": XINPUT_GAMEPAD_DPAD_UP,
+    "dpad_down": XINPUT_GAMEPAD_DPAD_DOWN,
+    "dpad_left": XINPUT_GAMEPAD_DPAD_LEFT,
+    "dpad_right": XINPUT_GAMEPAD_DPAD_RIGHT,
+    "start": XINPUT_GAMEPAD_START,
+    "select": XINPUT_GAMEPAD_BACK,
+    "left_stick": XINPUT_GAMEPAD_LEFT_THUMB,
+    "right_stick": XINPUT_GAMEPAD_RIGHT_THUMB,
+    "left_shoulder": XINPUT_GAMEPAD_LEFT_SHOULDER,
+    "right_shoulder": XINPUT_GAMEPAD_RIGHT_SHOULDER,
+    "a": XINPUT_GAMEPAD_A,
+    "b": XINPUT_GAMEPAD_B,
+    "x": XINPUT_GAMEPAD_X,
+    "y": XINPUT_GAMEPAD_Y,
+}
+DEFAULT_QUIT_CHORD = ["select", "start"]
+
+# Short, standard Xbox-pad labels for the names above -- matches iiSU's own
+# on-screen gamepad legend (see the BUTTON_TO_KEYCODE comment), and far more
+# compact than a plain name.replace("_", " ").title() would be (e.g. "Left
+# Stick" / "Right Shoulder"), which matters for manager.py's Advanced page
+# where all 14 need to fit in a tight checkbox grid.
+BUTTON_DISPLAY_NAMES = {
+    "dpad_up": "D-Pad Up",
+    "dpad_down": "D-Pad Down",
+    "dpad_left": "D-Pad Left",
+    "dpad_right": "D-Pad Right",
+    "start": "Start",
+    "select": "Select",
+    "left_stick": "LS",
+    "right_stick": "RS",
+    "left_shoulder": "LB",
+    "right_shoulder": "RB",
+    "a": "A",
+    "b": "B",
+    "x": "X",
+    "y": "Y",
+}
+
+
+def quit_chord_mask(button_names: list[str]) -> int:
+    mask = 0
+    for name in button_names:
+        mask |= BUTTON_NAME_TO_BIT.get(name, 0)
+    return mask
 
 SONY_CONTROLLER_CHECK_INTERVAL = 3.0  # seconds -- winmm enumeration, not worth doing at POLL_HZ
 MAXPNAMELEN = 32
@@ -230,19 +277,24 @@ def get_gamepad_state(slot: int) -> XinputGamepad | None:
 class ControllerBridge:
     """is_game_running: zero-arg callable returning True while a real PC
     emulator is active, so menu-nav forwarding pauses instead of fighting
-    for input. on_shutdown: zero-arg callable that closes iiSU and shuts
-    down the VM, invoked once when the Back+Start chord is held long
-    enough (see module docstring)."""
+    for input. on_quit: zero-arg callable that runs the same action a
+    keyboard quit-hotkey tap does, invoked once whenever every button in
+    quit_chord_buttons is pressed together on the same pad (see module
+    docstring). quit_chord_buttons is a list of BUTTON_NAME_TO_BIT keys,
+    defaulting to Select+Start."""
 
-    def __init__(self, is_game_running, on_shutdown):
+    def __init__(self, is_game_running, on_quit, quit_chord_buttons: list[str] | None = None):
         self.is_game_running = is_game_running
-        self.on_shutdown = on_shutdown
+        self.on_quit = on_quit
+        self._quit_chord_mask = quit_chord_mask(quit_chord_buttons or DEFAULT_QUIT_CHORD)
+        self._quit_chord_label = "+".join(
+            BUTTON_DISPLAY_NAMES.get(name, name) for name in (quit_chord_buttons or DEFAULT_QUIT_CHORD)
+        )
         self._adb_shell: subprocess.Popen | None = None
         self._connected_slots: set[int] = set()
         self._held_since: dict[tuple[int, int], float] = {}
         self._last_repeat: dict[tuple[int, int], float] = {}
-        self._shutdown_chord_since: dict[int, float] = {}
-        self._shutdown_fired: set[int] = set()
+        self._quit_chord_fired: set[int] = set()
         self._sony_controller_check_due = 0.0
         self._sony_controllers_prompted: set[str] = set()
 
@@ -281,16 +333,21 @@ class ControllerBridge:
             pressed.add(KEYCODE_DPAD_RIGHT)
         return pressed
 
-    def _check_shutdown_chord(self, slot: int, pad: XinputGamepad, now: float) -> None:
-        if pad.wButtons & SHUTDOWN_CHORD != SHUTDOWN_CHORD:
-            self._shutdown_chord_since.pop(slot, None)
-            self._shutdown_fired.discard(slot)
+    def _check_quit_chord(self, slot: int, pad: XinputGamepad) -> None:
+        """Fires on_quit() once per press of the configured chord, not on
+        a hold: the chord becoming fully pressed when it wasn't a moment
+        ago. _quit_chord_fired tracks that edge per pad so holding the
+        chord down doesn't repeat the action every poll tick, and clears
+        once any button in it is released so the next press fires again."""
+        if self._quit_chord_mask == 0:
             return
-        started = self._shutdown_chord_since.setdefault(slot, now)
-        if now - started >= SHUTDOWN_HOLD_SECONDS and slot not in self._shutdown_fired:
-            self._shutdown_fired.add(slot)
-            print(f"[controller] Back+Start held for {SHUTDOWN_HOLD_SECONDS:.1f}s -- closing iiSU and shutting down the VM")
-            self.on_shutdown()
+        fully_pressed = pad.wButtons & self._quit_chord_mask == self._quit_chord_mask
+        if not fully_pressed:
+            self._quit_chord_fired.discard(slot)
+            return
+        if slot not in self._quit_chord_fired:
+            self._quit_chord_fired.add(slot)
+            self.on_quit(f"{self._quit_chord_label} pressed")
 
     def _forward_navigation(self, slot: int, pad: XinputGamepad, now: float) -> None:
         pressed = self._digital_buttons(pad)
@@ -332,7 +389,8 @@ class ControllerBridge:
             print("[controller] XInput not available on this system; controller support disabled")
             return
         print("[controller] watching for Xbox-compatible controllers (wired or Bluetooth)")
-        print(f"[controller] hold Back+Start for {SHUTDOWN_HOLD_SECONDS:.0f}s on any pad to close iiSU and shut down the VM")
+        if self._quit_chord_mask:
+            print(f"[controller] {self._quit_chord_label} on any pad triggers the same action as the keyboard quit hotkey")
         while True:
             now = time.time()
             self._check_sony_controllers(now)
@@ -343,18 +401,17 @@ class ControllerBridge:
                     if slot in self._connected_slots:
                         print(f"[controller] slot {slot} disconnected")
                         self._connected_slots.discard(slot)
-                    self._shutdown_chord_since.pop(slot, None)
-                    self._shutdown_fired.discard(slot)
+                    self._quit_chord_fired.discard(slot)
                     continue
                 if slot not in self._connected_slots:
                     print(f"[controller] slot {slot} connected (wired or Bluetooth, detected automatically)")
                     self._connected_slots.add(slot)
 
                 # Checked regardless of game state -- this is a local
-                # "kill everything" action, not something forwarded into
+                # quit/shutdown action, not something forwarded into
                 # Android, so there's no reason to gate it on iiSU being
                 # the thing currently in focus.
-                self._check_shutdown_chord(slot, pad, now)
+                self._check_quit_chord(slot, pad)
 
                 if not game_running:
                     self._forward_navigation(slot, pad, now)

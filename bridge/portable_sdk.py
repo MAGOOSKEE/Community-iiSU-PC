@@ -88,44 +88,52 @@ def _find_real_avd_ini(avd_name: str) -> Path | None:
 # "mounted" SD card slot with no actual backing storage. Nothing in this
 # project uses it (ROM placeholders live under internal storage,
 # /sdcard/Roms, which is unrelated), so it's disabled outright rather than
-# creating a throwaway image just to satisfy it. forceColdBoot is set as a
-# second line of defense alongside the -no-snapshot launch flag in
-# start_iisu_pc.py, in case anything ever launches this AVD another way.
-CONFIG_INI_OVERRIDES = {
+# creating a throwaway image just to satisfy it.
+CONFIG_INI_STATIC_OVERRIDES = {
     "hw.sdCard": "no",
-    "fastboot.forceColdBoot": "yes",
 }
 
 
-def _patch_config_ini(config_ini: Path) -> None:
+def patch_config_ini(config_ini: Path, force_cold_boot: bool = True) -> None:
+    """Applies CONFIG_INI_STATIC_OVERRIDES plus fastboot.forceColdBoot,
+    which is the one entry re-patched on every single start (not just the
+    one-time bootstrap copy) -- see start_iisu_pc.py's boot-fingerprint
+    check, which decides force_cold_boot each run. This is belt-and-
+    suspenders alongside the matching -no-snapshot/no launch flag in
+    start_iisu_pc.py, in case anything ever launches this AVD another
+    way."""
     if not config_ini.is_file():
         return
+    overrides = {**CONFIG_INI_STATIC_OVERRIDES, "fastboot.forceColdBoot": "yes" if force_cold_boot else "no"}
     lines = config_ini.read_text(encoding="utf-8").splitlines()
     seen = set()
     new_lines = []
     for line in lines:
         key = line.split("=", 1)[0] if "=" in line else None
-        if key in CONFIG_INI_OVERRIDES:
-            new_lines.append(f"{key}={CONFIG_INI_OVERRIDES[key]}")
+        if key in overrides:
+            new_lines.append(f"{key}={overrides[key]}")
             seen.add(key)
         else:
             new_lines.append(line)
-    for key, value in CONFIG_INI_OVERRIDES.items():
+    for key, value in overrides.items():
         if key not in seen:
             new_lines.append(f"{key}={value}")
     config_ini.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
 
 
-def disable_quickboot_autosave(avd_dir: Path) -> None:
+def set_quickboot_autosave(avd_dir: Path, enabled: bool) -> None:
     """The emulator rewrites its own quickbootChoice.ini on exit based on
-    its current save-on-exit preference, independent of the -no-snapshot
-    launch flag: a graceful `adb emu kill` still saves a multi-GB snapshot
-    if this file's saveOnExit was left true by an earlier run, regardless
-    of what flag the next launch passes. Pinning it back to false right
-    before every launch (not just once) is what actually guarantees a
-    clean exit never leaves one behind, regardless of what the previous
-    run's exit wrote here."""
-    (avd_dir / "quickbootChoice.ini").write_text("saveOnExit = false\n", encoding="utf-8")
+    its current save-on-exit preference, independent of any launch flag:
+    a graceful `adb emu kill` only saves a snapshot on exit if this file's
+    saveOnExit was left true beforehand. Pinning it explicitly right
+    before every launch (not just once) is what actually guarantees the
+    outcome this run wants, regardless of what the previous run's exit
+    wrote here. enabled=True is what makes quick resume possible at all --
+    see start_iisu_pc.py's boot-fingerprint check for when a saved
+    snapshot is trusted for the *next* start versus ignored in favor of a
+    fresh boot."""
+    value = "true" if enabled else "false"
+    (avd_dir / "quickbootChoice.ini").write_text(f"saveOnExit = {value}\n", encoding="utf-8")
 
 
 def _read_image_sysdir(avd_dir: Path) -> str | None:
@@ -190,7 +198,7 @@ def ensure_portable_sdk(avd_name: str, source_sdk_root: Path) -> dict:
         # emulator just does a normal boot instead of a quickboot resume
         # the first time on the portable copy.
         _robocopy(real_avd_dir, portable_avd_dir, exclude_dirs=["snapshots"])
-        _patch_config_ini(portable_avd_dir / "config.ini")
+        patch_config_ini(portable_avd_dir / "config.ini", force_cold_boot=True)
         real_avd_ini = _find_real_avd_ini(avd_name)
         PORTABLE_AVD_HOME.mkdir(parents=True, exist_ok=True)
         portable_ini = PORTABLE_AVD_HOME / f"{avd_name}.ini"
