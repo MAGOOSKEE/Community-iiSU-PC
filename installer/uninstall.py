@@ -6,7 +6,8 @@ no reused SDK download, no reused AVD, no leftover config.
 Stops the AVD/bridge first (if running) via bridge/stop_iisu_pc.py, then
 removes:
   - bridge/'s generated state: the portable SDK+AVD copy, config.json,
-    caches, the extracted icon, and the last emulator.log/bridge.log/stop.log
+    caches, the extracted icon, and the last emulator.log/bridge.log/
+    stop.log/launch_history.log
   - installer/'s generated state: its own SDK download, the patch
     keystore, the preserved build-tools copy, working directories
   - the actual AVD(s) under ~/.android/avd/ (and the stray per-AVD log
@@ -126,6 +127,7 @@ def collect_targets(avd_name: str) -> list[Path]:
         BRIDGE_DIR / "emulator.log",
         BRIDGE_DIR / "bridge.log",
         BRIDGE_DIR / "stop.log",
+        BRIDGE_DIR / "launch_history.log",
         BRIDGE_DIR / ".iisu_icon.ico",
         BRIDGE_DIR / "_icon_extract_tmp",
         INSTALLER_DIR / "android-sdk",

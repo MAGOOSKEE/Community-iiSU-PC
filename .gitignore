@@ -19,6 +19,7 @@
 /bridge/emulator.log
 /bridge/bridge.log
 /bridge/stop.log
+/bridge/launch_history.log
 /bridge/.iisu_icon.ico
 /bridge/_icon_extract_tmp/
 
