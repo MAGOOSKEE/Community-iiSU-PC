@@ -1,6 +1,6 @@
 @echo off
 cd /d "%~dp0"
-where python >nul 2>nul
+python --version >nul 2>nul
 if not errorlevel 1 (
     set "PYCMD=python"
 ) else (

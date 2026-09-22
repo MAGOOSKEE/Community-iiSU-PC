@@ -1,11 +1,11 @@
 @echo off
 cd /d "%~dp0installer"
 
-where python >nul 2>nul
+python --version >nul 2>nul
 if not errorlevel 1 (
     set "PYCMD=python"
 ) else (
-    where py >nul 2>nul
+    py --version >nul 2>nul
     if not errorlevel 1 (
         set "PYCMD=py"
     ) else (
@@ -19,7 +19,7 @@ if not errorlevel 1 (
     )
 )
 
-where java >nul 2>nul
+java -version >nul 2>nul
 if errorlevel 1 (
     echo.
     echo Java was not found on PATH.
