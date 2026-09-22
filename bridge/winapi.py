@@ -241,10 +241,24 @@ def close_window(hwnd: int) -> bool:
         return False
     return bool(user32.PostMessageW(hwnd, WM_CLOSE, 0, 0))
 
-def wait_for_window_to_close(hwnd: int, poll_interval: float = 0.25) -> None:
-    """Block until a top-level HWND is destroyed."""
+def wait_for_window_to_close(
+    hwnd: int,
+    poll_interval: float = 0.25,
+    timeout: float | None = None,
+) -> bool:
+    """Wait for a top-level HWND to be destroyed.
+
+    Returns True when the HWND closes. If timeout is provided, returns False
+    when that many seconds elapse while the HWND is still valid.
+    """
+    deadline = time.monotonic() + timeout if timeout is not None else None
+
     while user32.IsWindow(hwnd):
+        if deadline is not None and time.monotonic() >= deadline:
+            return False
         time.sleep(poll_interval)
+
+    return True
 
 
 def find_window_by_pid(pid: int) -> int | None:

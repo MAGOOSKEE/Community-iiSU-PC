@@ -1880,7 +1880,7 @@ class Manager(tk.Tk):
             result = self._adb_shell_direct(f"mkdir {self._android_remote_quote(remote)}", timeout=30)
             if result.returncode != 0:
                 raise RuntimeError(result.stderr.strip() or "mkdir failed")
-            self._android_storage_media_scan(base)
+            self._android_storage_media_scan(remote)
         self._android_storage_run_async("Creating folder", work)
 
     def _android_storage_rename(self) -> None:
@@ -3385,11 +3385,25 @@ class Manager(tk.Tk):
         return Path(raw) / "windows"
 
     @staticmethod
+    def _windows_reserved_filename(name: str) -> bool:
+        """Return True for Windows reserved DOS device filenames."""
+        # Windows reserves these names even when an extension is present
+        # (for example, CON.txt and COM1.pcgame).
+        stem = name.rstrip(" .").split(".", 1)[0].upper()
+        return (
+            stem in {"CON", "PRN", "AUX", "NUL"}
+            or re.fullmatch(r"COM[1-9]", stem) is not None
+            or re.fullmatch(r"LPT[1-9]", stem) is not None
+        )
+
+    @staticmethod
     def _safe_pcgame_name(name: str) -> str | None:
         name = name.strip()
         if not name or name in {".", ".."}:
             return None
         if any(ch in name for ch in '<>:"/\\|?*'):
+            return None
+        if Manager._windows_reserved_filename(name):
             return None
         return name
 
@@ -3398,7 +3412,11 @@ class Manager(tk.Tk):
         """Make a Steam title safe as a Windows/.pcgame filename."""
         cleaned = re.sub(r'[<>:"/\\|?*]+', ' - ', name)
         cleaned = re.sub(r'\s+', ' ', cleaned).strip(' .')
-        return cleaned or "Steam Game"
+        if not cleaned:
+            return "Steam Game"
+        if Manager._windows_reserved_filename(cleaned):
+            cleaned += " - Game"
+        return cleaned
 
     @staticmethod
     def _unique_windows_app_name(base: str, apps: dict) -> str:
