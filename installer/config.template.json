@@ -20,8 +20,9 @@
     "modifiers": [],
     "key": "escape"
   },
-  "shutdown_hold_seconds": 5,
   "shutdown_hotkey": null,
+  "controller_quit_chord": ["select", "start"],
   "usb_passthrough": [],
+  "show_boot_overlay": true,
   "debug_show_console_windows": false
 }

@@ -25,15 +25,17 @@ It also always launches from the portable SDK/AVD copy under
 android-sdk-portable/ (see portable_sdk.py) rather than the system-wide
 Android Studio install -- see portable_sdk.py for why.
 
-Always launches with -no-snapshot: a quickboot-resumed AVD carries its
-mount/storage state forward from whenever the snapshot was captured,
-which can go stale in ways a fresh boot doesn't hit (e.g. the emulated
-SD card failing to (re)mount correctly). A real cold boot costs maybe
-30-60s more; that's cheap insurance against a whole class of "why is my
-storage broken" bug reports compared to a snapshot resume that's a few
-seconds faster but occasionally wrong.
+Smart resume: a quickboot snapshot is only trusted (skip -no-snapshot,
+let the AVD resume) when nothing that would make it stale has changed
+since it was captured -- see compute_boot_fingerprint(). Anything that
+changes the hardware profile, the emulator/controller mapping, or the
+ROM library forces a fresh cold boot instead, and the resulting state is
+what gets snapshotted for the *next* start to potentially resume from.
+A cold boot costs maybe 30-60s more than a resume; that's the cost paid
+only when something has actually changed, rather than on every start.
 """
 
+import hashlib
 import json
 import os
 import socket
@@ -47,10 +49,11 @@ import sync_library
 import updater
 from bridge_config import ConfigMissingError, load_config
 from launch_bridge import launch_iisu, show_iisu_window
-from portable_sdk import PORTABLE_AVD_HOME, PORTABLE_SDK, disable_quickboot_autosave, ensure_portable_sdk
+from portable_sdk import PORTABLE_AVD_HOME, PORTABLE_SDK, ensure_portable_sdk, patch_config_ini, set_quickboot_autosave
 
 BRIDGE_SCRIPT = Path(__file__).parent / "launch_bridge.py"
 STATE_PATH = Path(__file__).parent / ".runtime_state.json"
+BOOT_FINGERPRINT_PATH = Path(__file__).parent / ".boot_fingerprint.json"
 EMULATOR_LOG_PATH = Path(__file__).parent / "emulator.log"
 BRIDGE_LOG_PATH = Path(__file__).parent / "bridge.log"
 
@@ -69,6 +72,57 @@ CREATE_NEW_PROCESS_GROUP = 0x00000200
 def save_state(state: dict) -> None:
     with open(STATE_PATH, "w", encoding="utf-8") as f:
         json.dump(state, f)
+
+
+def _roms_signature(roms_dir: Path) -> str:
+    """A directory-mtime signature of the ROM library, not a full per-file
+    stat: adding or removing an entry updates its parent directory's own
+    mtime, so walking directories only (never opening or stat-ing
+    individual ROM files) still catches "a change in the ROMs folder" at
+    a cost proportional to folder count instead of file count -- the
+    difference between this running instantly and it meaningfully
+    delaying every single start on a large library."""
+    if not roms_dir.is_dir():
+        return "missing"
+    h = hashlib.sha256()
+    try:
+        for dirpath, dirnames, _filenames in os.walk(roms_dir):
+            dirnames.sort()
+            rel = os.path.relpath(dirpath, roms_dir)
+            h.update(f"{rel}|{os.stat(dirpath).st_mtime}\n".encode("utf-8"))
+    except OSError:
+        return "unreadable"
+    return h.hexdigest()
+
+
+def compute_boot_fingerprint(config: dict) -> str:
+    """Everything that would make a resumed (quickboot) AVD's state stale
+    or wrong: the hardware profile, the emulator/controller mapping iiSU's
+    patch depends on, and the ROM library. Anything else in config.json
+    (window position, debug flags, auto-update settings...) doesn't
+    affect what's actually running inside the VM, so it's deliberately
+    left out -- otherwise an unrelated settings change would force a
+    needless cold boot."""
+    h = hashlib.sha256()
+    h.update(str(config.get("avd_name", "")).encode("utf-8"))
+    h.update(json.dumps(config.get("display", {}), sort_keys=True).encode("utf-8"))
+    h.update(json.dumps(config.get("emulators", {}), sort_keys=True).encode("utf-8"))
+    h.update(json.dumps(config.get("usb_passthrough", []), sort_keys=True).encode("utf-8"))
+    h.update(_roms_signature(Path(config.get("roms_dir", ""))).encode("utf-8"))
+    return h.hexdigest()
+
+
+def load_saved_boot_fingerprint() -> str | None:
+    if not BOOT_FINGERPRINT_PATH.is_file():
+        return None
+    try:
+        return json.loads(BOOT_FINGERPRINT_PATH.read_text(encoding="utf-8")).get("fingerprint")
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def save_boot_fingerprint(fingerprint: str) -> None:
+    BOOT_FINGERPRINT_PATH.write_text(json.dumps({"fingerprint": fingerprint}), encoding="utf-8")
 
 
 def is_port_open(port: int) -> bool:
@@ -167,7 +221,13 @@ def build_usb_passthrough_args(usb_passthrough: list[dict]) -> list[str]:
 
 
 def _launch_once(
-    emulator_exe: Path, avd_name: str, env: dict, usb_passthrough: list[dict], debug_console: bool, gpu_mode: str
+    emulator_exe: Path,
+    avd_name: str,
+    env: dict,
+    usb_passthrough: list[dict],
+    debug_console: bool,
+    gpu_mode: str,
+    force_cold_boot: bool,
 ) -> int | None:
     """One launch attempt. Logged to a real file, not a pipe, by default: a
     pipe's write end would get inherited by this long-lived process and
@@ -185,15 +245,17 @@ def _launch_once(
 
     gpu_mode is passed as a plain -gpu launch flag rather than written
     into the AVD's config.ini (see apply_display.py, which still handles
-    width/height/density that way): this AVD always cold-boots on every
-    single start (-no-snapshot, never resumed) regardless of anything
-    changing, so a setting that only affects which GPU backend gets
-    picked for *this* launch doesn't need its own dedicated "cold-boot to
-    apply" cycle the way an actual hardware-profile change (resolution)
-    does -- it just needs to be read fresh from config.json and handed to
-    emulator.exe here, taking effect on the very next normal start like
-    every other config.json setting already does."""
-    args = [str(emulator_exe), "-avd", avd_name, "-no-snapshot", "-gpu", gpu_mode, *build_usb_passthrough_args(usb_passthrough)]
+    width/height/density that way): it's read fresh from config.json and
+    handed to emulator.exe here every launch, taking effect immediately
+    rather than needing its own dedicated "cold-boot to apply" cycle the
+    way an actual hardware-profile change (resolution) does.
+
+    force_cold_boot decides whether -no-snapshot is passed at all -- see
+    compute_boot_fingerprint() in start_avd()'s caller. When it's False,
+    the AVD attempts a quickboot resume instead of a full cold boot."""
+    args = [str(emulator_exe), "-avd", avd_name, "-gpu", gpu_mode, *build_usb_passthrough_args(usb_passthrough)]
+    if force_cold_boot:
+        args.append("-no-snapshot")
     if debug_console:
         process = subprocess.Popen(
             args,
@@ -238,7 +300,13 @@ def _launch_once(
     return None
 
 
-def start_avd(avd_name: str, usb_passthrough: list[dict], debug_console: bool = False, gpu_mode: str = "auto") -> int | None:
+def start_avd(
+    avd_name: str,
+    usb_passthrough: list[dict],
+    debug_console: bool = False,
+    gpu_mode: str = "auto",
+    force_cold_boot: bool = True,
+) -> int | None:
     """Launches the AVD directly (bypassing the buggy `android emulator
     start` wrapper) and returns its PID once it's confirmed running, so the
     stop script can find it reliably even if it later gets reparented.
@@ -249,7 +317,13 @@ def start_avd(avd_name: str, usb_passthrough: list[dict], debug_console: bool = 
     install under %LOCALAPPDATA%\\Android\\Sdk has been unreliable, failing
     intermittently with "Broken AVD system path" even with the files
     verified present and ANDROID_SDK_ROOT passed explicitly. The portable
-    copy lives in a plain folder next to this script instead."""
+    copy lives in a plain folder next to this script instead.
+
+    force_cold_boot=False attempts a quickboot resume; if that attempt
+    doesn't come up in time, later retries within this same call fall
+    back to a cold boot rather than repeating a resume that just failed
+    -- a bad/corrupt snapshot shouldn't be able to permanently block
+    starting at all."""
     system_emulator_exe = find_system_emulator_exe()
     if system_emulator_exe is None and not (PORTABLE_SDK / "emulator" / "emulator.exe").is_file():
         print("[start] Could not find an existing Android Studio emulator install to bootstrap the portable copy from.")
@@ -268,14 +342,19 @@ def start_avd(avd_name: str, usb_passthrough: list[dict], debug_console: bool = 
     env = os.environ.copy()
     env.update(env_overrides)
 
+    effective_cold_boot = force_cold_boot
     for attempt in range(1, MAX_LAUNCH_ATTEMPTS + 1):
         clear_stale_locks(avd_dir)
-        disable_quickboot_autosave(avd_dir)
-        pid = _launch_once(emulator_exe, avd_name, env, usb_passthrough, debug_console, gpu_mode)
+        set_quickboot_autosave(avd_dir, enabled=not effective_cold_boot)
+        patch_config_ini(avd_dir / "config.ini", force_cold_boot=effective_cold_boot)
+        pid = _launch_once(emulator_exe, avd_name, env, usb_passthrough, debug_console, gpu_mode, effective_cold_boot)
         if pid is not None:
             return pid
         diagnose_system_image(avd_dir, env_overrides["ANDROID_SDK_ROOT"])
-        if attempt < MAX_LAUNCH_ATTEMPTS:
+        if not effective_cold_boot:
+            print("[start] quick resume didn't come up in time -- falling back to a fresh cold boot...")
+            effective_cold_boot = True
+        elif attempt < MAX_LAUNCH_ATTEMPTS:
             print(f"[start] attempt {attempt}/{MAX_LAUNCH_ATTEMPTS} failed, retrying in {RETRY_DELAY}s...")
             time.sleep(RETRY_DELAY)
     return None
@@ -321,9 +400,14 @@ def main() -> None:
     # further down this same sequence -- covered with a fullscreen
     # overlay for the whole stretch instead. Skipped when the AVD is
     # already up (iiSU is presumably already on screen normally, nothing
-    # to cover) and when debug_console is on (it would just hide the
-    # console windows that setting exists to show).
-    show_overlay = not is_avd_running(avd_name) and not debug_console
+    # to cover), when show_boot_overlay is turned off, and when
+    # debug_console is on (it would just hide the console windows that
+    # setting exists to show).
+    show_overlay = (
+        not is_avd_running(avd_name)
+        and config.get("show_boot_overlay", True)
+        and not debug_console
+    )
     overlay = boot_overlay.show("Booting Community-iiSU-PC, please wait...") if show_overlay else None
     try:
         _run_start_sequence(config, avd_name, port, debug_console, state)
@@ -335,12 +419,18 @@ def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: b
     if is_avd_running(avd_name):
         print(f"[start] {avd_name} is already running.")
     else:
-        print(f"[start] Starting {avd_name}, this can take a minute...")
+        boot_fingerprint = compute_boot_fingerprint(config)
+        force_cold_boot = boot_fingerprint != load_saved_boot_fingerprint()
+        if force_cold_boot:
+            print(f"[start] Starting {avd_name} (settings or ROM library changed -- cold boot)...")
+        else:
+            print(f"[start] Starting {avd_name} (quick resume)...")
         gpu_mode = config.get("display", {}).get("gpu_mode", "auto")
-        pid = start_avd(avd_name, config.get("usb_passthrough", []), debug_console, gpu_mode)
+        pid = start_avd(avd_name, config.get("usb_passthrough", []), debug_console, gpu_mode, force_cold_boot)
         if pid is None:
             sys.exit(1)
         state["emulator_pid"] = pid
+        save_boot_fingerprint(boot_fingerprint)
         print(f"[start] {avd_name} is up.")
 
     print("[start] Syncing your ROM library into the AVD...")

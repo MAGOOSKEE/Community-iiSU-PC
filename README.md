@@ -7,7 +7,7 @@ Runs iiSU (an Android emulation frontend) inside a Windows-hosted Android VM, pa
 ## Requirements
 
 - Windows 10/11 (64-bit)
-- A JDK on PATH (`java` and `keytool` need to work from a terminal) -- e.g. [Eclipse Temurin](https://adoptium.net/)
+- A JDK on PATH (`java` and `keytool` need to work from a terminal), e.g. [Eclipse Temurin](https://adoptium.net/)
 - Python 3.11+
 - Your own copy of the iiSU APK
 - Whichever PC emulators you want to use (DuckStation, Dolphin, PCSX2, etc.) install these yourself
@@ -25,25 +25,25 @@ Once it's done, a short onboarding wizard walks you through your ROM directory, 
 
 ## Day to day use
 
-Double-click the **desktop shortcut**, or run **`Community-iiSU-PC Manager.bat`** for the full Manager -- one window, navigated with the hamburger menu sidebar:
+Double-click the **desktop shortcut**, or run **`Community-iiSU-PC Manager.bat`** for the full Manager: one window, navigated with the hamburger menu sidebar:
 
-- **Home** -- AVD/bridge status, Open/Stop, a running status line, and quick buttons to your ROMs folder and logs.
-- **ROM Directory** -- configure the host folder containing your ROM library.
-- **Emulators** -- configure PC emulator mappings and search folders, test a selected mapping without starting the AVD, and reinstall iiSU's redirector apps.
-- **Windows Apps** -- manage native Windows applications and URI/protocol launches exposed to iiSU through `.pcgame` placeholders, including Steam library import and health checks.
-- **Android Storage** -- browse and manage the Android VM's shared storage, transfer files and folders, and edit text files over ADB.
-- **Display** -- configure the Android VM's resolution and DPI.
-- **Backup & Restore** -- back up iiSU-PC configuration to a ZIP or safely restore an earlier configuration.
-- **Advanced** -- configure hotkeys and debugging options such as "Show console windows."
-- **Diagnostics** -- run non-destructive checks of iiSU-PC's configuration, Android VM/ADB, bridge, Windows Apps, Steam integration, logs, and related components.
-- **Credits** -- who built this and how (see below).
-- **Uninstall** -- below a divider at the bottom of the sidebar.
+- **Home**: AVD/bridge status, Open/Stop, a running status line, and quick buttons to your ROMs folder and logs.
+- **ROM Directory**: configure the host folder containing your ROM library.
+- **Emulators**: configure PC emulator mappings and search folders, test a selected mapping without starting the AVD, and reinstall iiSU's redirector apps.
+- **Windows Apps**: manage native Windows applications and URI/protocol launches exposed to iiSU through `.pcgame` placeholders, including Steam library import and health checks.
+- **Android Storage**: browse and manage the Android VM's shared storage, transfer files and folders, and edit text files over ADB.
+- **Display**: configure the Android VM's resolution and DPI.
+- **Backup & Restore**: back up iiSU-PC configuration to a ZIP or safely restore an earlier configuration.
+- **Advanced**: configure hotkeys and debugging options such as "Show console windows."
+- **Diagnostics**: run non-destructive checks of iiSU-PC's configuration, Android VM/ADB, bridge, Windows Apps, Steam integration, logs, and related components.
+- **Credits**: who built this and how (see below).
+- **Uninstall**: below a divider at the bottom of the sidebar.
 
 On startup, Community-iiSU-PC re-syncs your ROM library into the VM automatically. Automatic project updates are opt-in and can be enabled from the Manager's Diagnostics page; **Check for Updates Now** only checks whether an update is available and does not download or install it. iiSU still needs to notice new games: hit "Rescan full library" in its Library settings.
 
 A fullscreen overlay (`bridge/boot_overlay.py`) covers the AVD boot and the emulator hand-off, showing what's happening ("Booting Community-iiSU-PC...", "Waiting on DuckStation...") instead of raw desktop. It's off while the debug console checkbox is on.
 
-By default, **Escape** controls game quitting and shutdown: tap it while a game is running to force-quit the game and return to iiSU, tap it while already in iiSU to shut down Community-iiSU-PC, or hold it for 5 seconds at any time to shut down iiSU and the VM entirely. The keyboard controls are rebindable in Advanced. Holding **Back+Start** together on a controller for 2.5s also performs a full shutdown.
+By default, **Escape** controls game quitting and shutdown: tap it while a game is running to force-quit the game and return to iiSU, or tap it while already in iiSU to shut down Community-iiSU-PC. The keyboard controls are rebindable in Advanced. Pressing **Select+Start** together on a controller does the same thing, and the chord is remappable to any combination of buttons.
 
 ## Windows Apps
 
@@ -57,7 +57,7 @@ Use **Add** for individual programs, or **Steam Library Import** to find install
 
 ## Uninstalling
 
-Open the Manager's **Uninstall** page for a preview of exactly what will be removed and how much space it frees before you confirm. It removes the Android VM and its portable SDK copy, `bridge/config.json`, the signing keystore, and the desktop shortcut. It does not touch your ROM library, your PC emulators, or the iiSU APK you supplied. It also flags `%LOCALAPPDATA%\Android\Sdk`, which the SDK downloader can end up using -- left alone by default since a real Android Studio install would keep its own SDK there too.
+Open the Manager's **Uninstall** page for a preview of exactly what will be removed and how much space it frees before you confirm. It removes the Android VM and its portable SDK copy, `bridge/config.json`, the signing keystore, and the desktop shortcut. It does not touch your ROM library, your PC emulators, or the iiSU APK you supplied. It also flags `%LOCALAPPDATA%\Android\Sdk`, which the SDK downloader can end up using; left alone by default since a real Android Studio install would keep its own SDK there too.
 
 ## How it works, briefly
 
@@ -109,7 +109,7 @@ tests/                    unit tests for the pure routing/mapping logic (no AVD 
 
 ## Running tests
 
-`python -m unittest discover -s tests` runs the unit tests covering the console/emulator routing logic (`shared/emulator_defaults.py`, `bridge/console_names.py`, `bridge/launch_bridge.py`'s `find_emulator_for_package`). Stdlib-only, no AVD or adb needed -- these only check the pure mapping/decision logic, not an actual end-to-end launch.
+`python -m unittest discover -s tests` runs the unit tests covering the console/emulator routing logic (`shared/emulator_defaults.py`, `bridge/console_names.py`, `bridge/launch_bridge.py`'s `find_emulator_for_package`). Stdlib-only, no AVD or adb needed. These only check the pure mapping/decision logic, not an actual end-to-end launch.
 
 ## If something breaks
 
@@ -117,13 +117,13 @@ tests/                    unit tests for the pure routing/mapping logic (no AVD 
 - `bridge/manager_debug.log` and `bridge/bridge_debug.log` preserve Manager and launch-bridge diagnostics, including uncaught Python exceptions that might otherwise disappear when a console closes.
 - `installer/patch_iisu.py`'s patch is anchored on a specific log string in iiSU's code. If iiSU updates and changes it, the patch fails loudly instead of silently producing a broken build.
 - `bridge/emulator.log`, `bridge/bridge.log`, and `bridge/stop.log` cover the AVD, the launch bridge, and shutdown respectively. Open the Manager's Home page (Logs button) to check them.
-- Re-running setup is safe -- it skips anything already done and won't overwrite an existing `config.json`'s settings.
-- The AVD always cold-boots and never keeps a resume snapshot, trading a bit of boot time for avoiding stale storage/mount state.
+- Re-running setup is safe: it skips anything already done and won't overwrite an existing `config.json`'s settings.
+- Community-iiSU-PC uses a quick resume when nothing relevant has changed since the last start, and only cold-boots (a bit slower) when your settings or ROM library have changed since then, or on the very first start.
 
 ## Credits
 
-- **[MAGOOSKEE](https://github.com/MAGOOSKEE)** -- project owner, built and maintains Community-iiSU-PC.
-- **[Claude](https://github.com/claude)** (Anthropic) -- AI coding assistant; wrote and refactored most of this codebase in collaboration with MAGOOSKEE.
+- **[MAGOOSKEE](https://github.com/MAGOOSKEE)**: project owner, built and maintains Community-iiSU-PC.
+- **[Claude](https://github.com/claude)** (Anthropic): AI coding assistant; wrote and refactored most of this codebase in collaboration with MAGOOSKEE.
 
 Both are shown with live GitHub avatars on the Manager's Credits page.
 

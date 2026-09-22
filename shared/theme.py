@@ -115,6 +115,11 @@ def apply_ttk_styles(style: ttk.Style) -> None:
     style.theme_use("clam")
     style.configure("Accent.TButton", background="#3a3a40", foreground=TEXT, font=FONT_HEADING, padding=(16, 10), borderwidth=0)
     style.map("Accent.TButton", background=[("active", "#48484f"), ("disabled", "#2a2a2e")], foreground=[("disabled", TEXT_DIM)])
+    # For a Save button while it has unsaved changes pending -- same shape
+    # as Accent.TButton, just an amber background so it's noticeable at a
+    # glance instead of only via its text.
+    style.configure("Dirty.TButton", background="#c98a2b", foreground="#1a1206", font=FONT_HEADING, padding=(16, 10), borderwidth=0)
+    style.map("Dirty.TButton", background=[("active", "#d99a3b")])
     style.configure("Ghost.TButton", background=PANEL_BG, foreground=TEXT, font=FONT_BODY, padding=(12, 6), borderwidth=0)
     style.map("Ghost.TButton", background=[("active", PANEL_BG_HOVER)])
     style.configure("Dark.Horizontal.TProgressbar", background=GRADIENT_STOPS[2], troughcolor=PANEL_BG, borderwidth=0)
