@@ -29,6 +29,8 @@ import sys
 from pathlib import Path
 from xml.sax.saxutils import escape as xml_escape
 
+from jre_env import java_subprocess_env
+
 INSTALLER_DIR = Path(__file__).parent
 
 sys.path.insert(0, str(INSTALLER_DIR.parent / "bridge"))
@@ -95,7 +97,7 @@ def ensure_keystore() -> tuple[Path, str]:
             "-storepass", password, "-keypass", password,
             "-dname", "CN=iiSU-PC Redirector, OU=iiSU-PC, O=iiSU-PC, L=Local, S=Local, C=US",
         ],
-        capture_output=True, text=True,
+        capture_output=True, text=True, env=java_subprocess_env(),
     )
     if result.returncode != 0:
         raise RuntimeError(f"keytool failed:\n{result.stdout}\n{result.stderr}")
@@ -104,8 +106,8 @@ def ensure_keystore() -> tuple[Path, str]:
     return KEYSTORE_PATH, password
 
 
-def _run(args: list[str]) -> subprocess.CompletedProcess:
-    result = subprocess.run(args, capture_output=True, text=True)
+def _run(args: list[str], **kwargs) -> subprocess.CompletedProcess:
+    result = subprocess.run(args, capture_output=True, text=True, **kwargs)
     if result.returncode != 0:
         raise RuntimeError(f"command failed ({' '.join(args)}):\n{result.stdout}\n{result.stderr}")
     return result
@@ -165,11 +167,14 @@ def build_stub_apk(package_name: str, app_label: str, output_apk: Path) -> None:
 
     unsigned_apk = WORK_DIR / "unsigned.apk"
     aligned_apk = WORK_DIR / "aligned.apk"
-    _run(["java", "-jar", str(APKTOOL_JAR), "b", str(project_dir), "-o", str(unsigned_apk)])
+    _run(["java", "-jar", str(APKTOOL_JAR), "b", str(project_dir), "-o", str(unsigned_apk)], env=java_subprocess_env())
     _run([str(zipalign_exe()), "-p", "-f", "4", str(unsigned_apk), str(aligned_apk)])
 
     keystore, keystore_pass = ensure_keystore()
     output_apk.parent.mkdir(parents=True, exist_ok=True)
+    # apksigner.bat resolves its own `java` via JAVA_HOME/PATH internally --
+    # env= makes sure that resolves to a bundled JRE once one exists,
+    # without ever touching the user's real system PATH/JAVA_HOME.
     _run([
         str(apksigner_bat()), "sign",
         "--ks", str(keystore),
@@ -178,7 +183,7 @@ def build_stub_apk(package_name: str, app_label: str, output_apk: Path) -> None:
         "--key-pass", f"pass:{keystore_pass}",
         "--out", str(output_apk),
         str(aligned_apk),
-    ])
+    ], env=java_subprocess_env())
 
 
 def install_stub_apk(apk_path: Path, package_name: str, replace_existing: bool = False) -> str:

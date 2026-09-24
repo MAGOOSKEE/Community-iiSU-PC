@@ -23,6 +23,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import sdk_bootstrap
+from jre_env import java_subprocess_env
 from patch_iisu import patch_apk, validate_iisu_apk
 
 INSTALLER_DIR = Path(__file__).parent
@@ -122,24 +123,25 @@ def ensure_pillow() -> None:
         print(f"[setup] couldn't install Pillow automatically -- continuing without it ({result.stderr.strip()[:200]})")
 
 
-def ensure_tkinterdnd2() -> None:
-    """Backs drag-and-drop on the Manager's Windows Apps page (dropping an
-    .exe to add it). Same reasoning as ensure_pillow(): the feature already
-    degrades to Add Application's Browse dialog without it, so a failed
-    install here is never fatal to setup."""
+def ensure_pyside6() -> None:
+    """PySide6 is this project's GUI toolkit (the Qt rewrite replaced Tk
+    entirely, including tkinterdnd2's drag-and-drop -- Qt has that
+    natively). Unlike Pillow, this one isn't optional: with no PySide6
+    there is no GUI at all, so a failed install here is raised, not
+    silently swallowed like ensure_pillow()'s cosmetic-only fallback."""
     try:
-        import tkinterdnd2  # noqa: F401
+        import PySide6  # noqa: F401
         return
     except ImportError:
         pass
-    print("[setup] tkinterdnd2 isn't installed (used for drag-and-drop on the Manager's Windows Apps page) -- installing it now...")
+    print("[setup] PySide6 isn't installed (this project's GUI toolkit) -- installing it now...")
     result = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "--quiet", "tkinterdnd2"], capture_output=True, text=True
+        [sys.executable, "-m", "pip", "install", "--quiet", "PySide6"], capture_output=True, text=True
     )
     if result.returncode == 0:
-        print("[setup] tkinterdnd2 installed.")
+        print("[setup] PySide6 installed.")
     else:
-        print(f"[setup] couldn't install tkinterdnd2 automatically -- continuing without it ({result.stderr.strip()[:200]})")
+        raise RuntimeError(f"Couldn't install PySide6 automatically -- the GUI can't start without it: {result.stderr.strip()[:400]}")
 
 
 def ensure_keystore() -> tuple[Path, str]:
@@ -162,7 +164,7 @@ def ensure_keystore() -> tuple[Path, str]:
             "-storepass", password, "-keypass", password,
             "-dname", "CN=iiSU-PC, OU=iiSU-PC, O=iiSU-PC, L=Local, S=Local, C=US",
         ],
-        capture_output=True, text=True,
+        capture_output=True, text=True, env=java_subprocess_env(),
     )
     if result.returncode != 0:
         raise RuntimeError(f"keytool failed:\n{result.stdout}\n{result.stderr}")
@@ -538,7 +540,6 @@ def run_setup(apk_path: Path, on_stage: Callable[[str, int, int], None] | None =
     stage(0)
     require_java()
     ensure_pillow()
-    ensure_tkinterdnd2()
     print(f"[setup] using {apk_path.name} as the source APK")
     validate_iisu_apk(apk_path)
     check_disk_space()

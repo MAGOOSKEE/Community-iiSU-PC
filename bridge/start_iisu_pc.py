@@ -44,7 +44,15 @@ import sys
 import time
 from pathlib import Path
 
-import boot_overlay
+# Needed to reach bridge.ui.boot_overlay_qt below regardless of this
+# script's own cwd -- it's sometimes run in-process (project root already
+# on sys.path via the Qt app's own import chain) and sometimes as its own
+# subprocess with cwd set to this directory, not the project root.
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+from bridge.ui import boot_overlay_qt as boot_overlay
 import sync_library
 import updater
 from bridge_config import ConfigMissingError, load_config

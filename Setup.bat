@@ -1,5 +1,5 @@
 @echo off
-cd /d "%~dp0installer"
+cd /d "%~dp0"
 
 python --version >nul 2>nul
 if not errorlevel 1 (
@@ -31,4 +31,4 @@ if errorlevel 1 (
     exit /b 1
 )
 
-start "" %PYCMD% setup_gui.py
+start "" %PYCMD% -m bridge.ui.setup_app
