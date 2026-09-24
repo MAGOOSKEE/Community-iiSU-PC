@@ -53,12 +53,15 @@ from ctypes import wintypes
 from pathlib import Path
 from urllib.parse import unquote
 
-import boot_overlay
 import portable_sdk  # noqa: F401 -- imported for its import-time PATH fix (adb), not used directly here
 from bridge_config import ConfigMissingError, load_config
 from controller_bridge import ControllerBridge
 
+# Needed to reach bridge.ui.boot_overlay_qt below regardless of this
+# script's own cwd -- start_iisu_pc.py always launches this as its own
+# subprocess with cwd set to this directory, not the project root.
 sys.path.insert(0, str(Path(__file__).parent.parent))
+from bridge.ui import boot_overlay_qt as boot_overlay
 from shared.emulator_defaults import (
     all_emulator_exe_names,
     retroarch_core_dll_for_android_core,

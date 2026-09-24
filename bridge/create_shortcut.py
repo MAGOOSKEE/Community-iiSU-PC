@@ -25,6 +25,12 @@ from pathlib import Path
 
 BRIDGE_DIR = Path(__file__).parent
 PROJECT_ROOT = BRIDGE_DIR.parent
+
+# Needed for the jre_env import below regardless of whether this module was
+# reached via setup_wizard.py (which already has installer/ on sys.path by
+# then) or run standalone from bridge/ directly.
+sys.path.insert(0, str(PROJECT_ROOT / "installer"))
+from jre_env import java_subprocess_env
 START_SCRIPT = BRIDGE_DIR / "start_iisu_pc.py"
 SHORTCUT_NAME = "Community-iiSU-PC.lnk"
 
@@ -101,7 +107,7 @@ def extract_iisu_icon(apk_path: Path | None = None) -> Path | None:
         shutil.rmtree(decompile_dir, ignore_errors=True)
         result = subprocess.run(
             ["java", "-jar", str(APKTOOL_JAR), "d", "-s", "-f", str(apk_path), "-o", str(decompile_dir)],
-            capture_output=True, text=True,
+            capture_output=True, text=True, env=java_subprocess_env(),
         )
         if result.returncode != 0:
             print(f"[shortcut] apktool failed decoding {apk_path.name} -- using the generic icon")

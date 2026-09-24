@@ -1,0 +1,239 @@
+"""Console Games page -- ports manager.py's _build_games_console_page.
+Backed entirely by sync_library.py (already non-GUI and tested) and
+console_names.py -- no new service module needed, this page just wires
+those straight to a tree."""
+
+from pathlib import Path, PurePosixPath
+
+import bridge.ui  # noqa: F401 -- import-time side effect: puts root/bridge/installer on sys.path
+
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QColor
+from PySide6.QtWidgets import (
+    QAbstractItemView,
+    QComboBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPushButton,
+    QTreeWidget,
+    QTreeWidgetItem,
+    QWidget,
+)
+
+import sync_library
+from console_names import load_console_lookup
+from bridge.ui.pages.base import PageBase
+from bridge.ui.workers.task_runner import run_in_background
+from shared.qt_theme import RED, TEXT_DIM
+
+GAMES_CONSOLE_ALL_SYSTEMS = "All Systems"
+
+
+class ConsoleBrowserPage(PageBase):
+    def __init__(self, window, parent=None):
+        super().__init__(parent, scrollable_body=False)
+        self.window = window
+        self._rows: list[dict] = []
+
+        self.add_header(
+            "Console Games",
+            "Every game detected in your ROM library, grouped the same way syncing to the AVD does -- "
+            "a multi-disc game backed by an .m3u/.cue shows up here as one entry, not one per disc.",
+        )
+
+        search_row = QWidget()
+        search_row_layout = QHBoxLayout(search_row)
+        search_row_layout.setContentsMargins(0, 0, 0, 0)
+        search_row_layout.addWidget(QLabel("Search:"))
+        self.search_edit = QLineEdit()
+        self.search_edit.textChanged.connect(self._render_filtered)
+        search_row_layout.addWidget(self.search_edit, 1)
+        search_row_layout.addWidget(QLabel("System:"))
+        self.system_combo = QComboBox()
+        self.system_combo.addItems([GAMES_CONSOLE_ALL_SYSTEMS])
+        self.system_combo.currentTextChanged.connect(self._render_filtered)
+        search_row_layout.addWidget(self.system_combo)
+        self.count_label = QLabel("")
+        self.count_label.setStyleSheet(f"color: {TEXT_DIM};")
+        search_row_layout.addWidget(self.count_label)
+        self.body_layout.addWidget(search_row)
+
+        self.status_label = QLabel("Open this page to scan your ROM library.")
+        self.status_label.setStyleSheet(f"color: {TEXT_DIM};")
+        self.body_layout.addWidget(self.status_label)
+
+        action_row = QWidget()
+        action_row_layout = QHBoxLayout(action_row)
+        action_row_layout.setContentsMargins(0, 0, 0, 0)
+        rescan_button = QPushButton("Rescan")
+        rescan_button.setObjectName("accent")
+        rescan_button.clicked.connect(self.refresh)
+        action_row_layout.addWidget(rescan_button)
+        keep_separate_button = QPushButton("Keep Discs Separate")
+        keep_separate_button.setObjectName("ghost")
+        keep_separate_button.clicked.connect(self._add_exceptions)
+        action_row_layout.addWidget(keep_separate_button)
+        merge_button = QPushButton("Merge Discs Together")
+        merge_button.setObjectName("ghost")
+        merge_button.clicked.connect(self._remove_exceptions)
+        action_row_layout.addWidget(merge_button)
+        action_row_layout.addStretch(1)
+        self.body_layout.addWidget(action_row)
+
+        note = QLabel(
+            '"Keep Discs Separate" is for a game like Gran Turismo 2, where an .m3u actually bundles '
+            "distinct, separately-launchable modes rather than continuation discs: the individual files show up "
+            'in iiSU as their own entries instead, and the playlist/sheet itself is hidden from iiSU (still '
+            'listed here, greyed as "hidden", so you can merge it back together later). Only applies to '
+            "selected playlists/sheets, never to a plain single-file game. Takes effect on your next Start, "
+            "not while Community-iiSU-PC is already running."
+        )
+        note.setWordWrap(True)
+        note.setStyleSheet(f"color: {TEXT_DIM};")
+        self.body_layout.addWidget(note)
+
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabels(["Name", "Console", "Type", "File", "Discs kept separate"])
+        self.tree.setRootIsDecorated(False)
+        self.tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.tree.setColumnWidth(0, 220)
+        self.tree.setColumnWidth(1, 90)
+        self.tree.setColumnWidth(2, 160)
+        self.tree.setColumnWidth(3, 260)
+        self.body_layout.addWidget(self.tree, 1)
+
+        self._scan_signals = None
+
+    def on_shown(self) -> None:
+        self.refresh()
+
+    def refresh(self) -> None:
+        raw = self.window.config_data.get("roms_dir", "")
+        if not raw or not Path(raw).is_dir():
+            self._apply_scan([], "Set your ROM directory first.", True)
+            return
+        self.status_label.setText("Scanning...")
+        self.status_label.setStyleSheet(f"color: {TEXT_DIM};")
+        self._scan_signals = run_in_background(self._scan_worker, self._apply_scan_result, None, Path(raw))
+
+    def _scan_worker(self, roms_dir: Path):
+        try:
+            exact, by_compact = load_console_lookup()
+            exceptions = sync_library.load_dedupe_exceptions()
+            consoles, skipped = sync_library.scan_library(roms_dir, exact, by_compact, dedupe_exceptions=exceptions)
+        except OSError as e:
+            return [], str(e), True
+
+        consoles.pop("windows", None)
+        rows = []
+        seen_keys = set()
+        for shortname, entries in consoles.items():
+            for rel, _size, _mtime in entries:
+                exception_key = f"{shortname}/{rel}"
+                seen_keys.add(exception_key)
+                rows.append(
+                    {
+                        "shortname": shortname,
+                        "rel": rel,
+                        "name": PurePosixPath(rel).stem,
+                        "is_playlist": PurePosixPath(rel).suffix.lower() in (".m3u", ".cue"),
+                        "exception_key": exception_key,
+                        "excepted": exception_key in exceptions,
+                        "hidden_from_iisu": False,
+                    }
+                )
+
+        for exception_key in exceptions:
+            if exception_key in seen_keys or "/" not in exception_key:
+                continue
+            shortname, _sep, rel = exception_key.partition("/")
+            rows.append(
+                {
+                    "shortname": shortname,
+                    "rel": rel,
+                    "name": PurePosixPath(rel).stem,
+                    "is_playlist": True,
+                    "exception_key": exception_key,
+                    "excepted": True,
+                    "hidden_from_iisu": True,
+                }
+            )
+
+        rows.sort(key=lambda r: (r["shortname"], r["name"].casefold()))
+        game_count = len({(r["shortname"], r["name"]) for r in rows if not r["hidden_from_iisu"]})
+        status = f"{game_count} game(s) across {len(consoles)} console(s)"
+        if skipped:
+            status += f" -- {len(skipped)} folder(s) not recognized as a console"
+        return rows, status, False
+
+    def _apply_scan_result(self, result) -> None:
+        rows, status, error = result
+        self._apply_scan(rows, status, error)
+
+    def _apply_scan(self, rows: list[dict], status: str, error: bool) -> None:
+        self._rows = rows
+        self.status_label.setText(status)
+        self.status_label.setStyleSheet(f"color: {RED if error else TEXT_DIM};")
+        current = self.system_combo.currentText()
+        systems = [GAMES_CONSOLE_ALL_SYSTEMS] + sorted({row["shortname"] for row in rows})
+        self.system_combo.blockSignals(True)
+        self.system_combo.clear()
+        self.system_combo.addItems(systems)
+        self.system_combo.setCurrentText(current if current in systems else GAMES_CONSOLE_ALL_SYSTEMS)
+        self.system_combo.blockSignals(False)
+        self._render_filtered()
+
+    def _render_filtered(self, *_args) -> None:
+        self.tree.clear()
+        query = self.search_edit.text().strip().casefold()
+        system_filter = self.system_combo.currentText() or GAMES_CONSOLE_ALL_SYSTEMS
+        for row in self._rows:
+            if system_filter != GAMES_CONSOLE_ALL_SYSTEMS and row["shortname"] != system_filter:
+                continue
+            haystack = f"{row['name']} {row['shortname']} {row['rel']}".casefold()
+            if query and query not in haystack:
+                continue
+            if row["hidden_from_iisu"]:
+                type_label = "Playlist (hidden from iiSU)"
+            elif row["is_playlist"]:
+                type_label = "Playlist/Sheet"
+            else:
+                type_label = "File"
+            item = QTreeWidgetItem([row["name"], row["shortname"], type_label, row["rel"], "Yes" if row["excepted"] else ""])
+            item.setData(0, Qt.ItemDataRole.UserRole, row["exception_key"])
+            if row["hidden_from_iisu"]:
+                dim = QColor(TEXT_DIM)
+                for col in range(5):
+                    item.setForeground(col, dim)
+            self.tree.addTopLevelItem(item)
+
+        shown = self.tree.topLevelItemCount()
+        total = len(self._rows)
+        filtered = bool(query) or system_filter != GAMES_CONSOLE_ALL_SYSTEMS
+        self.count_label.setText(f"{shown} shown / {total} total" if filtered else f"{total} entries")
+
+    def _selected_rows(self) -> list[dict]:
+        selected_keys = {item.data(0, Qt.ItemDataRole.UserRole) for item in self.tree.selectedItems()}
+        return [row for row in self._rows if row["exception_key"] in selected_keys]
+
+    def _add_exceptions(self) -> None:
+        selected = [row for row in self._selected_rows() if row["is_playlist"]]
+        if not selected:
+            QMessageBox.information(self, "Console Games", "Select one or more playlist (.m3u) or sheet (.cue) entries first.")
+            return
+        exceptions = sync_library.load_dedupe_exceptions()
+        exceptions.update(row["exception_key"] for row in selected)
+        sync_library.save_dedupe_exceptions(exceptions)
+        self.refresh()
+
+    def _remove_exceptions(self) -> None:
+        selected = [row for row in self._selected_rows() if row["excepted"]]
+        if not selected:
+            QMessageBox.information(self, "Console Games", 'Select one or more "Discs kept separate" entries first.')
+            return
+        exceptions = sync_library.load_dedupe_exceptions()
+        exceptions.difference_update(row["exception_key"] for row in selected)
+        sync_library.save_dedupe_exceptions(exceptions)
+        self.refresh()

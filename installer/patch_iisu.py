@@ -22,6 +22,8 @@ import subprocess
 import zipfile
 from pathlib import Path
 
+from jre_env import java_subprocess_env
+
 SCRIPT_DIR = Path(__file__).parent
 SMALI_PATCH_DIR = SCRIPT_DIR / "smali_patch"
 TOOLS_DIR = SCRIPT_DIR / "tools"
@@ -261,6 +263,9 @@ def zipalign(zipalign_exe: Path, unsigned_apk: Path, aligned_apk: Path) -> None:
 
 
 def sign(apksigner_exe: Path, keystore: Path, keystore_pass: str, key_alias: str, aligned_apk: Path, signed_apk: Path) -> None:
+    # apksigner.bat resolves its own `java` via JAVA_HOME/PATH internally --
+    # env= makes sure that resolves to a bundled JRE once one exists,
+    # without ever touching the user's real system PATH/JAVA_HOME.
     run([
         str(apksigner_exe), "sign",
         "--ks", str(keystore),
@@ -269,7 +274,7 @@ def sign(apksigner_exe: Path, keystore: Path, keystore_pass: str, key_alias: str
         "--key-pass", f"pass:{keystore_pass}",
         "--out", str(signed_apk),
         str(aligned_apk),
-    ])
+    ], env=java_subprocess_env())
 
 
 def patch_apk(
