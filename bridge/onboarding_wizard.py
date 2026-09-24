@@ -146,6 +146,17 @@ class OnboardingWizard(tk.Tk):
         self.shutdown_mod_vars = {name: tk.BooleanVar(value=name in {m.lower() for m in shutdown_initial.get("modifiers", [])}) for name in MODIFIER_NAMES}
         self.shutdown_key_var = tk.StringVar(value=shutdown_initial.get("key", "x"))
 
+        # Snapshots taken here, before any step lets the user touch them, so
+        # _summary_lines() on the Finish step can tell what actually changed
+        # from what Setup/a previous config already had -- rather than
+        # listing every single setting whether or not this pass through the
+        # wizard touched it.
+        self._original_roms_dir = self.roms_dir_var.get()
+        self._original_search_roots = list(self.search_roots)
+        self._original_emulators = dict(self.emulators)
+        self._original_quit_hotkey = quit_initial
+        self._original_shutdown_hotkey = shutdown_initial
+
     # -- Style / chrome -------------------------------------------------
 
     def _configure_style(self) -> None:
@@ -650,7 +661,7 @@ class OnboardingWizard(tk.Tk):
         key_row.pack(anchor="w", pady=(4, 0))
         tk.Label(key_row, text="+", bg=PANEL_BG, fg=TEXT_DIM, font=FONT_BODY).pack(side="left", padx=(0, 8))
         tk.Label(key_row, textvariable=key_var, width=8, bg="#0e0e10", fg=TEXT, font=FONT_BODY, relief="flat", padx=8, pady=4).pack(side="left")
-        capture_button = ttk.Button(key_row, text="Press a key...", style="Ghost.TButton")
+        capture_button = ttk.Button(key_row, text="Map", style="Ghost.TButton")
         capture_button.configure(command=lambda: self._capture_key(key_var, capture_button))
         capture_button.pack(side="left", padx=(8, 0))
 
@@ -679,6 +690,13 @@ class OnboardingWizard(tk.Tk):
             "modifiers": [name for name, var in mod_vars.items() if var.get()],
             "key": key_var.get().strip() or default_key,
         }
+
+    @staticmethod
+    def _hotkey_signature(hotkey: dict) -> tuple[frozenset, str]:
+        """Case/order-insensitive so a hotkey re-saved in a different
+        modifier order (or case) than it was originally stored in doesn't
+        register as "changed" when it isn't."""
+        return (frozenset(m.lower() for m in hotkey.get("modifiers", [])), str(hotkey.get("key", "")).lower())
 
     # -- Step 6: Finish -------------------------------------------------
 
@@ -721,21 +739,38 @@ class OnboardingWizard(tk.Tk):
         )
 
     def _summary_lines(self) -> list[str]:
-        display_note = " (will cold-boot the VM once to apply)" if self._display_changed() else " (already matches)"
-        if self.scan_results is not None:
-            found = sum(1 for _, ok in self.scan_results if ok)
-            emulator_note = f" ({found}/{len(self.scan_results)} emulators found)"
-        else:
-            emulator_note = " (not scanned yet)"
-        return [
-            f"ROM folder: {self.roms_dir_var.get().strip() or '(not set)'}",
-            f"Emulator search folders: {len(self.search_roots)}{emulator_note}",
-            f"Emulator mappings: {len(self.emulators)} configured",
-            f"Display: {self.display_width_var.get()}×{self.display_height_var.get()} @ {self.display_refresh_var.get()}Hz{display_note}",
-            f"Quit hotkey: {self._describe_hotkey(self.quit_mod_vars, self.quit_key_var)}",
-            f"Shutdown hotkey: {self._describe_hotkey(self.shutdown_mod_vars, self.shutdown_key_var)}",
-            "Density, AVD name, and other rarely-touched settings stay as-is -- edit those later from Configure -> Advanced if you ever need to.",
-        ]
+        """Only what this pass through the wizard actually changed --
+        listing every setting regardless of whether it was touched just
+        buries the handful that matter in restating the defaults back."""
+        lines = []
+
+        if self.roms_dir_var.get().strip() != self._original_roms_dir:
+            lines.append(f"ROM folder: {self.roms_dir_var.get().strip() or '(not set)'}")
+
+        if self.search_roots != self._original_search_roots:
+            if self.scan_results is not None:
+                found = sum(1 for _, ok in self.scan_results if ok)
+                emulator_note = f" ({found}/{len(self.scan_results)} emulators found)"
+            else:
+                emulator_note = " (not scanned yet)"
+            lines.append(f"Emulator search folders: {len(self.search_roots)}{emulator_note}")
+
+        if self.emulators != self._original_emulators:
+            lines.append(f"Emulator mappings: {len(self.emulators)} configured")
+
+        if self._display_changed():
+            lines.append(
+                f"Display: {self.display_width_var.get()}×{self.display_height_var.get()} "
+                f"@ {self.display_refresh_var.get()}Hz (will cold-boot the VM once to apply)"
+            )
+
+        if self._hotkey_signature(self._read_hotkey(self.quit_mod_vars, self.quit_key_var, default_key="q")) != self._hotkey_signature(self._original_quit_hotkey):
+            lines.append(f"Quit hotkey: {self._describe_hotkey(self.quit_mod_vars, self.quit_key_var)}")
+
+        if self._hotkey_signature(self._read_hotkey(self.shutdown_mod_vars, self.shutdown_key_var, default_key="x")) != self._hotkey_signature(self._original_shutdown_hotkey):
+            lines.append(f"Shutdown hotkey: {self._describe_hotkey(self.shutdown_mod_vars, self.shutdown_key_var)}")
+
+        return lines or ["Nothing changed from your existing configuration -- it'll be kept as-is."]
 
     def _display_changed(self) -> bool:
         current = {
@@ -798,12 +833,9 @@ class OnboardingWizard(tk.Tk):
 
         self.finish_status_label.config(
             text=(
-                "Saved. You're all set -- close this and start Community-iiSU-PC yourself whenever you're "
-                "ready (the desktop shortcut, or Manager's Home page). Two things worth double-"
-                "checking before you do: your real ROM library actually needs to be reachable from "
-                "inside the VM at the folder you mapped (this only points at it, nothing gets copied "
-                "in), and any standalone emulators your console mappings rely on need to actually be "
-                "found -- rerun the scan on \"Emulator Folders\" if you're not sure."
+                "Saved. Start Community-iiSU-PC from the desktop shortcut or Manager's Home page "
+                "whenever you're ready. Double-check your ROM folder is reachable from inside the VM, "
+                "and rerun the scan on \"Emulator Folders\" if you're not sure your emulators were found."
             ),
             fg=GREEN,
         )

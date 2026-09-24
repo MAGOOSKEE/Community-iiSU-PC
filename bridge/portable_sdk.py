@@ -189,7 +189,15 @@ def ensure_portable_sdk(avd_name: str, source_sdk_root: Path) -> dict:
             _robocopy(source_image_dir, portable_image_dir)
 
     portable_avd_dir = PORTABLE_AVD_HOME / f"{avd_name}.avd"
-    if not portable_avd_dir.is_dir():
+    if not (portable_avd_dir / "config.ini").is_file():
+        # Checked via config.ini rather than just the directory existing --
+        # an interrupted previous adoption (killed process, disk full, an
+        # AV scanner locking a file mid-copy) can leave portable_avd_dir
+        # present but incomplete, and config.ini specifically missing is
+        # exactly what made emulator.exe fail outright rather than boot.
+        # robocopy is incremental, so re-running it against an already-
+        # mostly-populated directory only fills in what's actually missing
+        # or stale, not a multi-GB redo.
         if real_avd_dir is None:
             raise RuntimeError(f"No existing AVD '{avd_name}' found under ~/.android/avd to copy from.")
         print(f"[bootstrap] copying AVD config ({real_avd_dir} -> {portable_avd_dir}), one-time...")

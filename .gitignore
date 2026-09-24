@@ -23,6 +23,8 @@
 
 # Windows Apps / Manager runtime data
 /bridge/windows_apps.json
+/bridge/windows_stubs/
+/bridge/dedupe_exceptions.json
 /bridge/manager_debug.log
 /bridge/bridge_debug.log
 /bridge/launch_history.log

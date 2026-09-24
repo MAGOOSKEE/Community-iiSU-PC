@@ -57,6 +57,10 @@ SETUP_STAGES = [
 
 DETACHED_PROCESS = 0x00000008
 CREATE_NEW_PROCESS_GROUP = 0x00000200
+# See the matching constant in start_iisu_pc.py: DETACHED_PROCESS alone
+# doesn't reliably stop emulator.exe from popping up its own console
+# window; CREATE_NO_WINDOW is what actually guarantees it never does.
+CREATE_NO_WINDOW = 0x08000000
 
 
 def find_input_apk() -> Path | None:
@@ -116,6 +120,26 @@ def ensure_pillow() -> None:
         print("[setup] Pillow installed.")
     else:
         print(f"[setup] couldn't install Pillow automatically -- continuing without it ({result.stderr.strip()[:200]})")
+
+
+def ensure_tkinterdnd2() -> None:
+    """Backs drag-and-drop on the Manager's Windows Apps page (dropping an
+    .exe to add it). Same reasoning as ensure_pillow(): the feature already
+    degrades to Add Application's Browse dialog without it, so a failed
+    install here is never fatal to setup."""
+    try:
+        import tkinterdnd2  # noqa: F401
+        return
+    except ImportError:
+        pass
+    print("[setup] tkinterdnd2 isn't installed (used for drag-and-drop on the Manager's Windows Apps page) -- installing it now...")
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "--quiet", "tkinterdnd2"], capture_output=True, text=True
+    )
+    if result.returncode == 0:
+        print("[setup] tkinterdnd2 installed.")
+    else:
+        print(f"[setup] couldn't install tkinterdnd2 automatically -- continuing without it ({result.stderr.strip()[:200]})")
 
 
 def ensure_keystore() -> tuple[Path, str]:
@@ -283,7 +307,7 @@ def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_a
                 # emulator still runs and responds to adb identically
                 # headless; only the visible window is skipped.
                 [str(emulator_exe), "-avd", avd_name, "-no-snapshot", "-no-window"],
-                creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
                 stdin=subprocess.DEVNULL,
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
@@ -514,6 +538,7 @@ def run_setup(apk_path: Path, on_stage: Callable[[str, int, int], None] | None =
     stage(0)
     require_java()
     ensure_pillow()
+    ensure_tkinterdnd2()
     print(f"[setup] using {apk_path.name} as the source APK")
     validate_iisu_apk(apk_path)
     check_disk_space()
