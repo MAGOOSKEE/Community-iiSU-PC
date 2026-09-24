@@ -10,11 +10,15 @@ launched as its own process from the Home page) rather than a sidebar page
 you come back to, the same reasoning onboarding_wizard.py's own docstring
 already applies to first-run configuration.
 
-Stdlib only (tkinter) for the app itself; Pillow is used opportunistically
-for the Credits page's circular GitHub avatars and degrades to a plain
-colored circle if it isn't installed or the fetch fails (see
-shared/avatars.py) -- same "cosmetic nice-to-have degrades quietly"
-approach create_shortcut.py already takes for iiSU's own icon.
+Mostly stdlib (tkinter) for the app itself; a couple of third-party
+packages are used opportunistically and degrade quietly if missing (both
+get installed automatically by Setup, see installer/setup_wizard.py's
+ensure_pillow()/ensure_tkinterdnd2(), but a manual/portable install might
+not have them): Pillow backs the Credits page's circular GitHub avatars
+and falls back to a plain colored circle (shared/avatars.py), the same
+"cosmetic nice-to-have degrades quietly" approach create_shortcut.py
+already takes for iiSU's own icon; tkinterdnd2 backs drag-and-drop on the
+Windows Apps page and falls back to Add Application's Browse dialog.
 """
 
 import json
@@ -40,8 +44,27 @@ import threading
 import traceback
 import tkinter as tk
 import webbrowser
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from tkinter import filedialog, messagebox, ttk
+
+# Installed here (not just by Setup) so a first-ever launch straight into
+# the Manager -- without ever running Setup.bat -- still gets Pillow-backed
+# avatars/artwork and drag-and-drop working, not just a plain-install
+# fallback until Setup happens to run once. Has to happen before the
+# tkinterdnd2 import right below: installing it any later wouldn't change
+# what TkinterDnD is already bound to by the time Manager's class
+# definition below reads it.
+sys.path.insert(0, str(Path(__file__).parent.parent / "installer"))
+from setup_wizard import ensure_pillow, ensure_tkinterdnd2
+
+ensure_pillow()
+ensure_tkinterdnd2()
+
+try:
+    from tkinterdnd2 import DND_FILES, TkinterDnD
+except ImportError:
+    DND_FILES = None
+    TkinterDnD = None
 
 
 MANAGER_LOG_PATH = Path(__file__).resolve().parent / "manager_debug.log"
@@ -169,11 +192,13 @@ from controller_bridge import BUTTON_DISPLAY_NAMES, BUTTON_NAME_TO_BIT, DEFAULT_
 
 import start_iisu_pc
 import stop_iisu_pc
+import sync_library
 
 BRIDGE_DIR = Path(__file__).parent
 PROJECT_ROOT = BRIDGE_DIR.parent
 INSTALLER_DIR = PROJECT_ROOT / "installer"
 WINDOWS_APPS_PATH = BRIDGE_DIR / "windows_apps.json"
+WINDOWS_STUBS_DIR = BRIDGE_DIR / "windows_stubs"
 IIDB_DIR = BRIDGE_DIR / "iidb"
 IIDB_LIBRARY_DIR = IIDB_DIR / "library"
 IIDB_REGISTRY_PATH = IIDB_DIR / "installed_media.json"
@@ -199,6 +224,7 @@ sys.path.insert(0, str(INSTALLER_DIR))
 import uninstall as uninstall_cli
 
 RESOLUTION_PRESETS = ["1280 x 720", "1600 x 900", "1920 x 1080", "2560 x 1440", "3840 x 2160"]
+GAMES_CONSOLE_ALL_SYSTEMS = "All Systems"
 REFRESH_RATE_PRESETS = ["60", "90", "120", "144", "165", "240"]
 GPU_MODE_PRESETS = ["auto", "host", "swiftshader_indirect", "angle_indirect"]
 
@@ -220,7 +246,8 @@ STATUS_POLL_INTERVAL_MS = 2000
 NAV_ITEMS = [
     ("home", "", "Home"),
     ("library", "", "Library"),
-    ("emulators", "", "Emulators"),
+    ("games", "", "Games"),
+    ("emulators", "", "Emulators"),
     ("settings", "", "Settings"),
     ("backup_diagnostics", "", "Backup & Diagnostics"),
     ("credits", "", "Credits"),
@@ -241,9 +268,12 @@ NAV_GROUPS: dict[str, list[tuple[str, str]]] = {
         ("media_library", "Media Library"),
         ("android_storage", "Android Storage"),
     ],
+    "games": [
+        ("games_console", "Console"),
+        ("windows_apps", "PC"),
+    ],
     "emulators": [
         ("emulators", "PC Emulators"),
-        ("windows_apps", "Windows Apps"),
     ],
     "settings": [
         ("settings", "Display"),
@@ -259,7 +289,7 @@ NAV_GROUPS: dict[str, list[tuple[str, str]]] = {
 # everything except Home and Credits, which either doesn't need config.json
 # at all or is static text. Uninstall is deliberately never locked: it
 # should stay reachable even against a partial/broken install.
-LOCKED_NAV = {"library", "emulators", "settings", "backup_diagnostics"}
+LOCKED_NAV = {"library", "games", "emulators", "settings", "backup_diagnostics"}
 
 # Pages (top-level keys or sub-page keys, whichever is actually shown) that
 # use the shared bottom Save bar to commit straight to config.json.
@@ -321,7 +351,7 @@ class _Tooltip:
             self._popup = None
 
 
-class Manager(tk.Tk):
+class Manager(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Community-iiSU-PC Manager")
@@ -459,6 +489,7 @@ class Manager(tk.Tk):
         self._build_home_page()
         self._build_settings_pages()
         self._build_windows_apps_page()
+        self._build_games_console_page()
         self._build_media_library_page()
         self._build_diagnostics_page()
         self._build_backup_restore_page()
@@ -519,7 +550,7 @@ class Manager(tk.Tk):
             self.subnav_buttons[group_key][sub_key] = btn
 
         divider = tk.Frame(shell, bg=PANEL_BG_HOVER, height=1)
-        divider.pack(side="top", fill="x", padx=24, pady=(10, 0))
+        divider.pack(side="top", fill="x", padx=24, pady=(10, 10))
 
         sub_container = tk.Frame(shell, bg=BG)
         sub_container.pack(side="top", fill="both", expand=True)
@@ -602,6 +633,8 @@ class Manager(tk.Tk):
             self._android_storage_refresh()
         elif key == "media_library":
             self._media_library_refresh()
+        elif key == "games_console":
+            self._games_console_refresh()
 
     # -- Home page -------------------------------------------------
 
@@ -649,8 +682,13 @@ class Manager(tk.Tk):
         self.logs_button.pack(side="left", padx=(10, 0))
         self.shortcut_button = ttk.Button(self.button_row, text="Recreate Shortcut", style="Ghost.TButton", command=self._recreate_desktop_shortcut)
         self.shortcut_button.pack(side="left", padx=(10, 0))
+        self.clear_resume_button = ttk.Button(self.button_row, text="Clear Resume State", style="Ghost.TButton", command=self._clear_resume_state)
+        self.clear_resume_button.pack(side="left", padx=(10, 0))
         self.progress = ttk.Progressbar(self.button_row, mode="indeterminate", style="Dark.Horizontal.TProgressbar")
         self.progress.pack(side="left", fill="x", expand=True, padx=(16, 0))
+
+        self.resume_reason_label = tk.Label(page, text="", font=FONT_BODY, bg=BG, fg=TEXT_DIM, anchor="w")
+        self.resume_reason_label.pack(fill="x", padx=24, pady=(0, 4))
 
         self.stage_label = tk.Label(page, text="", font=FONT_BODY, bg=BG, fg=TEXT_DIM, anchor="w")
         self.stage_label.pack(fill="x", padx=24, pady=(0, 8))
@@ -675,6 +713,33 @@ class Manager(tk.Tk):
         else:
             self.setup_intro_label.pack(anchor="w", padx=24, pady=(0, 14), before=self.button_row)
         self._refresh_primary_button()
+        self._refresh_resume_reason()
+
+    def _refresh_resume_reason(self) -> None:
+        if not hasattr(self, "resume_reason_label"):
+            return
+        if not self.configured:
+            self.resume_reason_label.config(text="")
+            return
+        new_parts = start_iisu_pc.compute_boot_fingerprint_parts(self.config_data)
+        old_parts = start_iisu_pc.load_saved_boot_fingerprint_parts()
+        reasons = start_iisu_pc.describe_boot_fingerprint_diff(old_parts, new_parts)
+        if reasons:
+            self.resume_reason_label.config(text=f"Next start: cold boot ({', '.join(reasons)})", fg=TEXT_DIM)
+        else:
+            self.resume_reason_label.config(text="Next start: quick resume (nothing relevant has changed)", fg=TEXT_DIM)
+
+    def _clear_resume_state(self) -> None:
+        if not messagebox.askyesno(
+            "Clear Resume State",
+            "This forces the next start to do a full cold boot instead of a quick resume.\n\n"
+            "Use this if the Android VM seems stuck in a bad state after resuming. It doesn't "
+            "affect your settings, ROM library, or the VM itself.",
+        ):
+            return
+        start_iisu_pc.clear_boot_fingerprint()
+        self._refresh_resume_reason()
+        messagebox.showinfo("Clear Resume State", "Done. The next start will be a full cold boot.")
 
     def _refresh_primary_button(self) -> None:
         if not self.configured:
@@ -734,6 +799,7 @@ class Manager(tk.Tk):
         finally:
             sys.stdout = old_stdout
         self.after(0, self._set_busy, False)
+        self.after(0, self._refresh_resume_reason)
 
     def _set_busy(self, busy: bool) -> None:
         self.busy = busy
@@ -1812,6 +1878,15 @@ class Manager(tk.Tk):
         ttk.Button(top, text="Go", style="Ghost.TButton", command=self._android_storage_refresh).pack(side="left")
         ttk.Button(top, text="Refresh", style="Ghost.TButton", command=self._android_storage_refresh).pack(side="left", padx=(8, 0))
 
+        search_row = tk.Frame(frame, bg=BG)
+        search_row.pack(fill="x", padx=24, pady=(0, 6))
+        tk.Label(search_row, text="Search:", bg=BG, fg=TEXT, font=FONT_BODY).pack(side="left")
+        self.android_storage_search_var = tk.StringVar()
+        tk.Entry(search_row, textvariable=self.android_storage_search_var, **ENTRY_KWARGS).pack(
+            side="left", fill="x", expand=True, padx=(8, 10), ipady=3
+        )
+        self.android_storage_search_var.trace_add("write", self._android_storage_render_filtered)
+
         self.android_storage_status = tk.Label(
             frame, text="Open this page while the Android VM is running.",
             bg=BG, fg=TEXT_DIM, font=FONT_BODY, anchor="w",
@@ -1924,18 +1999,34 @@ class Manager(tk.Tk):
         return f"{size} B"
 
     def _android_storage_apply_listing(self, path: str, rows, status: str) -> None:
-        self.android_storage_tree.delete(*self.android_storage_tree.get_children())
         if rows is None:
+            self.android_storage_tree.delete(*self.android_storage_tree.get_children())
             self._android_storage_set_status(status, True)
             return
         self.android_storage_path_var.set(path)
+        self._android_storage_rows = rows
+        self._android_storage_last_status = status
+        self._android_storage_render_filtered()
+
+    def _android_storage_render_filtered(self, *_args) -> None:
+        if not hasattr(self, "android_storage_tree"):
+            return
+        self.android_storage_tree.delete(*self.android_storage_tree.get_children())
+        query = self.android_storage_search_var.get().strip().casefold() if hasattr(self, "android_storage_search_var") else ""
+        rows = getattr(self, "_android_storage_rows", [])
         for index, (name, is_dir, size) in enumerate(rows):
+            if query and query not in name.casefold():
+                continue
             self.android_storage_tree.insert(
                 "", "end", iid=f"android-{index}",
                 values=(name, "Folder" if is_dir else "File", "" if is_dir else self._format_android_size(size)),
                 tags=("dir" if is_dir else "file",),
             )
-        self._android_storage_set_status(f"{status} • {len(rows)} item(s)")
+        shown = len(self.android_storage_tree.get_children())
+        total = len(rows)
+        suffix = f"{shown} of {total} item(s)" if query else f"{total} item(s)"
+        status = getattr(self, "_android_storage_last_status", "")
+        self._android_storage_set_status(f"{status} • {suffix}" if status else suffix)
 
     def _android_storage_selected(self) -> list[tuple[str, bool]]:
         result = []
@@ -3364,9 +3455,7 @@ class Manager(tk.Tk):
     def _iidb_windows_target(self, game_name: str) -> dict:
         """Resolve an iiDB game to an existing Windows .pcgame placeholder."""
         import urllib.parse
-        rom_dir = self._windows_rom_dir(show_error=False)
-        if rom_dir is None or not rom_dir.is_dir():
-            raise RuntimeError("The configured Windows ROM directory is unavailable.")
+        rom_dir = self._windows_rom_dir()
         wanted = game_name.strip().casefold()
         matches = [p for p in rom_dir.glob("*.pcgame") if p.stem.casefold() == wanted]
         if not matches:
@@ -3630,13 +3719,81 @@ class Manager(tk.Tk):
             messagebox.showerror("Windows Apps", f"Couldn't save {WINDOWS_APPS_PATH.name}:\n\n{e}")
             return False
 
-    def _windows_rom_dir(self, show_error: bool = True) -> Path | None:
+    def _windows_rom_dir(self, show_error: bool = False) -> Path:
+        """Where Windows Apps' .pcgame placeholders live: the install
+        directory, not the live ROM library, so they never clutter the
+        real ROM folder and survive a ROM directory change. show_error is
+        unused now (kept so existing call sites don't need updating) --
+        this can no longer fail the way it could when it depended on
+        roms_dir being set."""
+        self._migrate_legacy_windows_stubs()
+        return WINDOWS_STUBS_DIR
+
+    def _migrate_legacy_windows_stubs(self) -> None:
+        """Pre-relocation installs kept .pcgame placeholders under
+        <roms_dir>/windows. One-time, additive copy into the new location
+        so existing Windows Apps entries keep working after updating --
+        never deletes or modifies anything under roms_dir, since that's
+        live content in the user's own ROM directory, not this project's
+        to clean up uninvited."""
+        if getattr(self, "_windows_stubs_migration_checked", False):
+            return
+        self._windows_stubs_migration_checked = True
         raw = self.config_data.get("roms_dir", "")
         if not raw:
-            if show_error:
-                messagebox.showerror("Windows Apps", "Set your ROM directory first.")
+            return
+        legacy_dir = Path(raw) / "windows"
+        if not legacy_dir.is_dir():
+            return
+        try:
+            WINDOWS_STUBS_DIR.mkdir(parents=True, exist_ok=True)
+            copied = 0
+            for stub in legacy_dir.glob("*.pcgame"):
+                target = WINDOWS_STUBS_DIR / stub.name
+                if not target.exists():
+                    shutil.copy2(stub, target)
+                    copied += 1
+        except OSError:
+            return
+        if copied:
+            messagebox.showinfo(
+                "Windows Apps",
+                f"Found {copied} Windows app placeholder(s) under your ROM directory's old \"windows\" folder "
+                f"and copied them to {WINDOWS_STUBS_DIR}.\n\n"
+                f"They no longer need to live under your ROM directory -- {legacy_dir} is untouched and safe "
+                "to delete yourself once you've confirmed everything still works (or use \"Delete Old "
+                "Location...\" on this page).",
+            )
+
+    def _legacy_windows_stubs_dir(self) -> Path | None:
+        raw = self.config_data.get("roms_dir", "")
+        if not raw:
             return None
-        return Path(raw) / "windows"
+        legacy_dir = Path(raw) / "windows"
+        return legacy_dir if legacy_dir.is_dir() else None
+
+    def _delete_legacy_windows_stubs(self) -> None:
+        legacy_dir = self._legacy_windows_stubs_dir()
+        if legacy_dir is None:
+            messagebox.showinfo(
+                "Windows Apps", "No old placeholder folder found under your ROM directory -- nothing to delete."
+            )
+            return
+        count = sum(1 for _ in legacy_dir.glob("*.pcgame"))
+        if not messagebox.askyesno(
+            "Delete Old Placeholder Folder",
+            f"Delete {legacy_dir}?\n\n"
+            f"It holds {count} old .pcgame placeholder(s) left over from before Windows Apps placeholders "
+            f"moved to {WINDOWS_STUBS_DIR}. Only do this once you've confirmed your Windows Apps still work -- "
+            "this cannot be undone.",
+        ):
+            return
+        try:
+            shutil.rmtree(legacy_dir)
+        except OSError as e:
+            messagebox.showerror("Windows Apps", f"Couldn't delete {legacy_dir}:\n\n{e}")
+            return
+        messagebox.showinfo("Windows Apps", f"Deleted {legacy_dir}.")
 
     @staticmethod
     def _windows_reserved_filename(name: str) -> bool:
@@ -3874,8 +4031,6 @@ class Manager(tk.Tk):
             messagebox.showinfo("Nothing selected", "Select one or more applications first.")
             return
         windows_dir = self._windows_rom_dir()
-        if windows_dir is None:
-            return
         try:
             windows_dir.mkdir(parents=True, exist_ok=True)
             repaired = 0
@@ -3937,8 +4092,6 @@ class Manager(tk.Tk):
         existing_steam_ids = self._steam_ids_already_added()
         added = skipped = 0
         windows_dir = self._windows_rom_dir()
-        if windows_dir is None:
-            return
         windows_dir.mkdir(parents=True, exist_ok=True)
         for raw_name, raw_entry in incoming.items():
             name = self._safe_pcgame_name(str(raw_name))
@@ -4030,9 +4183,6 @@ class Manager(tk.Tk):
             return
 
         windows_dir = self._windows_rom_dir()
-        if windows_dir is None:
-            return
-
         try:
             windows_dir.mkdir(parents=True, exist_ok=True)
         except OSError as e:
@@ -4155,8 +4305,6 @@ class Manager(tk.Tk):
 
             apps = self._load_windows_apps()
             windows_dir = self._windows_rom_dir()
-            if windows_dir is None:
-                return
             windows_dir.mkdir(parents=True, exist_ok=True)
             imported = skipped = 0
             existing_steam_ids = self._steam_ids_already_added()
@@ -4219,9 +4367,7 @@ class Manager(tk.Tk):
         else:
             return "✗ Unknown type"
 
-        windows_dir = self._windows_rom_dir(show_error=False)
-        if windows_dir is None:
-            return "? ROM dir unset"
+        windows_dir = self._windows_rom_dir()
         if not (windows_dir / f"{name}.pcgame").is_file():
             return "✗ Missing placeholder"
         return "✓ Ready"
@@ -4561,8 +4707,6 @@ class Manager(tk.Tk):
                 return
 
             windows_dir = self._windows_rom_dir()
-            if windows_dir is None:
-                return
             try:
                 windows_dir.mkdir(parents=True, exist_ok=True)
                 repaired = 0
@@ -4603,7 +4747,16 @@ class Manager(tk.Tk):
         self._windows_apps_images = {}
         ttk.Style(self).configure("WindowsApps.Treeview", rowheight=32)
 
-        steam_card = Card(frame)
+        # Not wrapped in _make_scrollable_body: that's a good fit for a tall
+        # form (see the Advanced page), but fights a wide Treeview that
+        # needs its own horizontal scrollbar -- the canvas it wraps content
+        # in stretched the whole window instead of scrolling. Buttons come
+        # before the tree instead so they're never the thing that gets
+        # squeezed off-screen on a small window; only the tree (which has
+        # its own scrollbars either way) absorbs that.
+        body = frame
+
+        steam_card = Card(body)
         steam_card.pack(fill="x", padx=24, pady=(12, 4))
         steam_inner = tk.Frame(steam_card, bg=PANEL_BG)
         steam_inner.pack(fill="x", padx=14, pady=10)
@@ -4636,7 +4789,7 @@ class Manager(tk.Tk):
             command=self._windows_apps_cleanup,
         ).pack(side="right", padx=(0, 8))
 
-        search_row = tk.Frame(frame, bg=BG)
+        search_row = tk.Frame(body, bg=BG)
         search_row.pack(fill="x", padx=24, pady=(12, 4))
         tk.Label(search_row, text="Search:", bg=BG, fg=TEXT, font=FONT_BODY).pack(side="left")
         self.windows_apps_search_var = tk.StringVar()
@@ -4647,9 +4800,38 @@ class Manager(tk.Tk):
         self.windows_apps_count_label.pack(side="right")
         self.windows_apps_search_var.trace_add("write", self._refresh_windows_apps_tree)
 
+        tk.Label(
+            body,
+            text="Steam import reads your installed Steam libraries locally. Steam artwork shown here is Manager-only; "
+                 "iiSU's own SteamGridDB artwork workflow is untouched.",
+            bg=BG, fg=TEXT_DIM, font=FONT_BODY, justify="left", wraplength=620,
+        ).pack(anchor="w", padx=24, pady=(0, 4))
+
+        if TkinterDnD is not None:
+            body.drop_target_register(DND_FILES)
+            body.dnd_bind("<<Drop>>", self._on_windows_apps_drop)
+            drop_hint_text = "Tip: drag and drop an .exe file anywhere on this page to add it as a Windows app."
+        else:
+            drop_hint_text = "Tip: pip install tkinterdnd2 to enable dragging and dropping an .exe onto this page."
+        tk.Label(
+            body, text=drop_hint_text, bg=BG, fg=TEXT_DIM, font=FONT_BODY, justify="left", wraplength=620,
+        ).pack(anchor="w", padx=24, pady=(0, 8))
+
+        # One row: the four most-used actions plus a "More" overflow menu
+        # for everything else, instead of two rows of eleven buttons.
+        action_row = tk.Frame(body, bg=BG)
+        action_row.pack(fill="x", padx=24, pady=(0, 8))
+        ttk.Button(action_row, text="Add Application...", style="Accent.TButton", command=self._add_windows_app).pack(side="left")
+        ttk.Button(action_row, text="Edit...", style="Ghost.TButton", command=self._edit_windows_app).pack(side="left", padx=(8, 0))
+        ttk.Button(action_row, text="Remove Selected", style="Ghost.TButton", command=self._remove_windows_app).pack(side="left", padx=(8, 0))
+        ttk.Button(action_row, text="Test...", style="Ghost.TButton", command=self._test_windows_app).pack(side="left", padx=(8, 0))
+        more_button = ttk.Button(action_row, text="More...", style="Ghost.TButton")
+        more_button.configure(command=lambda: self._show_windows_apps_more_menu(more_button))
+        more_button.pack(side="left", padx=(8, 0))
+
         columns = ("name", "type", "target", "args", "status", "added")
-        windows_apps_tree_container = tk.Frame(frame, bg=BG)
-        windows_apps_tree_container.pack(fill="both", expand=True, padx=24, pady=(4, 4))
+        windows_apps_tree_container = tk.Frame(body, bg=BG)
+        windows_apps_tree_container.pack(fill="both", expand=True, padx=24, pady=(0, 12))
         self.windows_apps_tree = ttk.Treeview(
             windows_apps_tree_container, columns=columns, show="tree headings", height=12, selectmode="extended"
         )
@@ -4676,32 +4858,263 @@ class Manager(tk.Tk):
         self.windows_apps_tree.bind("<Double-1>", lambda _e: self._edit_windows_app())
         self.windows_apps_tree.bind("<Button-3>", self._show_windows_apps_context_menu)
 
-        action_row = tk.Frame(frame, bg=BG)
-        action_row.pack(fill="x", padx=24, pady=(0, 4))
-        ttk.Button(action_row, text="Add Application...", style="Accent.TButton", command=self._add_windows_app).pack(side="left")
-        ttk.Button(action_row, text="Import Steam Library...", style="Ghost.TButton", command=self._import_steam_library).pack(side="left", padx=(8, 0))
-        ttk.Button(action_row, text="Edit...", style="Ghost.TButton", command=self._edit_windows_app).pack(side="left", padx=(8, 0))
-        ttk.Button(action_row, text="Duplicate...", style="Ghost.TButton", command=self._duplicate_windows_app).pack(side="left", padx=(8, 0))
-        ttk.Button(action_row, text="Remove Selected", style="Ghost.TButton", command=self._remove_windows_app).pack(side="left", padx=(8, 0))
-        ttk.Button(action_row, text="Test...", style="Ghost.TButton", command=self._test_windows_app).pack(side="left", padx=(8, 0))
-
-        utility_row = tk.Frame(frame, bg=BG)
-        utility_row.pack(fill="x", padx=24, pady=(0, 8))
-        ttk.Button(utility_row, text="Open Location / Copy URI", style="Ghost.TButton", command=self._windows_app_open_or_copy).pack(side="left")
-        ttk.Button(utility_row, text="Sync / Repair...", style="Ghost.TButton", command=self._repair_windows_apps).pack(side="left", padx=(8, 0))
-        ttk.Button(utility_row, text="Export...", style="Ghost.TButton", command=self._export_windows_apps).pack(side="left", padx=(8, 0))
-        ttk.Button(utility_row, text="Import...", style="Ghost.TButton", command=self._import_windows_apps_file).pack(side="left", padx=(8, 0))
-        ttk.Button(utility_row, text="Open Windows ROMs", style="Ghost.TButton", command=self._open_windows_roms).pack(side="left", padx=(8, 0))
-
-        tk.Label(
-            frame,
-            text="Steam import reads your installed Steam libraries locally. Steam artwork shown here is Manager-only; "
-                 "iiSU's own SteamGridDB artwork workflow is untouched.",
-            bg=BG, fg=TEXT_DIM, font=FONT_BODY, justify="left", wraplength=620,
-        ).pack(anchor="w", padx=24, pady=(0, 12))
         self._refresh_windows_apps_tree()
 
         self._refresh_steam_library_summary()
+
+    def _show_windows_apps_more_menu(self, anchor_button: ttk.Button) -> None:
+        menu = tk.Menu(self, tearoff=False)
+        menu.add_command(label="Import Steam Library...", command=self._import_steam_library)
+        menu.add_command(label="Duplicate...", command=self._duplicate_windows_app)
+        menu.add_separator()
+        menu.add_command(label="Open Location / Copy URI", command=self._windows_app_open_or_copy)
+        menu.add_command(label="Sync / Repair...", command=self._repair_windows_apps)
+        menu.add_separator()
+        menu.add_command(label="Export...", command=self._export_windows_apps)
+        menu.add_command(label="Import...", command=self._import_windows_apps_file)
+        menu.add_separator()
+        menu.add_command(label="Open Placeholder Folder", command=self._open_windows_roms)
+        menu.add_command(label="Delete Old Location...", command=self._delete_legacy_windows_stubs)
+        menu.tk_popup(anchor_button.winfo_rootx(), anchor_button.winfo_rooty() + anchor_button.winfo_height())
+
+    def _on_windows_apps_drop(self, event) -> None:
+        exe_paths = [p for p in self.tk.splitlist(event.data) if p.lower().endswith(".exe") and Path(p).is_file()]
+        if not exe_paths:
+            messagebox.showinfo("Windows Apps", "Drop an .exe file to add it as a Windows app.")
+            return
+        apps = self._load_windows_apps()
+        added = skipped = 0
+        for raw_path in exe_paths:
+            exe_path = Path(raw_path)
+            name = self._safe_pcgame_name(exe_path.stem)
+            if name is None:
+                skipped += 1
+                continue
+            name = self._unique_windows_app_name(name, apps)
+            entry = {"type": "executable", "exe": str(exe_path), "args": []}
+            if self._create_windows_app(name, entry, apps):
+                added += 1
+            else:
+                skipped += 1
+        summary = f"Added {added} application(s) from drag-and-drop."
+        if skipped:
+            summary += f" Skipped {skipped}."
+        messagebox.showinfo("Windows Apps", summary)
+
+    # -- Games > Console ------------------------------------------------
+
+    def _build_games_console_page(self) -> None:
+        frame = self.subpages["games_console"]
+        self._clear(frame)
+        self._page_header(
+            frame, "Console Games",
+            "Every game detected in your ROM library, grouped the same way syncing to the AVD does -- "
+            "a multi-disc game backed by an .m3u/.cue shows up here as one entry, not one per disc.",
+        )
+        # Not wrapped in _make_scrollable_body -- see the matching comment
+        # in _build_windows_apps_page. Buttons come before the tree so
+        # they're never what gets squeezed off-screen; the tree has its own
+        # scrollbars either way.
+        body = frame
+
+        search_row = tk.Frame(body, bg=BG)
+        search_row.pack(fill="x", padx=24, pady=(12, 4))
+        tk.Label(search_row, text="Search:", bg=BG, fg=TEXT, font=FONT_BODY).pack(side="left")
+        self.games_console_search_var = tk.StringVar()
+        tk.Entry(search_row, textvariable=self.games_console_search_var, **ENTRY_KWARGS).pack(
+            side="left", fill="x", expand=True, padx=(8, 10), ipady=3
+        )
+        tk.Label(search_row, text="System:", bg=BG, fg=TEXT, font=FONT_BODY).pack(side="left")
+        self.games_console_system_var = tk.StringVar(value=GAMES_CONSOLE_ALL_SYSTEMS)
+        self.games_console_system_combo = ttk.Combobox(
+            search_row, textvariable=self.games_console_system_var, state="readonly", width=14,
+            values=[GAMES_CONSOLE_ALL_SYSTEMS],
+        )
+        self.games_console_system_combo.pack(side="left", padx=(8, 10))
+        self.games_console_count_label = tk.Label(search_row, text="", bg=BG, fg=TEXT_DIM, font=FONT_BODY)
+        self.games_console_count_label.pack(side="right")
+        self.games_console_search_var.trace_add("write", self._games_console_render_filtered)
+        self.games_console_system_var.trace_add("write", self._games_console_render_filtered)
+
+        self.games_console_status = tk.Label(
+            body, text="Open this page to scan your ROM library.", bg=BG, fg=TEXT_DIM, font=FONT_BODY, anchor="w",
+        )
+        self.games_console_status.pack(fill="x", padx=24, pady=(0, 6))
+
+        action_row = tk.Frame(body, bg=BG)
+        action_row.pack(fill="x", padx=24, pady=(0, 8))
+        ttk.Button(action_row, text="Rescan", style="Accent.TButton", command=self._games_console_refresh).pack(side="left")
+        ttk.Button(
+            action_row, text="Keep Discs Separate", style="Ghost.TButton", command=self._games_console_add_exceptions
+        ).pack(side="left", padx=(8, 0))
+        ttk.Button(
+            action_row, text="Merge Discs Together", style="Ghost.TButton", command=self._games_console_remove_exceptions
+        ).pack(side="left", padx=(8, 0))
+
+        tk.Label(
+            body,
+            text="\"Keep Discs Separate\" is for a game like Gran Turismo 2, where an .m3u actually bundles "
+            "distinct, separately-launchable modes rather than continuation discs: the individual files show up "
+            "in iiSU as their own entries instead, and the playlist/sheet itself is hidden from iiSU (still "
+            "listed here, greyed as \"hidden\", so you can merge it back together later). Only applies to "
+            "selected playlists/sheets, never to a plain single-file game. Takes effect on your next Start, "
+            "not while Community-iiSU-PC is already running.",
+            bg=BG, fg=TEXT_DIM, font=FONT_BODY, justify="left", wraplength=700,
+        ).pack(anchor="w", padx=24, pady=(0, 8))
+
+        columns = ("console", "type", "path", "exception")
+        tree_container = tk.Frame(body, bg=BG)
+        tree_container.pack(fill="both", expand=True, padx=24, pady=(0, 12))
+        self.games_console_tree = ttk.Treeview(
+            tree_container, columns=columns, show="tree headings", height=16, selectmode="extended"
+        )
+        self.games_console_tree.tag_configure("hidden_from_iisu", foreground=TEXT_DIM)
+        self.games_console_tree.heading("#0", text="Name")
+        for col, label in (("console", "Console"), ("type", "Type"), ("path", "File"), ("exception", "Discs kept separate")):
+            self.games_console_tree.heading(col, text=label)
+        self.games_console_tree.column("#0", width=220)
+        self.games_console_tree.column("console", width=90, anchor="w")
+        self.games_console_tree.column("type", width=90, anchor="w")
+        self.games_console_tree.column("path", width=260, anchor="w")
+        self.games_console_tree.column("exception", width=130, anchor="w")
+        vscroll = ttk.Scrollbar(tree_container, orient="vertical", command=self.games_console_tree.yview)
+        hscroll = ttk.Scrollbar(tree_container, orient="horizontal", command=self.games_console_tree.xview)
+        self.games_console_tree.configure(yscrollcommand=vscroll.set, xscrollcommand=hscroll.set)
+        self.games_console_tree.grid(row=0, column=0, sticky="nsew")
+        vscroll.grid(row=0, column=1, sticky="ns")
+        hscroll.grid(row=1, column=0, sticky="ew")
+        tree_container.grid_rowconfigure(0, weight=1)
+        tree_container.grid_columnconfigure(0, weight=1)
+
+    def _games_console_refresh(self) -> None:
+        if not hasattr(self, "games_console_tree"):
+            return
+        raw = self.config_data.get("roms_dir", "")
+        if not raw or not Path(raw).is_dir():
+            self._games_console_apply_scan([], "Set your ROM directory first.", error=True)
+            return
+        self.games_console_status.config(text="Scanning...", fg=TEXT_DIM)
+        threading.Thread(target=self._games_console_scan_worker, args=(Path(raw),), daemon=True).start()
+
+    def _games_console_scan_worker(self, roms_dir: Path) -> None:
+        try:
+            exact, by_compact = load_console_lookup()
+            exceptions = sync_library.load_dedupe_exceptions()
+            consoles, skipped = sync_library.scan_library(roms_dir, exact, by_compact, dedupe_exceptions=exceptions)
+        except OSError as e:
+            self.after(0, self._games_console_apply_scan, [], str(e), True)
+            return
+
+        consoles.pop("windows", None)  # covered by the PC tab, not real console ROMs
+        rows = []
+        seen_keys = set()
+        for shortname, entries in consoles.items():
+            for rel, _size, _mtime in entries:
+                exception_key = f"{shortname}/{rel}"
+                seen_keys.add(exception_key)
+                rows.append({
+                    "shortname": shortname,
+                    "rel": rel,
+                    "name": PurePosixPath(rel).stem,
+                    "is_playlist": PurePosixPath(rel).suffix.lower() in (".m3u", ".cue"),
+                    "exception_key": exception_key,
+                    "excepted": exception_key in exceptions,
+                    "hidden_from_iisu": False,
+                })
+
+        # An exempted playlist/sheet is deliberately left out of the real
+        # scan above (its discs show up as their own entries in iiSU
+        # instead) -- added back here purely so there's still a row to
+        # select if you want to merge it back together later.
+        for exception_key in exceptions:
+            if exception_key in seen_keys or "/" not in exception_key:
+                continue
+            shortname, _sep, rel = exception_key.partition("/")
+            rows.append({
+                "shortname": shortname,
+                "rel": rel,
+                "name": PurePosixPath(rel).stem,
+                "is_playlist": True,
+                "exception_key": exception_key,
+                "excepted": True,
+                "hidden_from_iisu": True,
+            })
+
+        rows.sort(key=lambda r: (r["shortname"], r["name"].casefold()))
+        game_count = len({(r["shortname"], r["name"]) for r in rows if not r["hidden_from_iisu"]})
+        status = f"{game_count} game(s) across {len(consoles)} console(s)"
+        if skipped:
+            status += f" -- {len(skipped)} folder(s) not recognized as a console"
+        self.after(0, self._games_console_apply_scan, rows, status, False)
+
+    def _games_console_apply_scan(self, rows: list[dict], status: str, error: bool) -> None:
+        self._games_console_rows = rows
+        self.games_console_status.config(text=status, fg=RED if error else TEXT_DIM)
+        if hasattr(self, "games_console_system_combo"):
+            systems = [GAMES_CONSOLE_ALL_SYSTEMS] + sorted({row["shortname"] for row in rows})
+            self.games_console_system_combo.configure(values=systems)
+            if self.games_console_system_var.get() not in systems:
+                self.games_console_system_var.set(GAMES_CONSOLE_ALL_SYSTEMS)
+        self._games_console_render_filtered()
+
+    def _games_console_render_filtered(self, *_args) -> None:
+        if not hasattr(self, "games_console_tree"):
+            return
+        self.games_console_tree.delete(*self.games_console_tree.get_children())
+        query = self.games_console_search_var.get().strip().casefold() if hasattr(self, "games_console_search_var") else ""
+        system_filter = self.games_console_system_var.get() if hasattr(self, "games_console_system_var") else GAMES_CONSOLE_ALL_SYSTEMS
+        rows = getattr(self, "_games_console_rows", [])
+        for row in rows:
+            if system_filter != GAMES_CONSOLE_ALL_SYSTEMS and row["shortname"] != system_filter:
+                continue
+            haystack = f"{row['name']} {row['shortname']} {row['rel']}".casefold()
+            if query and query not in haystack:
+                continue
+            if row["hidden_from_iisu"]:
+                type_label = "Playlist (hidden from iiSU)"
+            elif row["is_playlist"]:
+                type_label = "Playlist/Sheet"
+            else:
+                type_label = "File"
+            self.games_console_tree.insert(
+                "", "end", iid=row["exception_key"], text=row["name"],
+                values=(
+                    row["shortname"], type_label, row["rel"],
+                    "Yes" if row["excepted"] else "",
+                ),
+                tags=("hidden_from_iisu",) if row["hidden_from_iisu"] else (),
+            )
+        shown = len(self.games_console_tree.get_children())
+        total = len(rows)
+        filtered = bool(query) or system_filter != GAMES_CONSOLE_ALL_SYSTEMS
+        if hasattr(self, "games_console_count_label"):
+            self.games_console_count_label.config(text=f"{shown} shown / {total} total" if filtered else f"{total} entries")
+
+    def _games_console_selected_rows(self) -> list[dict]:
+        selected_keys = set(self.games_console_tree.selection())
+        return [row for row in getattr(self, "_games_console_rows", []) if row["exception_key"] in selected_keys]
+
+    def _games_console_add_exceptions(self) -> None:
+        selected = [row for row in self._games_console_selected_rows() if row["is_playlist"]]
+        if not selected:
+            messagebox.showinfo(
+                "Console Games", "Select one or more playlist (.m3u) or sheet (.cue) entries first."
+            )
+            return
+        exceptions = sync_library.load_dedupe_exceptions()
+        exceptions.update(row["exception_key"] for row in selected)
+        sync_library.save_dedupe_exceptions(exceptions)
+        self._games_console_refresh()
+
+    def _games_console_remove_exceptions(self) -> None:
+        selected = [row for row in self._games_console_selected_rows() if row["excepted"]]
+        if not selected:
+            messagebox.showinfo("Console Games", "Select one or more \"Discs kept separate\" entries first.")
+            return
+        exceptions = sync_library.load_dedupe_exceptions()
+        exceptions.difference_update(row["exception_key"] for row in selected)
+        sync_library.save_dedupe_exceptions(exceptions)
+        self._games_console_refresh()
 
     def _windows_app_dialog(self, title: str, initial_name: str = "", initial: dict | None = None):
         initial = initial or {}
@@ -5153,8 +5566,6 @@ class Manager(tk.Tk):
             return False
 
         windows_dir = self._windows_rom_dir()
-        if windows_dir is None:
-            return False
         try:
             windows_dir.mkdir(parents=True, exist_ok=True)
             (windows_dir / f"{name}.pcgame").touch(exist_ok=True)
@@ -5195,8 +5606,6 @@ class Manager(tk.Tk):
             return
 
         windows_dir = self._windows_rom_dir()
-        if windows_dir is None:
-            return
         old_stub = windows_dir / f"{old_name}.pcgame"
         new_stub = windows_dir / f"{new_name}.pcgame"
         try:
@@ -5377,12 +5786,10 @@ class Manager(tk.Tk):
 
     def _repair_windows_apps(self) -> None:
         windows_dir = self._windows_rom_dir()
-        if windows_dir is None:
-            return
         try:
             windows_dir.mkdir(parents=True, exist_ok=True)
         except OSError as e:
-            messagebox.showerror("Windows Apps", f"Couldn't create the Windows ROM folder:\n\n{e}")
+            messagebox.showerror("Windows Apps", f"Couldn't create the Windows app placeholder folder:\n\n{e}")
             return
 
         apps = self._load_windows_apps()
@@ -5447,8 +5854,6 @@ class Manager(tk.Tk):
 
     def _open_windows_roms(self) -> None:
         windows_dir = self._windows_rom_dir()
-        if windows_dir is None:
-            return
         try:
             windows_dir.mkdir(parents=True, exist_ok=True)
             os.startfile(windows_dir)
@@ -5696,7 +6101,7 @@ class Manager(tk.Tk):
         tk.Label(key_row, text="+", bg=BG, fg=TEXT_DIM, font=FONT_BODY).pack(side="left", padx=(0, 8))
         key_var = tk.StringVar(value=initial.get("key", ""))
         tk.Label(key_row, textvariable=key_var, width=8, bg="#0e0e10", fg=TEXT, font=FONT_BODY, relief="flat", padx=8, pady=4).pack(side="left")
-        capture_button = ttk.Button(key_row, text="Press a key...", style="Ghost.TButton")
+        capture_button = ttk.Button(key_row, text="Map", style="Ghost.TButton")
         capture_button.configure(command=lambda: self._capture_key(key_var, capture_button))
         capture_button.pack(side="left", padx=(8, 0))
 
@@ -5838,6 +6243,7 @@ class Manager(tk.Tk):
         self.save_status_label.config(text=f"Saved to {CONFIG_PATH.name}")
         self.after(3000, lambda: self.save_status_label.config(text=""))
         self._set_settings_dirty(False)
+        self._refresh_resume_reason()
         return True
 
     def _is_settings_dirty(self) -> bool:
@@ -6176,4 +6582,5 @@ class Manager(tk.Tk):
 
 
 if __name__ == "__main__":
+    winapi.minimize_own_console()
     Manager().mainloop()

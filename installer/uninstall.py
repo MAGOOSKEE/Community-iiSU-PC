@@ -33,6 +33,7 @@ Usage:
     python uninstall.py [--yes]
 """
 
+import os
 import shutil
 import sys
 import time
@@ -57,28 +58,63 @@ def dir_size(path: Path) -> int:
     return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
 
 
+def _remove_tree_best_effort(root: Path) -> list[Path]:
+    """Deletes everything under root bottom-up, collecting whatever
+    couldn't be removed instead of aborting the whole operation the
+    moment one locked file is hit the way a bare shutil.rmtree() would --
+    a single still-open handle deep inside a multi-GB tree (android-sdk-
+    portable/ in particular, several GB across thousands of files) should
+    never be able to leave everything else in that tree behind too,
+    silently, as a partial install that only surfaces as a confusing,
+    unrelated-looking failure the next time Setup runs."""
+    locked: list[Path] = []
+    for dirpath, _dirnames, filenames in os.walk(root, topdown=False):
+        current = Path(dirpath)
+        for filename in filenames:
+            file_path = current / filename
+            try:
+                file_path.unlink()
+            except OSError:
+                locked.append(file_path)
+        try:
+            current.rmdir()
+        except OSError:
+            locked.append(current)
+    return locked
+
+
 def remove_path(path: Path, attempts: int = 5, delay: float = 1.0) -> int:
     """Removes a file or directory tree, retrying briefly on a locked
     file -- a process that was just stopped doesn't always release its
     handles the instant it exits, which can otherwise leave a chunk of a
     large directory tree behind on the first attempt. Returns the size
-    reclaimed, 0 if the path didn't exist or couldn't be removed."""
+    actually reclaimed, which can be less than the full size if some of
+    it is still locked after every retry."""
     if not path.exists():
         return 0
     size = dir_size(path)
+    locked: list[Path] = [path]
     for attempt in range(attempts):
-        try:
-            if path.is_dir():
-                shutil.rmtree(path)
-            else:
+        if path.is_file():
+            try:
                 path.unlink()
+                locked = []
+            except OSError:
+                locked = [path]
+        else:
+            locked = _remove_tree_best_effort(path)
+        if not locked:
             return size
-        except OSError:
-            if attempt == attempts - 1:
-                print(f"  ! couldn't remove {path} -- still locked, remove it by hand once nothing's using it")
-                return 0
+        if attempt < attempts - 1:
             time.sleep(delay)
-    return 0
+
+    remaining = dir_size(path) if path.exists() else 0
+    print(f"  ! {len(locked)} item(s) under {path} are still locked -- close whatever's using them and remove by hand:")
+    for locked_path in locked[:10]:
+        print(f"      {locked_path}")
+    if len(locked) > 10:
+        print(f"      ... and {len(locked) - 10} more")
+    return size - remaining
 
 
 def stop_running_instance() -> None:

@@ -67,6 +67,13 @@ RETRY_DELAY = 5  # seconds
 
 DETACHED_PROCESS = 0x00000008
 CREATE_NEW_PROCESS_GROUP = 0x00000200
+# DETACHED_PROCESS alone stops the child inheriting *our* console, but
+# doesn't reliably stop a console-subsystem executable (emulator.exe, or
+# python.exe running launch_bridge.py) from popping up one of its own --
+# CREATE_NO_WINDOW is what actually guarantees no window ever appears,
+# already proven for the exact same purpose by boot_overlay.py and
+# launch_bridge.py's own emulator launches.
+CREATE_NO_WINDOW = 0x08000000
 
 
 def save_state(state: dict) -> None:
@@ -95,21 +102,47 @@ def _roms_signature(roms_dir: Path) -> str:
     return h.hexdigest()
 
 
-def compute_boot_fingerprint(config: dict) -> str:
+FINGERPRINT_PART_LABELS = {
+    "avd_name": "the AVD name",
+    "display": "the display settings",
+    "emulators": "the emulator mappings",
+    "usb_passthrough": "the USB passthrough list",
+    "roms_dir": "the ROM library",
+}
+
+
+def compute_boot_fingerprint_parts(config: dict) -> dict[str, str]:
     """Everything that would make a resumed (quickboot) AVD's state stale
-    or wrong: the hardware profile, the emulator/controller mapping iiSU's
-    patch depends on, and the ROM library. Anything else in config.json
-    (window position, debug flags, auto-update settings...) doesn't
-    affect what's actually running inside the VM, so it's deliberately
-    left out -- otherwise an unrelated settings change would force a
-    needless cold boot."""
+    or wrong, hashed separately per part instead of as one combined blob,
+    so a later comparison can say *what* changed rather than just *that*
+    something did. Anything else in config.json (window position, debug
+    flags, auto-update settings...) doesn't affect what's actually running
+    inside the VM, so it's deliberately left out; otherwise an unrelated
+    settings change would force a needless cold boot."""
+    return {
+        "avd_name": str(config.get("avd_name", "")),
+        "display": hashlib.sha256(json.dumps(config.get("display", {}), sort_keys=True).encode("utf-8")).hexdigest(),
+        "emulators": hashlib.sha256(json.dumps(config.get("emulators", {}), sort_keys=True).encode("utf-8")).hexdigest(),
+        "usb_passthrough": hashlib.sha256(json.dumps(config.get("usb_passthrough", []), sort_keys=True).encode("utf-8")).hexdigest(),
+        "roms_dir": _roms_signature(Path(config.get("roms_dir", ""))),
+    }
+
+
+def compute_boot_fingerprint(config: dict) -> str:
+    parts = compute_boot_fingerprint_parts(config)
     h = hashlib.sha256()
-    h.update(str(config.get("avd_name", "")).encode("utf-8"))
-    h.update(json.dumps(config.get("display", {}), sort_keys=True).encode("utf-8"))
-    h.update(json.dumps(config.get("emulators", {}), sort_keys=True).encode("utf-8"))
-    h.update(json.dumps(config.get("usb_passthrough", []), sort_keys=True).encode("utf-8"))
-    h.update(_roms_signature(Path(config.get("roms_dir", ""))).encode("utf-8"))
+    for key in sorted(parts):
+        h.update(f"{key}:{parts[key]}\n".encode("utf-8"))
     return h.hexdigest()
+
+
+def describe_boot_fingerprint_diff(old_parts: dict[str, str] | None, new_parts: dict[str, str]) -> list[str]:
+    """Human-readable, ready-to-join reasons a cold boot would be forced.
+    An empty list means a resume is expected; old_parts is None the first
+    time this ever runs, or after a manual reset via clear_boot_fingerprint()."""
+    if old_parts is None:
+        return ["no saved resume state yet"]
+    return [f"{FINGERPRINT_PART_LABELS.get(key, key)} changed" for key in new_parts if old_parts.get(key) != new_parts[key]]
 
 
 def load_saved_boot_fingerprint() -> str | None:
@@ -121,8 +154,27 @@ def load_saved_boot_fingerprint() -> str | None:
         return None
 
 
-def save_boot_fingerprint(fingerprint: str) -> None:
-    BOOT_FINGERPRINT_PATH.write_text(json.dumps({"fingerprint": fingerprint}), encoding="utf-8")
+def load_saved_boot_fingerprint_parts() -> dict[str, str] | None:
+    """None both when there's no saved state and for one left by a version
+    before parts were tracked; both cases fall back to "unknown, assume
+    everything changed" in describe_boot_fingerprint_diff()."""
+    if not BOOT_FINGERPRINT_PATH.is_file():
+        return None
+    try:
+        return json.loads(BOOT_FINGERPRINT_PATH.read_text(encoding="utf-8")).get("parts")
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def save_boot_fingerprint(fingerprint: str, parts: dict[str, str]) -> None:
+    BOOT_FINGERPRINT_PATH.write_text(json.dumps({"fingerprint": fingerprint, "parts": parts}), encoding="utf-8")
+
+
+def clear_boot_fingerprint() -> None:
+    """Forces the next start to cold boot regardless of what changed --
+    an escape hatch for a quickboot snapshot that's gotten itself into a
+    bad state resume can't recover from."""
+    BOOT_FINGERPRINT_PATH.unlink(missing_ok=True)
 
 
 def is_port_open(port: int) -> bool:
@@ -267,7 +319,7 @@ def _launch_once(
         try:
             process = subprocess.Popen(
                 args,
-                creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
                 stdin=subprocess.DEVNULL,
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
@@ -345,7 +397,13 @@ def start_avd(
     effective_cold_boot = force_cold_boot
     for attempt in range(1, MAX_LAUNCH_ATTEMPTS + 1):
         clear_stale_locks(avd_dir)
-        set_quickboot_autosave(avd_dir, enabled=not effective_cold_boot)
+        # Always on, regardless of whether *this* boot is cold or a resume:
+        # a cold boot is exactly the case that most needs its resulting
+        # state captured, since that's what the *next* start would resume
+        # from. The boot-fingerprint check (see describe_boot_fingerprint_diff)
+        # is what actually decides whether a saved snapshot gets trusted
+        # later -- this just makes sure one exists for it to trust.
+        set_quickboot_autosave(avd_dir, enabled=True)
         patch_config_ini(avd_dir / "config.ini", force_cold_boot=effective_cold_boot)
         pid = _launch_once(emulator_exe, avd_name, env, usb_passthrough, debug_console, gpu_mode, effective_cold_boot)
         if pid is not None:
@@ -419,10 +477,12 @@ def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: b
     if is_avd_running(avd_name):
         print(f"[start] {avd_name} is already running.")
     else:
-        boot_fingerprint = compute_boot_fingerprint(config)
-        force_cold_boot = boot_fingerprint != load_saved_boot_fingerprint()
+        new_parts = compute_boot_fingerprint_parts(config)
+        old_parts = load_saved_boot_fingerprint_parts()
+        reasons = describe_boot_fingerprint_diff(old_parts, new_parts)
+        force_cold_boot = bool(reasons)
         if force_cold_boot:
-            print(f"[start] Starting {avd_name} (settings or ROM library changed -- cold boot)...")
+            print(f"[start] Starting {avd_name} (cold boot: {', '.join(reasons)})...")
         else:
             print(f"[start] Starting {avd_name} (quick resume)...")
         gpu_mode = config.get("display", {}).get("gpu_mode", "auto")
@@ -430,7 +490,7 @@ def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: b
         if pid is None:
             sys.exit(1)
         state["emulator_pid"] = pid
-        save_boot_fingerprint(boot_fingerprint)
+        save_boot_fingerprint(compute_boot_fingerprint(config), new_parts)
         print(f"[start] {avd_name} is up.")
 
     print("[start] Syncing your ROM library into the AVD...")
@@ -467,7 +527,7 @@ def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: b
             try:
                 bridge_process = subprocess.Popen(
                     [sys.executable, str(BRIDGE_SCRIPT)],
-                    creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                    creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
                     stdin=subprocess.DEVNULL,
                     stdout=bridge_log_file,
                     stderr=subprocess.STDOUT,

@@ -32,6 +32,9 @@ from shared.theme import BG, GREEN, PANEL_BG, RED, TEXT, TEXT_DIM, FONT_BODY, FO
 
 BRIDGE_DIR = setup_wizard.BRIDGE_DIR
 
+sys.path.insert(0, str(BRIDGE_DIR))
+import winapi
+
 
 class SetupApp(tk.Tk):
     def __init__(self):
@@ -182,16 +185,16 @@ class SetupApp(tk.Tk):
         if error is None:
             self.status_label.config(text="Setup complete, opening the setup wizard...", fg=GREEN)
             self._open_onboarding()
-            # Closing this window (instead of leaving it open with "next
-            # step" buttons) hands off cleanly to onboarding_wizard.py --
-            # manager.py, which spawned this process, notices it exit and
-            # brings itself back to the front automatically (see its
-            # _apply_status), so there's no need for a manual "Open
-            # Manager" button here either. The desktop shortcut is already
-            # created automatically by run_setup() itself. A short delay
-            # so the "Setup complete" status is actually visible for a
-            # moment instead of the window just vanishing.
-            self.after(1200, self.destroy)
+            # Hiding this window (instead of leaving it open with "next
+            # step" buttons) hands off cleanly to onboarding_wizard.py; see
+            # _hide_and_wait_for_onboarding for why this process stays
+            # alive a while longer than the window does. The desktop
+            # shortcut is already created automatically by run_setup()
+            # itself, so there's no need for a manual "Open Manager"
+            # button here either. A short delay so the "Setup complete"
+            # status is actually visible for a moment instead of the
+            # window just vanishing.
+            self.after(1200, self._hide_and_wait_for_onboarding)
         else:
             self.status_label.config(text=f"Setup failed: {error}", fg=RED)
             if isinstance(error, setup_wizard.VirtualizationError):
@@ -236,10 +239,29 @@ class SetupApp(tk.Tk):
         emulator folders, display, and hotkeys one step at a time instead
         of dropping manager.py's settings pages on someone who's never seen
         this app before; manager.py itself is still there afterward (it
-        hid itself while Setup was running and brings itself back once
-        this window closes -- see manager.py's _apply_status)."""
-        subprocess.Popen([sys.executable, "onboarding_wizard.py"], cwd=str(BRIDGE_DIR))
+        hid itself while Setup was running and brings itself back once this
+        *process* exits -- see manager.py's _apply_status, and
+        _hide_and_wait_for_onboarding below for why that isn't the instant
+        this window closes)."""
+        self._onboarding_process = subprocess.Popen([sys.executable, "onboarding_wizard.py"], cwd=str(BRIDGE_DIR))
+
+    def _hide_and_wait_for_onboarding(self) -> None:
+        """Withdraws this window immediately -- it has nothing left to show
+        -- but keeps this process itself alive until onboarding_wizard.py
+        (a separate process this one spawned and manager.py never sees
+        directly) exits too. manager.py only watches *this* process to
+        decide when it's safe to bring itself back to the front; destroying
+        this window right away would let it reappear the moment this
+        window closes, popping up behind or on top of the onboarding
+        wizard while that's still what the user should be looking at."""
+        self.withdraw()
+        threading.Thread(target=self._wait_for_onboarding_then_exit, daemon=True).start()
+
+    def _wait_for_onboarding_then_exit(self) -> None:
+        self._onboarding_process.wait()
+        self.after(0, self.destroy)
 
 
 if __name__ == "__main__":
+    winapi.minimize_own_console()
     SetupApp().mainloop()

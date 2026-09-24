@@ -62,6 +62,7 @@ kernel32.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD,
 kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
 kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
 kernel32.CloseHandle.restype = wintypes.BOOL
+kernel32.GetConsoleWindow.restype = wintypes.HWND
 
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 WM_CLOSE = 0x0010
@@ -83,6 +84,24 @@ WS_MINIMIZEBOX = 0x00020000
 WS_MAXIMIZEBOX = 0x00010000
 WS_SYSMENU = 0x00080000
 WS_BORDERLESS_MASK = WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_SYSMENU
+
+
+def minimize_own_console() -> None:
+    """Minimizes this process's own console window, if it has one. Every
+    entry point launched via `start "" python foo.py` from a .bat file
+    (manager.py, setup_gui.py) gets a visible console alongside its real
+    tkinter GUI, since python.exe -- unlike pythonw.exe -- is a console-
+    subsystem executable; minimizing it out of the way instead of leaving
+    it sitting on top keeps the actual GUI window the thing you see first.
+    Minimized rather than hidden so the raw stdout/stderr it carries (a
+    traceback the GUI itself failed to catch, say) is still one click away
+    on the taskbar instead of silently gone. A no-op wherever there's no
+    console to minimize (GetConsoleWindow returns NULL), which is exactly
+    what happens on a second run of a script that already detached from
+    its console, so this is always safe to call unconditionally."""
+    hwnd = kernel32.GetConsoleWindow()
+    if hwnd:
+        user32.ShowWindow(hwnd, SW_MINIMIZE)
 
 
 def _find_window(predicate) -> int | None:
