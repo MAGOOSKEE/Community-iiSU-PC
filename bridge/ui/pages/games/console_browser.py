@@ -73,42 +73,17 @@ class ConsoleBrowserPage(PageBase):
         rescan_button.clicked.connect(self.refresh)
         action_row_layout.addWidget(rescan_button)
         action_row_layout.addStretch(1)
-        # Left-click affordance for the selection toolbar below: it's
-        # invisible until something's selected, so without this line
-        # there's no clue the bulk actions exist at all until you stumble
-        # onto right-click.
-        self.selection_hint = QLabel("Select rows for bulk actions, or right-click a selection.")
+        # Left-click never reveals the bulk actions themselves (see
+        # _update_selection_hint) -- this is purely a status/discoverability
+        # line pointing at right-click, not a button.
+        self.selection_hint = QLabel("Select rows, then right-click for bulk actions.")
         self.selection_hint.setStyleSheet(f"color: {TEXT_DIM};")
         action_row_layout.addWidget(self.selection_hint)
         self.body_layout.addWidget(action_row)
 
-        # Hidden until the tree selection is non-empty -- replaces having
-        # "Keep Discs Separate"/"Merge Discs Together" sit as permanently
-        # visible, mostly-disabled-feeling buttons above an empty selection.
-        self.selection_toolbar = QWidget()
-        selection_toolbar_layout = QHBoxLayout(self.selection_toolbar)
-        selection_toolbar_layout.setContentsMargins(0, 0, 0, 0)
-        self.selection_count_label = QLabel("")
-        selection_toolbar_layout.addWidget(self.selection_count_label)
-        self.keep_separate_button = QPushButton("Keep Discs Separate")
-        self.keep_separate_button.setObjectName("ghost")
-        self.keep_separate_button.clicked.connect(self._add_exceptions)
-        selection_toolbar_layout.addWidget(self.keep_separate_button)
-        self.merge_button = QPushButton("Merge Discs Together")
-        self.merge_button.setObjectName("ghost")
-        self.merge_button.clicked.connect(self._remove_exceptions)
-        selection_toolbar_layout.addWidget(self.merge_button)
-        selection_toolbar_layout.addStretch(1)
-        self.selection_toolbar.setVisible(False)
-        self.body_layout.addWidget(self.selection_toolbar)
-
         note = QLabel(
-            '"Keep Discs Separate" is for a game like Gran Turismo 2, where an .m3u actually bundles '
-            "distinct, separately-launchable modes rather than continuation discs: the individual files show up "
-            'in iiSU as their own entries instead, and the playlist/sheet itself is hidden from iiSU (still '
-            'listed here, greyed as "hidden", so you can merge it back together later). Only applies to '
-            "selected playlists/sheets, never to a plain single-file game. Takes effect on your next Start, "
-            "not while Community-iiSU-PC is already running."
+            "Multi-disc playlists sync as one entry by default -- right-click a selection for the "
+            "\"Keep Discs Separate\"/\"Merge Discs Together\" options (details in the project README)."
         )
         note.setWordWrap(True)
         note.setStyleSheet(f"color: {TEXT_DIM};")
@@ -122,7 +97,7 @@ class ConsoleBrowserPage(PageBase):
         self.tree.setColumnWidth(1, 90)
         self.tree.setColumnWidth(2, 160)
         self.tree.setColumnWidth(3, 260)
-        self.tree.itemSelectionChanged.connect(self._update_selection_toolbar)
+        self.tree.itemSelectionChanged.connect(self._update_selection_hint)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._show_context_menu)
         self.body_layout.addWidget(self.tree, 1)
@@ -241,15 +216,15 @@ class ConsoleBrowserPage(PageBase):
         selected_keys = {item.data(0, Qt.ItemDataRole.UserRole) for item in self.tree.selectedItems()}
         return [row for row in self._rows if row["exception_key"] in selected_keys]
 
-    def _update_selection_toolbar(self) -> None:
+    def _update_selection_hint(self) -> None:
+        """Status text only -- never a button. Left-clicking to select rows
+        must not surface the bulk actions themselves; right-click is the
+        only path to them (see _show_context_menu)."""
         selected = self._selected_rows()
-        self.selection_toolbar.setVisible(bool(selected))
-        self.selection_hint.setVisible(not selected)
-        if not selected:
-            return
-        self.selection_count_label.setText(f"{len(selected)} selected:")
-        self.keep_separate_button.setEnabled(any(row["is_playlist"] for row in selected))
-        self.merge_button.setEnabled(any(row["excepted"] for row in selected))
+        if selected:
+            self.selection_hint.setText(f"{len(selected)} selected -- right-click for bulk actions.")
+        else:
+            self.selection_hint.setText("Select rows, then right-click for bulk actions.")
 
     def _show_context_menu(self, pos) -> None:
         item = self.tree.itemAt(pos)

@@ -23,6 +23,41 @@ _CONTRIBUTORS = [
     },
 ]
 
+# Every third-party component this project actually ships or bundles, plus
+# what it's used for -- kept here (not just in a LICENSE file nobody
+# opens) so it stays visible from inside the app itself. Listed even
+# where attribution isn't strictly required by the license, on the
+# principle that crediting the work costs nothing and is worth doing
+# anyway. Android SDK pieces (platform-tools, emulator, build-tools) are
+# deliberately excluded: sdk_bootstrap.py downloads those directly from
+# Google at Setup time, this project never redistributes them.
+_THIRD_PARTY = [
+    {
+        "name": "PySide6 (Qt for Python)",
+        "url": "https://www.qt.io/qt-for-python",
+        "license": "LGPLv3",
+        "note": "This app's entire GUI toolkit.",
+    },
+    {
+        "name": "Pillow",
+        "url": "https://python-pillow.org/",
+        "license": "MIT-CMU",
+        "note": "Desktop shortcut icon extraction and Credits page avatars.",
+    },
+    {
+        "name": "Material Symbols",
+        "url": "https://fonts.google.com/icons",
+        "license": "Apache License 2.0",
+        "note": "The icon font used throughout this app's sidebar and pages.",
+    },
+    {
+        "name": "Apktool",
+        "url": "https://apktool.org/",
+        "license": "Apache License 2.0",
+        "note": "Decompiles/rebuilds iiSU's APK to apply the PC-bridge patch, and every stub app.",
+    },
+]
+
 
 class _AvatarLabel(QLabel):
     """A clickable circular avatar: shows a placeholder immediately, swaps
@@ -66,6 +101,7 @@ class CreditsPage(PageBase):
             "in collaboration with MAGOOSKEE.",
         )
         self._add_contributors_section()
+        self._add_third_party_section()
 
         disclaimer = Card()
         disclaimer_layout = QVBoxLayout(disclaimer)
@@ -136,5 +172,25 @@ class CreditsPage(PageBase):
             avatar_row_layout.addWidget(avatar)
         avatar_row_layout.addStretch(1)
         card_layout.addWidget(avatar_row)
+
+        self.body_layout.addWidget(card)
+
+    def _add_third_party_section(self) -> None:
+        card = Card()
+        card_layout = QVBoxLayout(card)
+
+        heading = QLabel("Third-party software")
+        heading.setFont(Fonts.heading())
+        card_layout.addWidget(heading)
+
+        for entry in _THIRD_PARTY:
+            row = QLabel(
+                f'<a href="{entry["url"]}" style="color:{GRADIENT_STOPS[2]};text-decoration:none;">{entry["name"]}</a>'
+                f' -- {entry["license"]}. {entry["note"]}'
+            )
+            row.setOpenExternalLinks(True)
+            row.setWordWrap(True)
+            row.setStyleSheet(f"color: {TEXT_DIM};")
+            card_layout.addWidget(row)
 
         self.body_layout.addWidget(card)
