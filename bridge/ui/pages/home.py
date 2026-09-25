@@ -12,11 +12,12 @@ from pathlib import Path
 
 import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
-from PySide6.QtGui import QTextCursor
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont, QTextCursor
 from PySide6.QtWidgets import (
-    QGridLayout,
     QHBoxLayout,
     QLabel,
+    QMenu,
     QMessageBox,
     QProgressBar,
     QPushButton,
@@ -29,6 +30,7 @@ import start_iisu_pc
 import stop_iisu_pc
 from bridge.ui.pages.base import PageBase
 from bridge.ui.widgets.card import Card
+from bridge.ui.widgets.gradient_background import GradientBlobBackground
 from bridge.ui.widgets.status_dot import StatusDot
 from bridge.ui.workers.log_stream import LogStreamRedirector
 from bridge.ui.workers.task_runner import run_in_background
@@ -50,96 +52,136 @@ class HomePage(PageBase):
         self._setup_process = None
         self._hidden_for_setup = False
 
+        # Painted behind everything else on this page -- created before any
+        # body_layout.addWidget() call below so it sits at the bottom of the
+        # sibling stacking order, and never added to body_layout itself
+        # since it's positioned manually (see resizeEvent), not managed by
+        # the page's own layout. Same technique bridge/ui/boot_overlay_app.py
+        # uses for its own background.
+        self._background = GradientBlobBackground(self)
+        self._background.lower()
+
         self.add_header("Community-iiSU-PC", "Android frontend, real PC emulators.")
 
-        self.status_card = Card()
-        status_layout = QGridLayout(self.status_card)
-        status_layout.setContentsMargins(16, 14, 16, 14)
-        status_layout.setHorizontalSpacing(10)
-        status_layout.setVerticalSpacing(8)
+        self.body_layout.addStretch(1)
 
+        # Everything below is the one thing this page is actually for:
+        # start/stop iiSU. Status, resume-state, and log detail all used to
+        # sit here permanently as their own buttons/cards; now they're a
+        # compact status line, an Advanced Launch Options menu, and a
+        # collapsed-by-default log drawer, so the page reads as one big
+        # button rather than a control panel.
+        center_col = QWidget()
+        center_layout = QVBoxLayout(center_col)
+        center_layout.setContentsMargins(0, 0, 0, 0)
+        center_layout.setSpacing(10)
+        center_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+
+        self.status_row = QWidget()
+        status_row_layout = QHBoxLayout(self.status_row)
+        status_row_layout.setContentsMargins(0, 0, 0, 0)
+        status_row_layout.setSpacing(18)
+        status_row_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+
+        avd_col = QHBoxLayout()
+        avd_col.setSpacing(6)
         self.avd_dot = StatusDot()
-        status_layout.addWidget(self.avd_dot, 0, 0)
+        avd_col.addWidget(self.avd_dot)
         avd_label = QLabel("Android VM")
-        avd_label.setFont(Fonts.heading())
-        status_layout.addWidget(avd_label, 0, 1)
+        avd_label.setStyleSheet(f"color: {TEXT_DIM};")
+        avd_col.addWidget(avd_label)
         self.avd_status_label = QLabel("checking...")
         self.avd_status_label.setStyleSheet(f"color: {TEXT_DIM};")
-        status_layout.addWidget(self.avd_status_label, 0, 2)
+        avd_col.addWidget(self.avd_status_label)
+        status_row_layout.addLayout(avd_col)
 
+        bridge_col = QHBoxLayout()
+        bridge_col.setSpacing(6)
         self.bridge_dot = StatusDot()
-        status_layout.addWidget(self.bridge_dot, 1, 0)
+        bridge_col.addWidget(self.bridge_dot)
         bridge_label = QLabel("Launch bridge")
-        bridge_label.setFont(Fonts.heading())
-        status_layout.addWidget(bridge_label, 1, 1)
+        bridge_label.setStyleSheet(f"color: {TEXT_DIM};")
+        bridge_col.addWidget(bridge_label)
         self.bridge_status_label = QLabel("checking...")
         self.bridge_status_label.setStyleSheet(f"color: {TEXT_DIM};")
-        status_layout.addWidget(self.bridge_status_label, 1, 2)
-        status_layout.setColumnStretch(2, 1)
-        self.body_layout.addWidget(self.status_card)
+        bridge_col.addWidget(self.bridge_status_label)
+        status_row_layout.addLayout(bridge_col)
+
+        center_layout.addWidget(self.status_row)
 
         self.setup_intro_label = QLabel(
             "Community-iiSU-PC hasn't been set up yet. Setup installs a self-contained Android VM "
-            "and\npatches your copy of iiSU to hand off game launches to real PC emulators."
+            "and patches your copy of iiSU to hand off game launches to real PC emulators."
         )
+        self.setup_intro_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self.setup_intro_label.setWordWrap(True)
+        self.setup_intro_label.setMaximumWidth(520)
         self.setup_intro_label.setStyleSheet(f"color: {TEXT_DIM};")
-        self.body_layout.addWidget(self.setup_intro_label)
+        center_layout.addWidget(self.setup_intro_label)
 
-        self.button_row = QWidget()
-        button_layout = QHBoxLayout(self.button_row)
+        button_row = QWidget()
+        button_layout = QHBoxLayout(button_row)
         button_layout.setContentsMargins(0, 0, 0, 0)
-        button_layout.setSpacing(10)
+        button_layout.setSpacing(6)
 
-        self.primary_button = QPushButton("Run Setup")
+        self.primary_button = QPushButton("Start iiSU")
         self.primary_button.setObjectName("accent")
+        primary_font = QFont(self.primary_button.font())
+        primary_font.setPointSize(primary_font.pointSize() + 4)
+        self.primary_button.setFont(primary_font)
+        self.primary_button.setMinimumSize(220, 56)
         button_layout.addWidget(self.primary_button)
 
-        self.roms_folder_button = QPushButton("ROMs Folder")
-        self.roms_folder_button.setObjectName("ghost")
-        self.roms_folder_button.clicked.connect(self._open_roms_folder)
-        button_layout.addWidget(self.roms_folder_button)
+        self.advanced_button = QPushButton("▾")  # small dropdown caret
+        self.advanced_button.setObjectName("ghost")
+        self.advanced_button.setFixedSize(32, 56)
+        self.advanced_button.setToolTip("Advanced launch options")
+        self.advanced_button.clicked.connect(self._show_advanced_menu)
+        button_layout.addWidget(self.advanced_button)
 
-        self.logs_button = QPushButton("Logs")
-        self.logs_button.setObjectName("ghost")
-        self.logs_button.clicked.connect(self._open_logs)
-        button_layout.addWidget(self.logs_button)
-
-        self.shortcut_button = QPushButton("Recreate Shortcut")
-        self.shortcut_button.setObjectName("ghost")
-        self.shortcut_button.clicked.connect(self._recreate_desktop_shortcut)
-        button_layout.addWidget(self.shortcut_button)
-
-        self.clear_resume_button = QPushButton("Clear Resume State")
-        self.clear_resume_button.setObjectName("ghost")
-        self.clear_resume_button.clicked.connect(self._clear_resume_state)
-        button_layout.addWidget(self.clear_resume_button)
+        center_layout.addWidget(button_row)
 
         self.progress = QProgressBar()
         self.progress.setTextVisible(False)
         self.progress.setRange(0, 0)
-        self.progress.setFixedHeight(6)
+        self.progress.setFixedHeight(4)
+        self.progress.setFixedWidth(220)
         self.progress.hide()
-        button_layout.addWidget(self.progress, 1)
-
-        self.body_layout.addWidget(self.button_row)
+        center_layout.addWidget(self.progress, 0, Qt.AlignmentFlag.AlignHCenter)
 
         self.resume_reason_label = QLabel("")
+        self.resume_reason_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self.resume_reason_label.setStyleSheet(f"color: {TEXT_DIM};")
-        self.body_layout.addWidget(self.resume_reason_label)
+        center_layout.addWidget(self.resume_reason_label)
 
         self.stage_label = QLabel("")
+        self.stage_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self.stage_label.setStyleSheet(f"color: {TEXT_DIM};")
-        self.body_layout.addWidget(self.stage_label)
+        center_layout.addWidget(self.stage_label)
 
-        log_card = Card()
-        log_layout = QVBoxLayout(log_card)
+        self.body_layout.addWidget(center_col, 0, Qt.AlignmentFlag.AlignHCenter)
+        self.body_layout.addStretch(1)
+
+        # Collapsed by default -- the log drawer, not a permanently visible
+        # console. _run_guarded's redirector keeps appending to it whether
+        # it's shown or not, so opening it mid-run shows history, not just
+        # new output.
+        self.logs_toggle_button = QPushButton("Show Logs ▾")
+        self.logs_toggle_button.setObjectName("ghost")
+        self.logs_toggle_button.clicked.connect(self._toggle_logs_drawer)
+        self.body_layout.addWidget(self.logs_toggle_button, 0, Qt.AlignmentFlag.AlignHCenter)
+
+        self.log_drawer = Card()
+        log_layout = QVBoxLayout(self.log_drawer)
         log_layout.setContentsMargins(10, 10, 10, 10)
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
         self.log_text.setFont(Fonts.mono())
         self.log_text.setStyleSheet(f"background-color: {INPUT_BG}; color: {LOG_TEXT}; border: none;")
+        self.log_text.setFixedHeight(220)
         log_layout.addWidget(self.log_text)
-        self.body_layout.addWidget(log_card, 1)
+        self.log_drawer.setVisible(False)
+        self.body_layout.addWidget(self.log_drawer)
 
         self._log_redirector = LogStreamRedirector()
         self._log_redirector.text_written.connect(self._append_log)
@@ -150,11 +192,29 @@ class HomePage(PageBase):
         self.primary_button.clicked.connect(self._on_primary_click)
         self.refresh_home_state()
 
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._background.setGeometry(self.rect())
+
+    def _show_advanced_menu(self) -> None:
+        menu = QMenu(self)
+        menu.addAction("ROMs Folder", self._open_roms_folder)
+        menu.addAction("Open Logs Folder", self._open_logs)
+        menu.addAction("Recreate Shortcut", self._recreate_desktop_shortcut)
+        menu.addSeparator()
+        menu.addAction("Clear Resume State", self._clear_resume_state)
+        menu.exec(self.advanced_button.mapToGlobal(self.advanced_button.rect().bottomRight()))
+
+    def _toggle_logs_drawer(self) -> None:
+        showing = not self.log_drawer.isVisible()
+        self.log_drawer.setVisible(showing)
+        self.logs_toggle_button.setText("Hide Logs ▴" if showing else "Show Logs ▾")
+
     # == Home state ==
 
     def refresh_home_state(self) -> None:
         self.setup_intro_label.setVisible(not self.window.configured)
-        self.status_card.setVisible(self.window.configured)
+        self.status_row.setVisible(self.window.configured)
         self._refresh_primary_button()
         self._refresh_resume_reason()
 
@@ -201,7 +261,7 @@ class HomePage(PageBase):
             self.primary_button.setText("Stop")
             self.primary_button.setEnabled(not self.busy)
         else:
-            self.primary_button.setText("Open")
+            self.primary_button.setText("Start iiSU")
             self.primary_button.setEnabled(not self.busy)
 
     def _on_primary_click(self) -> None:
@@ -295,8 +355,10 @@ class HomePage(PageBase):
         os.startfile(bridge_dir)
 
     def _recreate_desktop_shortcut(self) -> None:
-        self.shortcut_button.setEnabled(False)
-        self.shortcut_button.setText("Creating...")
+        # A one-shot menu action now rather than its own always-visible
+        # button, so the advanced-options button itself is the "busy"
+        # indicator that stops a second click starting a second run.
+        self.advanced_button.setEnabled(False)
         self._shortcut_signals = run_in_background(self._recreate_shortcut_worker, self._on_shortcut_recreated, self._on_shortcut_error)
 
     def _recreate_shortcut_worker(self):
@@ -305,13 +367,11 @@ class HomePage(PageBase):
         return create_shortcut.create_desktop_shortcut()
 
     def _on_shortcut_recreated(self, path) -> None:
-        self.shortcut_button.setEnabled(True)
-        self.shortcut_button.setText("Recreate Shortcut")
+        self.advanced_button.setEnabled(True)
         QMessageBox.information(self, "Shortcut", f"Desktop shortcut created:\n{path}")
 
     def _on_shortcut_error(self, message: str) -> None:
-        self.shortcut_button.setEnabled(True)
-        self.shortcut_button.setText("Recreate Shortcut")
+        self.advanced_button.setEnabled(True)
         QMessageBox.critical(self, "Shortcut", f"Couldn't create the desktop shortcut:\n{message}")
 
     # == Status polling (called by ManagerWindow's shared timer) ==
