@@ -465,6 +465,27 @@ def find_rom(rom_filename: str, roms_dir: Path, cache: dict) -> Path | None:
     return None
 
 
+def build_pc_launch_args(profile: dict, executable: Path, rom_path: Path | None) -> list[str]:
+    """The exact CLI argv a PC-side emulator gets launched with, shared with
+    try_launch_args.py so that checker exercises the same logic a real
+    launch does rather than a separate reimplementation that could drift.
+
+    Every emulator here except RPCS3 takes its rom as a trailing positional
+    argument after any flags, RPCS3's own CLI is the opposite (confirmed
+    against its actual usage, "rpcs3.exe <game_path> --no-gui --fullscreen"):
+    the boot target has to come *before* --no-gui/--fullscreen, or it parses
+    as neither flag having a boot target at all ("Cannot run no-gui mode
+    without boot target", confirmed live). rom_before_args, when a profile
+    sets it, is the escape hatch for that rather than hardcoding RPCS3 as a
+    special case here."""
+    if rom_path and profile.get("rom_before_args"):
+        return [str(executable), str(rom_path), *profile["pre_args"]]
+    args = [str(executable), *profile["pre_args"]]
+    if rom_path:
+        args.append(str(rom_path))
+    return args
+
+
 def find_emulator_for_package(package: str, emulators: dict, rom_filename: str | None, android_core: str | None) -> dict | None:
     """Every package here (RetroArch aside) is single-system, so the
     package match alone already tells the whole story, no guessing from
@@ -1393,21 +1414,7 @@ def handle_request(raw_intent: str) -> None:
     if core_dll:
         ensure_retroarch_core(executable.parent, core_dll)
 
-    # Every emulator here except RPCS3 takes its rom as a trailing
-    # positional argument after any flags, RPCS3's own CLI is the
-    # opposite (confirmed against its actual usage,
-    # "rpcs3.exe <game_path> --no-gui --fullscreen"): the boot target has
-    # to come *before* --no-gui/--fullscreen, or it parses as neither
-    # flag having a boot target at all ("Cannot run no-gui mode without
-    # boot target", confirmed live). rom_before_args, when a profile
-    # sets it, is the escape hatch for that rather than hardcoding RPCS3
-    # as a special case here.
-    if rom_path and profile.get("rom_before_args"):
-        args = [str(executable), str(rom_path), *profile["pre_args"]]
-    else:
-        args = [str(executable), *profile["pre_args"]]
-        if rom_path:
-            args.append(str(rom_path))
+    args = build_pc_launch_args(profile, executable, rom_path)
 
     # Covers the gap between iiSU's window minimizing and the real PC
     # emulator's own window appearing and taking the foreground, without
