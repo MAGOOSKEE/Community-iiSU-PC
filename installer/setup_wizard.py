@@ -4,7 +4,7 @@ AVD (sdk_bootstrap.py), patches a copy of iiSU that you supply yourself
 (patch_iisu.py) to redirect its ROM launches to a PC-side bridge, installs
 it, and points the bridge/ folder at the result.
 
-This never bundles or redistributes iiSU's own APK -- you need your own
+This never bundles or redistributes iiSU's own APK, you need your own
 copy of it, same as you'd need for any other APK-patching tool. Drop it
 into input/ before running this (see the printed instructions below if
 none is found).
@@ -23,6 +23,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import sdk_bootstrap
+from jre_env import java_subprocess_env
 from patch_iisu import patch_apk, validate_iisu_apk
 
 INSTALLER_DIR = Path(__file__).parent
@@ -39,8 +40,8 @@ DEFAULT_AVD_NAME = "iisuwin"
 DEFAULT_DISPLAY = {"width": 1920, "height": 1080, "density": 240, "refresh_rate": 144}
 # Generous on purpose: without hardware virtualization (Hyper-V/WHPX on
 # Windows, or disabled in the BIOS/UEFI) the emulator falls back to pure
-# software rendering, and a first cold boot -- creating the userdata
-# partition from scratch, not just resuming one -- can genuinely take
+# software rendering, and a first cold boot, creating the userdata
+# partition from scratch, not just resuming one, can genuinely take
 # several minutes there instead of well under one.
 AVD_BOOT_TIMEOUT = 420
 MIN_FREE_DISK_GB = 15
@@ -57,6 +58,10 @@ SETUP_STAGES = [
 
 DETACHED_PROCESS = 0x00000008
 CREATE_NEW_PROCESS_GROUP = 0x00000200
+# See the matching constant in start_iisu_pc.py: DETACHED_PROCESS alone
+# doesn't reliably stop emulator.exe from popping up its own console
+# window; CREATE_NO_WINDOW is what actually guarantees it never does.
+CREATE_NO_WINDOW = 0x08000000
 
 
 def find_input_apk() -> Path | None:
@@ -67,36 +72,36 @@ def find_input_apk() -> Path | None:
 def check_disk_space() -> None:
     """The installer's own SDK copy and the portable copy under bridge/
     briefly coexist before cleanup_installer_sdk() reclaims the first one,
-    so peak usage during setup is well above what either copy needs alone
-    -- checked up front so a low-disk failure surfaces in a second, not
+    so peak usage during setup is well above what either copy needs alone,
+    checked up front so a low-disk failure surfaces in a second, not
     partway through a multi-GB download."""
     usage = shutil.disk_usage(INSTALLER_DIR)
     free_gb = usage.free / 1e9
     if free_gb < MIN_FREE_DISK_GB:
         raise RuntimeError(
-            f"Only {free_gb:.1f} GB free on the drive holding {INSTALLER_DIR} -- this setup needs "
+            f"Only {free_gb:.1f} GB free on the drive holding {INSTALLER_DIR}, this setup needs "
             f"about {MIN_FREE_DISK_GB} GB (the SDK/AVD images are briefly duplicated between the "
             "installer's own copy and the portable copy under bridge/ before cleanup). Free up some "
             "space and run this again."
         )
-    print(f"[setup] {free_gb:.1f} GB free -- enough room for setup.")
+    print(f"[setup] {free_gb:.1f} GB free, enough room for setup.")
 
 
 def require_java() -> None:
     if shutil.which("java") is None:
         raise RuntimeError(
             "Java was not found on PATH. This installer needs a JDK (for apktool and key "
-            "generation) -- install one (e.g. Eclipse Temurin) and make sure `java` and "
+            "generation), install one (e.g. Eclipse Temurin) and make sure `java` and "
             "`keytool` are on PATH, then run this again."
         )
     if shutil.which("keytool") is None:
-        raise RuntimeError("`keytool` was not found on PATH (it ships with any JDK) -- check your Java install includes it.")
+        raise RuntimeError("`keytool` was not found on PATH (it ships with any JDK), check your Java install includes it.")
 
 
 def ensure_pillow() -> None:
-    """Pillow backs two purely cosmetic features -- the desktop shortcut's
+    """Pillow backs two purely cosmetic features, the desktop shortcut's
     real extracted icon (create_shortcut.py) and the Manager's Credits
-    page avatars (shared/avatars.py) -- both of which already degrade
+    page avatars (shared/avatars.py), both of which already degrade
     gracefully without it (a generic icon, a plain colored circle). That's
     a reasonable fallback for something genuinely unavailable, but not a
     reason to make it the default experience when a one-time `pip install`
@@ -108,18 +113,41 @@ def ensure_pillow() -> None:
     except ImportError:
         pass
     print("[setup] Pillow isn't installed (used for the desktop shortcut's real icon and the")
-    print("[setup] Manager's Credits page avatars) -- installing it now...")
+    print("[setup] Manager's Credits page avatars), installing it now...")
     result = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "--quiet", "pillow"], capture_output=True, text=True
+        [sys.executable, "-m", "pip", "install", "--quiet", "pillow"], capture_output=True, text=True,
+        creationflags=CREATE_NO_WINDOW,
     )
     if result.returncode == 0:
         print("[setup] Pillow installed.")
     else:
-        print(f"[setup] couldn't install Pillow automatically -- continuing without it ({result.stderr.strip()[:200]})")
+        print(f"[setup] couldn't install Pillow automatically, continuing without it ({result.stderr.strip()[:200]})")
+
+
+def ensure_pyside6() -> None:
+    """PySide6 is this project's GUI toolkit (the Qt rewrite replaced Tk
+    entirely, including tkinterdnd2's drag-and-drop, Qt has that
+    natively). Unlike Pillow, this one isn't optional: with no PySide6
+    there is no GUI at all, so a failed install here is raised, not
+    silently swallowed like ensure_pillow()'s cosmetic-only fallback."""
+    try:
+        import PySide6  # noqa: F401
+        return
+    except ImportError:
+        pass
+    print("[setup] PySide6 isn't installed (this project's GUI toolkit), installing it now...")
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "--quiet", "PySide6"], capture_output=True, text=True,
+        creationflags=CREATE_NO_WINDOW,
+    )
+    if result.returncode == 0:
+        print("[setup] PySide6 installed.")
+    else:
+        raise RuntimeError(f"Couldn't install PySide6 automatically, the GUI can't start without it: {result.stderr.strip()[:400]}")
 
 
 def ensure_keystore() -> tuple[Path, str]:
-    """Generates a fresh, locally-unique signing key on first run -- each
+    """Generates a fresh, locally-unique signing key on first run, each
     install of this installer gets its own, rather than everyone who runs
     it sharing one embedded in the distributed files."""
     KEYSTORE_DIR.mkdir(parents=True, exist_ok=True)
@@ -138,7 +166,7 @@ def ensure_keystore() -> tuple[Path, str]:
             "-storepass", password, "-keypass", password,
             "-dname", "CN=iiSU-PC, OU=iiSU-PC, O=iiSU-PC, L=Local, S=Local, C=US",
         ],
-        capture_output=True, text=True,
+        capture_output=True, text=True, env=java_subprocess_env(), creationflags=CREATE_NO_WINDOW,
     )
     if result.returncode != 0:
         raise RuntimeError(f"keytool failed:\n{result.stdout}\n{result.stderr}")
@@ -149,10 +177,10 @@ def ensure_keystore() -> tuple[Path, str]:
 
 def wait_for_avd(avd_name: str, timeout: float, process: subprocess.Popen | None = None) -> bool:
     """`adb devices` reporting "device" state only means the ADB link is
-    up -- it doesn't mean Android's own system services have finished
+    up, it doesn't mean Android's own system services have finished
     starting. `adb install` needs PackageManagerService specifically,
     which can still be initializing well after ADB itself is reachable,
-    especially on an AVD's very first-ever cold boot -- it shows up as
+    especially on an AVD's very first-ever cold boot, it shows up as
     `adb install` failing with "cmd: Can't find service: package" even
     though ADB is already connected. sys.boot_completed is the actual
     signal that the OS is done starting up.
@@ -161,13 +189,13 @@ def wait_for_avd(avd_name: str, timeout: float, process: subprocess.Popen | None
     is caught in a couple of seconds instead of only after the full
     timeout: without hardware virtualization at all (no WHPX/Hyper-V, and
     no software fallback available either), emulator.exe doesn't run
-    slowly -- it exits almost immediately. Waiting out the full multi-
+    slowly, it exits almost immediately. Waiting out the full multi-
     minute timeout for that case reports a generic "AVD didn't come up"
     that reads identically to a merely-slow software-rendered boot, when
     the actual, more specific and more actionable cause (diagnosable via
     virtualization_diagnostics() below) was knowable in seconds. The
     caller distinguishes the two by checking process.poll() itself once
-    this returns False -- still not None means it genuinely just timed
+    this returns False, still not None means it genuinely just timed
     out while running; not None means it died."""
     deadline = time.time() + timeout
     connected = False
@@ -175,12 +203,14 @@ def wait_for_avd(avd_name: str, timeout: float, process: subprocess.Popen | None
         if process is not None and process.poll() is not None:
             return False
         if not connected:
-            result = subprocess.run(["adb", "devices"], capture_output=True, text=True)
+            result = subprocess.run(["adb", "devices"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
             connected = any(line.startswith("emulator-") and "device" in line for line in result.stdout.splitlines())
             if not connected:
                 time.sleep(2)
                 continue
-        boot_check = subprocess.run(["adb", "shell", "getprop", "sys.boot_completed"], capture_output=True, text=True)
+        boot_check = subprocess.run(
+            ["adb", "shell", "getprop", "sys.boot_completed"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW
+        )
         if boot_check.stdout.strip() == "1":
             return True
         time.sleep(2)
@@ -190,16 +220,16 @@ def wait_for_avd(avd_name: str, timeout: float, process: subprocess.Popen | None
 def virtualization_diagnostics() -> dict:
     """Reports the same virtualization state Task Manager's Performance
     tab shows for "Virtualization: Enabled/Disabled" (Win32_Processor's
-    VirtualizationFirmwareEnabled -- the CPU/BIOS-level VT-x/AMD-V flag),
+    VirtualizationFirmwareEnabled, the CPU/BIOS-level VT-x/AMD-V flag),
     plus whether a hypervisor is actually active right now
-    (Win32_ComputerSystem's HypervisorPresent -- true for Hyper-V, WHPX,
-    or any other hypervisor, whichever is actually providing acceleration
-    -- not tied to one specific named Windows feature). Deliberately not
+    (Win32_ComputerSystem's HypervisorPresent, true for Hyper-V, WHPX,
+    or any other hypervisor, whichever is actually providing acceleration,
+    not tied to one specific named Windows feature). Deliberately not
     Get-WindowsOptionalFeature: querying installed features' state
     requires an elevated PowerShell session, and this needs to work from
     this project's normal, non-admin install/bridge processes. Both False
     values default to False rather than raising if the query itself fails
-    for any reason (e.g. WMI unavailable) -- this is a diagnostic aid for
+    for any reason (e.g. WMI unavailable), this is a diagnostic aid for
     a *different* failure already in progress, not something that should
     itself become a second failure."""
     result = {"cpu_virtualization_enabled": False, "hypervisor_present": False}
@@ -207,7 +237,7 @@ def virtualization_diagnostics() -> dict:
         cpu_check = subprocess.run(
             ["powershell", "-NoProfile", "-Command",
              "(Get-CimInstance Win32_Processor).VirtualizationFirmwareEnabled"],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, text=True, timeout=15, creationflags=CREATE_NO_WINDOW,
         )
         result["cpu_virtualization_enabled"] = cpu_check.stdout.strip().lower() == "true"
     except (OSError, subprocess.TimeoutExpired):
@@ -216,7 +246,7 @@ def virtualization_diagnostics() -> dict:
         hypervisor_check = subprocess.run(
             ["powershell", "-NoProfile", "-Command",
              "(Get-CimInstance Win32_ComputerSystem).HypervisorPresent"],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, text=True, timeout=15, creationflags=CREATE_NO_WINDOW,
         )
         result["hypervisor_present"] = hypervisor_check.stdout.strip().lower() == "true"
     except (OSError, subprocess.TimeoutExpired):
@@ -225,13 +255,13 @@ def virtualization_diagnostics() -> dict:
 
 
 def enable_hypervisor_platform() -> None:
-    """Turns on Windows' "Windows Hypervisor Platform" optional feature --
+    """Turns on Windows' "Windows Hypervisor Platform" optional feature,
     what the Android Emulator actually needs on Windows (a lighter-weight
     ask than enabling full Hyper-V, and compatible with more third-party
     virtualization software). Requires admin rights: shells out through
     a UAC elevation prompt (Windows' own consent dialog, not a silent
     escalation) rather than assuming this process is already elevated.
-    Takes effect only after a restart -- this never reboots the PC
+    Takes effect only after a restart, this never reboots the PC
     itself, since that's a genuinely disruptive action only the person
     at the keyboard should decide when to do."""
     subprocess.run(
@@ -248,14 +278,14 @@ class VirtualizationError(RuntimeError):
     """Raised instead of a plain RuntimeError specifically when the AVD
     boot failure looks like a virtualization problem (the emulator
     process either crashed almost immediately, or ran the full timeout
-    with Windows' Hypervisor Platform feature confirmed off) -- callers
+    with Windows' Hypervisor Platform feature confirmed off), callers
     with a GUI (setup_gui.py) can catch this type specifically to offer
     enable_hypervisor_platform() as an action, rather than just showing
     the message as inert text."""
 
 
 def is_avd_connected() -> bool:
-    result = subprocess.run(["adb", "devices"], capture_output=True, text=True)
+    result = subprocess.run(["adb", "devices"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
     return any(line.startswith("emulator-") and "device" in line for line in result.stdout.splitlines())
 
 
@@ -269,7 +299,7 @@ def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_a
         # orphaned and still running rather than cleaning up after itself.
         # Reuse it instead of launching a second instance against the same
         # AVD, which would conflict.
-        print("[setup] an AVD instance is already up from an earlier attempt -- reusing it...")
+        print("[setup] an AVD instance is already up from an earlier attempt, reusing it...")
     else:
         print("[setup] booting the AVD once to install iiSU (this can take a minute)...")
         import portable_sdk
@@ -278,12 +308,12 @@ def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_a
         try:
             process = subprocess.Popen(
                 # -no-window: nothing here needs the user to see or touch
-                # this boot -- it only installs the patched APK and the
+                # this boot, it only installs the patched APK and the
                 # redirector stubs over adb, then shuts back down. The
                 # emulator still runs and responds to adb identically
                 # headless; only the visible window is skipped.
                 [str(emulator_exe), "-avd", avd_name, "-no-snapshot", "-no-window"],
-                creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
                 stdin=subprocess.DEVNULL,
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
@@ -305,7 +335,7 @@ def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_a
                 print(f"    {line}")
         else:
             print(
-                "[setup] no log file to show -- an AVD instance from an earlier attempt is still "
+                "[setup] no log file to show, an AVD instance from an earlier attempt is still "
                 "running but never finished booting either. A slow, non-hardware-accelerated boot "
                 "(no Hyper-V/WHPX, or virtualization disabled in BIOS) is the most common cause."
             )
@@ -314,24 +344,24 @@ def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_a
         if crashed_early and not diag["cpu_virtualization_enabled"]:
             raise VirtualizationError(
                 "The emulator crashed immediately instead of booting, and this PC's CPU virtualization "
-                "(VT-x/AMD-V -- what Task Manager's Performance tab calls \"Virtualization\") is reported "
-                "as disabled. This has to be turned on in your BIOS/UEFI first -- Windows itself can't "
+                "(VT-x/AMD-V, what Task Manager's Performance tab calls \"Virtualization\") is reported "
+                "as disabled. This has to be turned on in your BIOS/UEFI first, Windows itself can't "
                 "enable it. Re-running Setup.bat resumes from here once it's on."
             )
         if crashed_early and not diag["hypervisor_present"]:
             raise VirtualizationError(
                 "The emulator crashed immediately instead of booting. Your CPU has virtualization enabled, "
-                "but no hypervisor is currently active on this PC -- the Android Emulator needs one "
+                "but no hypervisor is currently active on this PC, the Android Emulator needs one "
                 "(Windows Hypervisor Platform, Hyper-V, or a WHPX-compatible equivalent) actually running "
                 "on top of that. Enable Windows Hypervisor Platform below, or install Google's Android "
                 "Emulator Hypervisor Driver instead if you'd rather not (search for it in Android Studio's "
-                "SDK Manager, or google \"Android Emulator Hypervisor Driver\") -- either one fixes this. "
+                "SDK Manager, or google \"Android Emulator Hypervisor Driver\"), either one fixes this. "
                 "Re-running Setup.bat resumes from here."
             )
         if crashed_early:
             raise VirtualizationError(
                 f"The emulator crashed immediately (code {process.returncode}) instead of booting, even "
-                "though this PC reports both CPU virtualization enabled and a hypervisor already active -- "
+                "though this PC reports both CPU virtualization enabled and a hypervisor already active, "
                 f"see {log_path.name} above for the actual error (a conflict with another virtualization "
                 "product, like an older VirtualBox/VMware version, is a common cause here). Re-running "
                 "Setup.bat resumes from here."
@@ -340,14 +370,16 @@ def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_a
             f"The AVD did not come up within {AVD_BOOT_TIMEOUT}s on its first boot. If your PC doesn't "
             "have hardware virtualization enabled (Hyper-V/Windows Hypervisor Platform on Windows, or "
             "virtualization enabled in your BIOS/UEFI), the emulator falls back to pure software "
-            "rendering and can take several minutes instead of under a minute -- re-running Setup.bat "
+            "rendering and can take several minutes instead of under a minute, re-running Setup.bat "
             "resumes from here rather than starting over."
         )
 
     print("[setup] installing the patched iiSU...")
     result = None
     for attempt in range(5):
-        result = subprocess.run(["adb", "install", "-r", str(patched_apk)], capture_output=True, text=True)
+        result = subprocess.run(
+            ["adb", "install", "-r", str(patched_apk)], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW
+        )
         if "Can't find service: package" not in result.stdout and "Can't find service: package" not in result.stderr:
             break
         # sys.boot_completed=1 (checked above) still isn't an ironclad
@@ -359,21 +391,23 @@ def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_a
 
     if "INSTALL_FAILED_UPDATE_INCOMPATIBLE" in result.stdout or "INSTALL_FAILED_UPDATE_INCOMPATIBLE" in result.stderr:
         # The AVD already has a copy of iiSU installed signed with a
-        # different key than this run's -- e.g. a previous setup attempt
+        # different key than this run's, e.g. a previous setup attempt
         # used a different keystore, or this AVD was reused from an
         # unrelated earlier install. Safe to just replace it: at this
         # point in first-time setup there's no bridge-managed app state on
         # it worth preserving.
-        print("[setup] a differently-signed iiSU is already on this AVD -- removing it and reinstalling fresh...")
-        subprocess.run(["adb", "uninstall", "com.iisulauncher"], capture_output=True, text=True)
-        result = subprocess.run(["adb", "install", str(patched_apk)], capture_output=True, text=True)
+        print("[setup] a differently-signed iiSU is already on this AVD, removing it and reinstalling fresh...")
+        subprocess.run(["adb", "uninstall", "com.iisulauncher"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
+        result = subprocess.run(
+            ["adb", "install", str(patched_apk)], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW
+        )
     if result.returncode != 0 or "Success" not in result.stdout:
         raise RuntimeError(f"adb install failed:\n{result.stdout}\n{result.stderr}")
 
     install_default_redirectors()
 
     print("[setup] shutting the AVD back down (Community-iiSU-PC Manager.bat will bring it up properly from here on)...")
-    subprocess.run(["adb", "emu", "kill"], capture_output=True, text=True)
+    subprocess.run(["adb", "emu", "kill"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
     deadline = time.time() + 15
     while time.time() < deadline and is_avd_connected():
         time.sleep(1)
@@ -384,11 +418,11 @@ def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_a
 def cleanup_installer_sdk() -> None:
     """Once bridge/portable_sdk.py has its own copy of the emulator,
     platform-tools, and system image, installer/android-sdk/ (~3.7GB) and
-    the downloaded commandlinetools.zip (~156MB) are pure dead weight --
+    the downloaded commandlinetools.zip (~156MB) are pure dead weight,
     only build-tools (zipalign/apksigner) from it was ever needed post-copy,
     and only for the one-time patch step above. Deleting them trades away
     re-running Setup.bat for a *different* APK later without a fresh
-    multi-GB SDK re-download -- worth it for a one-time setup tool."""
+    multi-GB SDK re-download, worth it for a one-time setup tool."""
     reclaimed = 0
     for path in (sdk_bootstrap.SDK_ROOT, INSTALLER_DIR / "commandlinetools.zip"):
         if not path.exists():
@@ -406,7 +440,7 @@ def cleanup_installer_sdk() -> None:
 def write_bridge_config(avd_name: str) -> None:
     """Creates bridge/config.json from the generic template if this is a
     fresh install (no config yet), or just patches avd_name/display into
-    whatever's already there -- so re-running this against an existing,
+    whatever's already there, so re-running this against an existing,
     already-personalized setup (e.g. to rebuild a corrupted AVD) never
     overwrites someone's real roms_dir/search_roots/emulators.
 
@@ -432,16 +466,16 @@ def install_default_redirectors() -> None:
     """Installs a stub for every package shared/emulator_defaults.py maps
     a PC emulator to (see that module for why a stub is needed at all).
     Runs while the AVD is already up from installing iiSU, right before
-    it gets shut back down -- one boot instead of a second one just for
+    it gets shut back down, one boot instead of a second one just for
     this. Each package is independent: one failing (or already having a
     real, differently-signed app installed under that name, which this
-    deliberately does not overwrite -- see stub_apk.install_stub_apk)
+    deliberately does not overwrite, see stub_apk.install_stub_apk)
     doesn't stop the rest, since none of them are required for the
     install as a whole to have succeeded.
 
     Missing build-tools is different: that fails every single stub, not
     just one, and most consoles won't show up as playable in iiSU at all
-    without their stub -- so this fails setup loudly instead of quietly
+    without their stub, so this fails setup loudly instead of quietly
     finishing with zero consoles usable and no obvious sign why (confirmed
     live: a silent skip here is easy to miss in a long setup log)."""
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -453,7 +487,7 @@ def install_default_redirectors() -> None:
         expected_source = sdk_bootstrap.SDK_ROOT / "build-tools" / sdk_bootstrap.BUILD_TOOLS_VERSION
         raise RuntimeError(
             f"build-tools not found under {stub_apk.BUILD_TOOLS_DIR} (tried to copy them from "
-            f"{expected_source}, which {'exists' if expected_source.is_dir() else 'does not exist'}) -- "
+            f"{expected_source}, which {'exists' if expected_source.is_dir() else 'does not exist'}), "
             "redirector apps can't be built without them, and most consoles won't appear as playable "
             "in iiSU without their stub. Re-run Setup.bat; if this keeps happening, check that the SDK "
             "download actually included build-tools."
@@ -464,7 +498,7 @@ def install_default_redirectors() -> None:
         try:
             outcome = stub_apk.build_and_install(package, label)
             if outcome == "conflict":
-                print(f"[setup]   {label}: a different app is already installed as {package} -- left it alone")
+                print(f"[setup]   {label}: a different app is already installed as {package}, left it alone")
             else:
                 print(f"[setup]   {label}: {outcome}")
         except Exception as e:
@@ -472,12 +506,12 @@ def install_default_redirectors() -> None:
 
 
 def create_desktop_shortcut(apk_path: Path) -> None:
-    """A shortcut straight to iiSU is worth having by default -- not
+    """A shortcut straight to iiSU is worth having by default, not
     something worth failing setup over if it doesn't work, so any problem
     here is reported and swallowed rather than raised.
 
     Passes the actual source APK through explicitly rather than letting
-    create_shortcut.py re-discover one under installer/input/ -- picking
+    create_shortcut.py re-discover one under installer/input/, picking
     an APK from anywhere else via Browse (setup_gui.py) works fine for
     patching, which only ever reads from wherever apk_path points, but
     icon extraction used to silently fall back to the generic icon
@@ -488,18 +522,18 @@ def create_desktop_shortcut(apk_path: Path) -> None:
         shortcut_path = create_shortcut.create_desktop_shortcut(apk_path)
         print(f"[setup] created a desktop shortcut: {shortcut_path}")
     except Exception as e:
-        print(f"[setup] couldn't create a desktop shortcut ({e}) -- you can still use Community-iiSU-PC Manager.bat directly")
+        print(f"[setup] couldn't create a desktop shortcut ({e}), you can still use Community-iiSU-PC Manager.bat directly")
 
 
 def run_setup(apk_path: Path, on_stage: Callable[[str, int, int], None] | None = None) -> None:
-    """Does the actual work, given a source APK path -- shared by the CLI
+    """Does the actual work, given a source APK path, shared by the CLI
     entry point below and setup_gui.py, so both stay in sync with exactly
     one implementation. Reports progress via plain print(), which the GUI
     captures by redirecting sys.stdout for the duration of the call.
 
     on_stage (if given) is called at the start of each of SETUP_STAGES, so
     a GUI can show "Step 3/7: ..." somewhere more durable than a scrolling
-    log -- the whole run used to be one indeterminate spinner from start to
+    log, the whole run used to be one indeterminate spinner from start to
     finish, which gives no sense of whether a several-minute step is normal
     progress or actually stuck."""
     total = len(SETUP_STAGES)
@@ -570,7 +604,7 @@ def main() -> None:
         INPUT_DIR.mkdir(parents=True, exist_ok=True)
         print(f"No iiSU APK found in {INPUT_DIR}.")
         print("Drop your own copy of the iiSU APK into that folder (any filename, .apk extension)")
-        print("and run this again. This tool patches your copy -- it doesn't come with one.")
+        print("and run this again. This tool patches your copy, it doesn't come with one.")
         sys.exit(1)
     run_setup(apk_path)
 

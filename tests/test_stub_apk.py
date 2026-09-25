@@ -1,5 +1,5 @@
 """
-Unit tests for installer/stub_apk.py's _manifest_xml -- the redirector
+Unit tests for installer/stub_apk.py's _manifest_xml, the redirector
 stub's AndroidManifest.xml generator. Pure string function, no apktool/
 build-tools/keystore involved, but importing stub_apk.py does pull in
 portable_sdk.py (its import-time adb PATH fix), so this only runs
@@ -14,7 +14,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "bridge"))
 sys.path.insert(0, str(PROJECT_ROOT / "installer"))
 
-from stub_apk import _manifest_xml  # noqa: E402 -- path set up above
+from stub_apk import _manifest_xml  # noqa: E402; path set up above
 
 
 class ManifestXmlTests(unittest.TestCase):
@@ -25,7 +25,7 @@ class ManifestXmlTests(unittest.TestCase):
 
     def test_ampersand_in_label_is_escaped(self):
         # A future label containing "&" used to produce a manifest apktool
-        # couldn't parse -- only quotes were escaped before. Confirms the
+        # couldn't parse, only quotes were escaped before. Confirms the
         # fix (installer/stub_apk.py) actually escapes it. The apostrophe
         # is deliberately left alone: attributes here are double-quoted,
         # so a literal ' is already well-formed XML and doesn't need
