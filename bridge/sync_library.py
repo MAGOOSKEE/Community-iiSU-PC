@@ -179,7 +179,12 @@ def referenced_disc_filenames(
 
 
 def adb(*args: str, check: bool = True) -> subprocess.CompletedProcess:
-    return subprocess.run(["adb", *args], capture_output=True, text=True, check=check)
+    # adb.exe is console-subsystem; every caller of this runs from the GUI
+    # (pythonw.exe, no console of its own), so without CREATE_NO_WINDOW
+    # each call here would flash its own console window.
+    return subprocess.run(
+        ["adb", *args], capture_output=True, text=True, check=check, creationflags=0x08000000
+    )
 
 
 def scan_library(

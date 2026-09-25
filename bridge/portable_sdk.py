@@ -62,7 +62,7 @@ def _robocopy(src: Path, dst: Path, exclude_dirs: list[str] | None = None) -> No
     args = ["robocopy", str(src), str(dst), "/E", "/R:2", "/W:2", "/NFL", "/NDL", "/NJH", "/NJS"]
     if exclude_dirs:
         args += ["/XD", *exclude_dirs]
-    result = subprocess.run(args, capture_output=True, text=True)
+    result = subprocess.run(args, capture_output=True, text=True, creationflags=0x08000000)  # CREATE_NO_WINDOW
     # robocopy's exit codes 0-7 all mean some degree of success (a bitmask
     # of what it did); 8+ means a real failure.
     if result.returncode >= 8:

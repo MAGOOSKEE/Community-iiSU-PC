@@ -192,7 +192,7 @@ def is_port_open(port: int) -> bool:
 
 
 def is_avd_running(avd_name: str) -> bool:
-    result = subprocess.run(["adb", "devices"], capture_output=True, text=True)
+    result = subprocess.run(["adb", "devices"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
     # A running AVD shows up as "emulator-5554\tdevice" (or similar) once booted.
     return any(line.startswith("emulator-") and "device" in line for line in result.stdout.splitlines())
 

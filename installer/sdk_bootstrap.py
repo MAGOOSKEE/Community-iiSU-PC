@@ -28,6 +28,12 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).parent
 SDK_ROOT = SCRIPT_DIR / "android-sdk"
 
+# The bundled "android" CLI (a .bat wrapper) is console-subsystem; this
+# runs from the GUI's Setup flow (pythonw.exe, no console of its own), so
+# without CREATE_NO_WINDOW each multi-minute SDK/AVD command below would
+# pop up its own window.
+CREATE_NO_WINDOW = 0x08000000
+
 COMMANDLINETOOLS_URL = "https://dl.google.com/android/repository/commandlinetools-win-15859902_latest.zip"
 SYSTEM_IMAGE = "system-images;android-36;google_apis_playstore;x86_64"
 BUILD_TOOLS_VERSION = "34.0.0"
@@ -130,7 +136,7 @@ def _run_with_heartbeat(args: list[str], what: str, interval: float = 15.0) -> N
     thread = threading.Thread(target=heartbeat, daemon=True)
     thread.start()
     try:
-        subprocess.run(args, capture_output=True, text=True)
+        subprocess.run(args, capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
     finally:
         stop.set()
         thread.join()
@@ -166,7 +172,10 @@ def create_default_avd() -> Path:
     default_avd_dir = Path.home() / ".android" / "avd" / f"{DEVICE_PROFILE}.avd"
     if not default_avd_dir.is_dir():
         print(f"[sdk] creating a new AVD from the '{DEVICE_PROFILE}' device profile...")
-        subprocess.run([str(android_exe()), f"--sdk={SDK_ROOT}", "emulator", "create", DEVICE_PROFILE], capture_output=True, text=True)
+        subprocess.run(
+            [str(android_exe()), f"--sdk={SDK_ROOT}", "emulator", "create", DEVICE_PROFILE],
+            capture_output=True, text=True, creationflags=CREATE_NO_WINDOW,
+        )
         if not default_avd_dir.is_dir():
             raise RuntimeError(f"`android emulator create {DEVICE_PROFILE}` did not produce {default_avd_dir}.")
     return default_avd_dir

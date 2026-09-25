@@ -38,6 +38,11 @@ BRIDGE_PACKAGE_SMALI_DIR = "com/iisulauncher/pcbridge"
 
 
 def run(args: list[str], **kwargs) -> subprocess.CompletedProcess:
+    # Every command this wraps (java -jar apktool, zipalign, apksigner.bat)
+    # is console-subsystem; this runs from the GUI's Setup flow
+    # (pythonw.exe, no console of its own), so without CREATE_NO_WINDOW
+    # each one flashes its own window during patching.
+    kwargs.setdefault("creationflags", 0x08000000)
     result = subprocess.run(args, capture_output=True, text=True, **kwargs)
     if result.returncode != 0:
         raise RuntimeError(f"command failed ({' '.join(args)}):\n{result.stdout}\n{result.stderr}")

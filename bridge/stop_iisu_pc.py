@@ -31,6 +31,11 @@ from pathlib import Path
 
 from portable_sdk import PORTABLE_AVD_HOME
 
+# adb/taskkill/powershell are all console-subsystem executables; this
+# script itself always runs from the GUI (pythonw.exe), which has no
+# console for them to inherit, so each would otherwise pop up its own.
+CREATE_NO_WINDOW = 0x08000000
+
 STATE_PATH = Path(__file__).parent / ".runtime_state.json"
 CONFIG_PATH = Path(__file__).parent / "config.json"
 GRACEFUL_STOP_TIMEOUT = 10  # seconds
@@ -56,12 +61,12 @@ def load_avd_name(state: dict) -> str | None:
 
 
 def is_avd_running() -> bool:
-    result = subprocess.run(["adb", "devices"], capture_output=True, text=True)
+    result = subprocess.run(["adb", "devices"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
     return any(line.startswith("emulator-") and "device" in line for line in result.stdout.splitlines())
 
 
 def kill_tree(pid: int) -> None:
-    subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, text=True)
+    subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
 
 
 def kill_by_cmdline_match(needle: str) -> None:
@@ -83,7 +88,7 @@ def kill_by_cmdline_match(needle: str) -> None:
         f"| Where-Object {{ $_.CommandLine -like '*{needle}*' }} "
         "| ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
     )
-    subprocess.run(["powershell", "-NoProfile", "-Command", script], capture_output=True, text=True)
+    subprocess.run(["powershell", "-NoProfile", "-Command", script], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
 
 
 def _remove_path_with_retry(path: Path, attempts: int = 5, delay: float = 1.0) -> None:
@@ -129,7 +134,7 @@ def main() -> None:
 
     if is_avd_running():
         print("[stop] asking the AVD to shut down gracefully...")
-        subprocess.run(["adb", "emu", "kill"], capture_output=True, text=True)
+        subprocess.run(["adb", "emu", "kill"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
         deadline = time.time() + GRACEFUL_STOP_TIMEOUT
         while time.time() < deadline and is_avd_running():
             time.sleep(1)
@@ -163,7 +168,7 @@ def main() -> None:
     # the documented graceful shutdown for it, unlike taskkill against the
     # other two processes above.
     print("[stop] stopping the adb server...")
-    subprocess.run(["adb", "kill-server"], capture_output=True, text=True)
+    subprocess.run(["adb", "kill-server"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
 
     clear_stale_locks(avd_name)
 

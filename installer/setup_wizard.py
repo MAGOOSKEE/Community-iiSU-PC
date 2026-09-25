@@ -115,7 +115,8 @@ def ensure_pillow() -> None:
     print("[setup] Pillow isn't installed (used for the desktop shortcut's real icon and the")
     print("[setup] Manager's Credits page avatars) -- installing it now...")
     result = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "--quiet", "pillow"], capture_output=True, text=True
+        [sys.executable, "-m", "pip", "install", "--quiet", "pillow"], capture_output=True, text=True,
+        creationflags=CREATE_NO_WINDOW,
     )
     if result.returncode == 0:
         print("[setup] Pillow installed.")
@@ -136,7 +137,8 @@ def ensure_pyside6() -> None:
         pass
     print("[setup] PySide6 isn't installed (this project's GUI toolkit) -- installing it now...")
     result = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "--quiet", "PySide6"], capture_output=True, text=True
+        [sys.executable, "-m", "pip", "install", "--quiet", "PySide6"], capture_output=True, text=True,
+        creationflags=CREATE_NO_WINDOW,
     )
     if result.returncode == 0:
         print("[setup] PySide6 installed.")
@@ -164,7 +166,7 @@ def ensure_keystore() -> tuple[Path, str]:
             "-storepass", password, "-keypass", password,
             "-dname", "CN=iiSU-PC, OU=iiSU-PC, O=iiSU-PC, L=Local, S=Local, C=US",
         ],
-        capture_output=True, text=True, env=java_subprocess_env(),
+        capture_output=True, text=True, env=java_subprocess_env(), creationflags=CREATE_NO_WINDOW,
     )
     if result.returncode != 0:
         raise RuntimeError(f"keytool failed:\n{result.stdout}\n{result.stderr}")
@@ -201,12 +203,14 @@ def wait_for_avd(avd_name: str, timeout: float, process: subprocess.Popen | None
         if process is not None and process.poll() is not None:
             return False
         if not connected:
-            result = subprocess.run(["adb", "devices"], capture_output=True, text=True)
+            result = subprocess.run(["adb", "devices"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
             connected = any(line.startswith("emulator-") and "device" in line for line in result.stdout.splitlines())
             if not connected:
                 time.sleep(2)
                 continue
-        boot_check = subprocess.run(["adb", "shell", "getprop", "sys.boot_completed"], capture_output=True, text=True)
+        boot_check = subprocess.run(
+            ["adb", "shell", "getprop", "sys.boot_completed"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW
+        )
         if boot_check.stdout.strip() == "1":
             return True
         time.sleep(2)
@@ -233,7 +237,7 @@ def virtualization_diagnostics() -> dict:
         cpu_check = subprocess.run(
             ["powershell", "-NoProfile", "-Command",
              "(Get-CimInstance Win32_Processor).VirtualizationFirmwareEnabled"],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, text=True, timeout=15, creationflags=CREATE_NO_WINDOW,
         )
         result["cpu_virtualization_enabled"] = cpu_check.stdout.strip().lower() == "true"
     except (OSError, subprocess.TimeoutExpired):
@@ -242,7 +246,7 @@ def virtualization_diagnostics() -> dict:
         hypervisor_check = subprocess.run(
             ["powershell", "-NoProfile", "-Command",
              "(Get-CimInstance Win32_ComputerSystem).HypervisorPresent"],
-            capture_output=True, text=True, timeout=15,
+            capture_output=True, text=True, timeout=15, creationflags=CREATE_NO_WINDOW,
         )
         result["hypervisor_present"] = hypervisor_check.stdout.strip().lower() == "true"
     except (OSError, subprocess.TimeoutExpired):
@@ -281,7 +285,7 @@ class VirtualizationError(RuntimeError):
 
 
 def is_avd_connected() -> bool:
-    result = subprocess.run(["adb", "devices"], capture_output=True, text=True)
+    result = subprocess.run(["adb", "devices"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
     return any(line.startswith("emulator-") and "device" in line for line in result.stdout.splitlines())
 
 
@@ -373,7 +377,9 @@ def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_a
     print("[setup] installing the patched iiSU...")
     result = None
     for attempt in range(5):
-        result = subprocess.run(["adb", "install", "-r", str(patched_apk)], capture_output=True, text=True)
+        result = subprocess.run(
+            ["adb", "install", "-r", str(patched_apk)], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW
+        )
         if "Can't find service: package" not in result.stdout and "Can't find service: package" not in result.stderr:
             break
         # sys.boot_completed=1 (checked above) still isn't an ironclad
@@ -391,15 +397,17 @@ def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_a
         # point in first-time setup there's no bridge-managed app state on
         # it worth preserving.
         print("[setup] a differently-signed iiSU is already on this AVD -- removing it and reinstalling fresh...")
-        subprocess.run(["adb", "uninstall", "com.iisulauncher"], capture_output=True, text=True)
-        result = subprocess.run(["adb", "install", str(patched_apk)], capture_output=True, text=True)
+        subprocess.run(["adb", "uninstall", "com.iisulauncher"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
+        result = subprocess.run(
+            ["adb", "install", str(patched_apk)], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW
+        )
     if result.returncode != 0 or "Success" not in result.stdout:
         raise RuntimeError(f"adb install failed:\n{result.stdout}\n{result.stderr}")
 
     install_default_redirectors()
 
     print("[setup] shutting the AVD back down (Community-iiSU-PC Manager.bat will bring it up properly from here on)...")
-    subprocess.run(["adb", "emu", "kill"], capture_output=True, text=True)
+    subprocess.run(["adb", "emu", "kill"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
     deadline = time.time() + 15
     while time.time() < deadline and is_avd_connected():
         time.sleep(1)

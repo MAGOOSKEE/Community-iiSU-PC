@@ -66,7 +66,8 @@ DOWNLOAD_TIMEOUT = 30.0
 def _run_git(args: list[str]) -> subprocess.CompletedProcess | None:
     try:
         return subprocess.run(
-            ["git", *args], cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=GIT_TIMEOUT
+            ["git", *args], cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=GIT_TIMEOUT,
+            creationflags=0x08000000,  # CREATE_NO_WINDOW -- git.exe is console-subsystem
         )
     except (OSError, subprocess.TimeoutExpired):
         return None
