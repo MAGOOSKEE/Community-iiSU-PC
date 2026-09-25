@@ -1,8 +1,8 @@
 """
 Unit tests for bridge/start_iisu_pc.py's boot-fingerprint diffing and the
 quickboot-autosave regression: set_quickboot_autosave(enabled=not
-effective_cold_boot) meant a cold boot -- which includes every first run,
-and any run after a settings/ROM-library change -- never saved a snapshot
+effective_cold_boot) meant a cold boot, which includes every first run,
+and any run after a settings/ROM-library change, never saved a snapshot
 to resume *from*, so the very next start's "quick resume" was never
 backed by anything real. No AVD or adb needed for either.
 """
@@ -15,7 +15,7 @@ from unittest.mock import patch
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "bridge"))
 
-import start_iisu_pc  # noqa: E402 -- path set up above
+import start_iisu_pc  # noqa: E402; path set up above
 
 
 class DescribeBootFingerprintDiffTests(unittest.TestCase):
@@ -45,7 +45,7 @@ class DescribeBootFingerprintDiffTests(unittest.TestCase):
 
 class QuickbootAutosaveRegressionTests(unittest.TestCase):
     """start_avd() must always leave quickboot autosave ON before launching,
-    regardless of whether this particular boot is cold or a resume -- the
+    regardless of whether this particular boot is cold or a resume, the
     boot-fingerprint check is what decides whether a saved snapshot gets
     trusted later; autosave being off would mean there's never one to
     trust in the first place."""

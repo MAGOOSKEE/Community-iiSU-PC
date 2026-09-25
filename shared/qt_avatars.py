@@ -3,14 +3,14 @@ Fetches a GitHub user's avatar and renders it as a circular QPixmap, for
 the Credits page in bridge/ui (replaces shared/avatars.py's tkinter
 version during the Qt rewrite).
 
-GitHub serves a user's current avatar at a stable, unauthenticated URL --
-https://github.com/<username>.png -- which redirects to the real image on
+GitHub serves a user's current avatar at a stable, unauthenticated URL,
+https://github.com/<username>.png, which redirects to the real image on
 avatars.githubusercontent.com. No API token or rate-limited REST call is
 needed just to show a picture.
 
 Everything here is best-effort: no internet or a GitHub outage degrades to
 a plain colored circle with the user's first initial rather than break the
-page -- the same "cosmetic nice-to-have degrades quietly" approach
+page, the same "cosmetic nice-to-have degrades quietly" approach
 create_shortcut.py already takes for iiSU's own icon.
 
 Unlike the tkinter version, this has no Pillow dependency at all: Qt's
@@ -29,7 +29,7 @@ FETCH_TIMEOUT = 5.0
 
 
 def fetch_avatar_bytes(username: str) -> bytes | None:
-    """Runs on a background thread (network I/O) -- callers shouldn't call
+    """Runs on a background thread (network I/O), callers shouldn't call
     this from the Qt main thread. Returns None on any failure at all."""
     try:
         req = urllib.request.Request(
@@ -44,7 +44,7 @@ def fetch_avatar_bytes(username: str) -> bytes | None:
 
 def make_circular_pixmap(image_bytes: bytes, size: int) -> QPixmap | None:
     """Converts raw image bytes into a circular QPixmap of (size x size).
-    Returns None if the bytes aren't a decodable image -- callers fall back
+    Returns None if the bytes aren't a decodable image, callers fall back
     to make_placeholder_circle in that case. Must be called from the Qt
     main thread (QPixmap needs a live QApplication)."""
     source = QPixmap()
@@ -74,7 +74,7 @@ def make_circular_pixmap(image_bytes: bytes, size: int) -> QPixmap | None:
 
 def make_placeholder_circle(size: int, label: str, color: str, text_color: str) -> QPixmap:
     """A plain painted circle with a single letter, used whenever a real
-    avatar couldn't be fetched or decoded -- no network, cannot fail short
+    avatar couldn't be fetched or decoded, no network, cannot fail short
     of Qt itself being broken."""
     pixmap = QPixmap(size, size)
     pixmap.fill(Qt.GlobalColor.transparent)

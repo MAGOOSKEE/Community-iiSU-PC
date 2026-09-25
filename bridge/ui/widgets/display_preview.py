@@ -1,6 +1,6 @@
 """Scaled aspect-ratio preview box showing the configured display
 resolution as a to-scale rectangle, with the resolution and simplified
-ratio labeled underneath -- consolidates what used to be two near-
+ratio labeled underneath, consolidates what used to be two near-
 identical, already-drifted-apart copies (bridge/manager.py's Display page
 and bridge/onboarding_wizard.py's Display step: the wizard's copy was
 missing the ratio label the Manager's had). This version always shows

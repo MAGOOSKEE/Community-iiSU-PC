@@ -1,5 +1,5 @@
 """
-Unit tests for shared/emulator_defaults.py's pure mapping logic -- no
+Unit tests for shared/emulator_defaults.py's pure mapping logic, no
 Windows APIs, no AVD, no adb involved, so these run anywhere Python does.
 
 Run with: python -m unittest discover -s tests
@@ -37,7 +37,7 @@ class BuildEmulatorsMapTests(unittest.TestCase):
         self.assertTrue(emulators["aenu.aps3e"].get("rom_before_args"))
 
     def test_shared_package_collapses_to_one_entry(self):
-        # GameCube and Wii both route through org.dolphinemu.dolphinemu --
+        # GameCube and Wii both route through org.dolphinemu.dolphinemu,
         # collapsing to the same dict entry is intentional, not a bug.
         emulators = build_emulators_map()
         gc = next(e for e in STANDALONE_DEFAULTS if e["console"] == "gc")

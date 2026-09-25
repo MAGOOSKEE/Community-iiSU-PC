@@ -1,4 +1,4 @@
-"""Windows Apps page -- ports manager.py's _build_windows_apps_page and its
+"""Windows Apps page, ports manager.py's _build_windows_apps_page and its
 supporting methods. Backed entirely by bridge/services/windows_apps_service.py
 (extracted first, see that module's docstring); this file is "wire a
 service call to a signal/slot" per the Qt rewrite plan.
@@ -14,7 +14,7 @@ import os
 import subprocess
 from pathlib import Path
 
-import bridge.ui  # noqa: F401 -- import-time side effect: puts root/bridge/installer on sys.path
+import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -142,7 +142,7 @@ class WindowsAppsPage(PageBase):
         self._steam_signals = None
         self.reload_from_config()
 
-    # -- Data -------------------------------------------------
+    # == Data ==
 
     def _windows_dir(self):
         svc.migrate_legacy_windows_stubs(self.window.config_data.get("roms_dir", ""))
@@ -214,7 +214,7 @@ class WindowsAppsPage(PageBase):
     def _selected_names(self) -> list[str]:
         return [item.text(0) for item in self.tree.selectedItems()]
 
-    # -- Steam summary -------------------------------------------------
+    # == Steam summary ==
 
     def _refresh_steam_summary(self) -> None:
         self.steam_summary_label.setText("Steam: scanning libraries...")
@@ -236,7 +236,7 @@ class WindowsAppsPage(PageBase):
             f"{available} available to import  •  {libraries} librar{'y' if libraries == 1 else 'ies'}"
         )
 
-    # -- Add / edit / duplicate / remove -------------------------------------------------
+    # == Add / edit / duplicate / remove ==
 
     def _add_windows_app(self) -> None:
         dialog = WindowsAppDialog(self, "Add Windows Application")
@@ -331,7 +331,7 @@ class WindowsAppsPage(PageBase):
         self._refresh_tree()
         self._refresh_steam_summary()
 
-    # -- Test / open location -------------------------------------------------
+    # == Test / open location ==
 
     def _test_windows_app(self) -> None:
         selected = self._selected_names()
@@ -384,7 +384,7 @@ class WindowsAppsPage(PageBase):
         except OSError as e:
             QMessageBox.critical(self, "Couldn't open location", str(e))
 
-    # -- Repair -------------------------------------------------
+    # == Repair ==
 
     def _repair_selected(self) -> None:
         selected = self._selected_names()
@@ -436,7 +436,7 @@ class WindowsAppsPage(PageBase):
                 return
         QMessageBox.information(self, "Windows Apps: Sync / Repair", "\n\n".join(summary))
 
-    # -- Health check -------------------------------------------------
+    # == Health check ==
 
     def _open_health_check(self) -> None:
         dialog = WindowsAppsHealthDialog(self, self._windows_dir(), self._refresh_tree)
@@ -444,7 +444,7 @@ class WindowsAppsPage(PageBase):
         self._refresh_tree()
         self._refresh_steam_summary()
 
-    # -- Export / import -------------------------------------------------
+    # == Export / import ==
 
     def _export_windows_apps(self) -> None:
         apps = svc.load_windows_apps()
@@ -488,7 +488,7 @@ class WindowsAppsPage(PageBase):
         self._refresh_tree()
         QMessageBox.information(self, "Import complete", f"Imported {added} application(s).\nSkipped {skipped} duplicate/invalid item(s).")
 
-    # -- Steam library -------------------------------------------------
+    # == Steam library ==
 
     def _import_steam_library(self) -> None:
         dialog = SteamLibraryDialog(self, multi_select=True)
@@ -562,7 +562,7 @@ class WindowsAppsPage(PageBase):
             self, "Steam auto-import complete", f"Imported {imported} new Steam game(s)." + (f"\nSkipped {skipped} item(s)." if skipped else "")
         )
 
-    # -- Menus -------------------------------------------------
+    # == Menus ==
 
     def _show_context_menu(self, pos) -> None:
         item = self.tree.itemAt(pos)
@@ -606,7 +606,7 @@ class WindowsAppsPage(PageBase):
         roms_dir = self.window.config_data.get("roms_dir", "")
         legacy_dir = svc.legacy_windows_stubs_dir(roms_dir)
         if legacy_dir is None:
-            QMessageBox.information(self, "Windows Apps", "No old placeholder folder found under your ROM directory -- nothing to delete.")
+            QMessageBox.information(self, "Windows Apps", "No old placeholder folder found under your ROM directory, nothing to delete.")
             return
         count = sum(1 for _ in legacy_dir.glob("*.pcgame"))
         reply = QMessageBox.question(
@@ -614,7 +614,7 @@ class WindowsAppsPage(PageBase):
             "Delete Old Placeholder Folder",
             f"Delete {legacy_dir}?\n\nIt holds {count} old .pcgame placeholder(s) left over from before Windows Apps "
             f"placeholders moved to {svc.WINDOWS_STUBS_DIR}. Only do this once you've confirmed your Windows Apps "
-            "still work -- this cannot be undone.",
+            "still work, this cannot be undone.",
         )
         if reply != QMessageBox.StandardButton.Yes:
             return

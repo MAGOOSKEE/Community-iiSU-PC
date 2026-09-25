@@ -1,7 +1,7 @@
 """A dark panel with real rounded corners (shared/theme.py's tkinter Card
-could only fake this with a flat rectangle -- see qt_theme.py's QSS for
+could only fake this with a flat rectangle, see qt_theme.py's QSS for
 the actual `border-radius`, set via the "Card" object name below) and a
-soft drop shadow for a little visual lift off the page background --
+soft drop shadow for a little visual lift off the page background,
 another thing a flat Tk canvas tile had no way to do."""
 
 from PySide6.QtGui import QColor

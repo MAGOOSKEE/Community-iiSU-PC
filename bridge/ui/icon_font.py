@@ -1,4 +1,4 @@
-"""Material Icons as real QIcons -- replaces the sidebar's first two
+"""Material Icons as real QIcons, replaces the sidebar's first two
 attempts (Segoe MDL2 line-art, then emoji): a bundled icon font renders as
 solid, filled glyphs with real detail (Material Icons' "filled" style is
 the one downloaded below) rather than a plain OS-supplied Unicode symbol,
@@ -6,12 +6,12 @@ which is what most polished desktop apps actually use.
 
 shared/assets/fonts/MaterialIcons-Regular.ttf comes from Google's
 material-design-icons repository (Apache License 2.0, LICENSE file
-alongside it) -- each glyph is reached by its ASCII ligature name (e.g.
+alongside it), each glyph is reached by its ASCII ligature name (e.g.
 the text "home" renders as the home glyph) rather than a codepoint lookup,
 which is the officially documented way to use this specific font.
 
 Rendered to a QIcon (not embedded as button text) so it composes with
-QPushButton's native icon+text layout -- icon and label can use their own
+QPushButton's native icon+text layout, icon and label can use their own
 fonts/colors independently, and collapsing the sidebar to icon-only mode
 is just clearing the button's text, not string surgery.
 """

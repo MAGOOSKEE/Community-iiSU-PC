@@ -1,4 +1,4 @@
-"""Non-UI logic behind the Media Library page -- the durable iiDB artwork
+"""Non-UI logic behind the Media Library page, the durable iiDB artwork
 registry and MediaBridge install/verify/rescan calls, extracted ahead of
 porting that page to Qt (this is the largest remaining page, so per the Qt
 rewrite plan its service layer comes first).
@@ -46,7 +46,7 @@ class MediaLibraryServiceError(Exception):
     pass
 
 
-# -- Registry -------------------------------------------------
+# == Registry ==
 
 
 def media_registry_empty() -> dict:
@@ -208,7 +208,7 @@ def human_size(value) -> str:
     return ""
 
 
-# -- MediaBridge -------------------------------------------------
+# == MediaBridge ==
 
 
 def mediabridge_ping() -> tuple[bool, str]:

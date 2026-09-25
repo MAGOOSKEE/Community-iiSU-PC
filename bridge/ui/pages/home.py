@@ -1,8 +1,8 @@
-"""Home page: status card, Start/Stop, quick actions, and the live log --
+"""Home page: status card, Start/Stop, quick actions, and the live log,
 ports manager.py's _build_home_page and everything it drives (~lines
 641-977 of the original). Threading collapses from thread+queue.Queue+
 polling timer down to run_in_background() + a Signal-based log redirector,
-since Qt already marshals cross-thread signal delivery on its own -- see
+since Qt already marshals cross-thread signal delivery on its own, see
 bridge/ui/workers/{task_runner,log_stream}.py's docstrings."""
 
 import os
@@ -10,7 +10,7 @@ import sys
 import traceback
 from pathlib import Path
 
-import bridge.ui  # noqa: F401 -- import-time side effect: puts root/bridge/installer on sys.path
+import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
@@ -150,7 +150,7 @@ class HomePage(PageBase):
         self.primary_button.clicked.connect(self._on_primary_click)
         self.refresh_home_state()
 
-    # -- Home state -------------------------------------------------
+    # == Home state ==
 
     def refresh_home_state(self) -> None:
         self.setup_intro_label.setVisible(not self.window.configured)
@@ -222,7 +222,7 @@ class HomePage(PageBase):
         self._refresh_primary_button()
         # Hidden, not closed, so the Manager reappears exactly where it was
         # once Setup (and the onboarding wizard it hands off to) exits (see
-        # _apply_status) -- an idle Manager window sitting behind Setup
+        # _apply_status), an idle Manager window sitting behind Setup
         # serves no purpose.
         self.window.hide()
         self._hidden_for_setup = True
@@ -314,7 +314,7 @@ class HomePage(PageBase):
         self.shortcut_button.setText("Recreate Shortcut")
         QMessageBox.critical(self, "Shortcut", f"Couldn't create the desktop shortcut:\n{message}")
 
-    # -- Status polling (called by ManagerWindow's shared timer) -------------------------------------------------
+    # == Status polling (called by ManagerWindow's shared timer) ==
 
     def poll_status(self) -> None:
         self._status_signals = run_in_background(self._check_status, self._apply_status)
@@ -373,7 +373,7 @@ class HomePage(PageBase):
         self.window.refresh_save_lock(avd_up, bridge_up)
 
     def confirm_close(self) -> bool:
-        """True if it's OK to close the main window -- warns first when the
+        """True if it's OK to close the main window, warns first when the
         VM/bridge are still running in the background, matching manager.py's
         _on_close."""
         if self.window.last_avd_up or self.window.last_bridge_up:
@@ -381,7 +381,7 @@ class HomePage(PageBase):
                 self.window,
                 "Community-iiSU-PC is still running",
                 "The Android VM and/or launch bridge are still running in the background.\n\n"
-                "Closing this window will NOT stop them -- use Stop first if you want to shut "
+                "Closing this window will NOT stop them, use Stop first if you want to shut "
                 "everything down.\n\nClose this window anyway?",
             )
             return reply == QMessageBox.StandardButton.Yes

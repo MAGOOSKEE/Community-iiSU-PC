@@ -3,7 +3,7 @@ The Qt rewrite of Community-iiSU-PC's GUI (see
 C:\\Users\\Jaemin\\.claude\\plans\\robust-giggling-thompson.md), replacing
 the flat, non-package bridge/*.py tkinter front ends.
 
-Puts the project root, bridge/, and installer/ on sys.path once here --
+Puts the project root, bridge/, and installer/ on sys.path once here,
 the same bare-import convention the old flat scripts already relied on
 (e.g. "import stub_apk", "from console_names import ...", "from
 shared.qt_theme import ..."), so every module under bridge/ui/ can use it

@@ -6,14 +6,14 @@ C:\\Users\\Jaemin\\.claude\\plans\\robust-giggling-thompson.md).
 Lets you pick your iiSU APK, then runs the whole first-time setup (SDK/AVD
 bootstrap, patching, install) on a background thread while streaming its
 progress into a log view. All the actual work lives in setup_wizard.py /
-sdk_bootstrap.py / patch_iisu.py -- this is purely a front end for it.
+sdk_bootstrap.py / patch_iisu.py, this is purely a front end for it.
 
 Stays its own separate window rather than a page inside the Manager, since
 a one-time install wizard is a different shape of problem than the
 settings the Manager's sidebar covers afterward.
 """
 
-import bridge.ui  # noqa: F401 -- import-time side effect: puts root/bridge/installer on sys.path
+import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 import subprocess
 import sys
 import threading
@@ -22,7 +22,7 @@ from pathlib import Path
 
 import setup_wizard
 
-# PySide6 is this file's own GUI toolkit -- has to be confirmed installed
+# PySide6 is this file's own GUI toolkit, has to be confirmed installed
 # before the imports below, which need it, not inside main().
 setup_wizard.ensure_pyside6()
 
@@ -62,7 +62,7 @@ class SetupWindow(QMainWindow):
         self._build_ui()
         self._autodetect_apk()
 
-    # -- UI -------------------------------------------------
+    # == UI ==
 
     def _build_ui(self) -> None:
         central = QWidget()
@@ -161,14 +161,14 @@ class SetupWindow(QMainWindow):
         if not self.running:
             self.start_button.setEnabled(True)
 
-    # -- Log handling -------------------------------------------------
+    # == Log handling ==
 
     def _append_log(self, text: str) -> None:
         self.log_text.moveCursor(self.log_text.textCursor().MoveOperation.End)
         self.log_text.insertPlainText(text)
         self.log_text.moveCursor(self.log_text.textCursor().MoveOperation.End)
 
-    # -- Setup run -------------------------------------------------
+    # == Setup run ==
 
     def _start_setup(self) -> None:
         if self.apk_path is None or self.running:
@@ -187,7 +187,7 @@ class SetupWindow(QMainWindow):
         error: Exception | None = None
         try:
             setup_wizard.run_setup(apk_path, on_stage=self._on_stage)
-        except Exception as e:  # noqa: BLE001 -- surfaced to the user below, not swallowed
+        except Exception as e:  # noqa: BLE001; surfaced to the user below, not swallowed
             error = e
             print(f"\n[setup] FAILED: {e}\n")
             print(traceback.format_exc())
@@ -196,7 +196,7 @@ class SetupWindow(QMainWindow):
         return error
 
     def _on_stage(self, label: str, index: int, total: int) -> None:
-        # Called from the worker thread -- emitting a Qt signal from here is
+        # Called from the worker thread, emitting a Qt signal from here is
         # safe the same way LogStreamRedirector's is; stage_changed's queued
         # connection delivers _apply_stage's call on the main thread.
         self.stage_changed.emit(label, index, total)
@@ -238,7 +238,7 @@ class SetupWindow(QMainWindow):
             self,
             "Enable Windows Hypervisor Platform?",
             f"{message}\n\nEnable Windows Hypervisor Platform now? This asks Windows for admin "
-            "permission and won't take effect until you restart your PC -- re-run Setup.bat "
+            "permission and won't take effect until you restart your PC, re-run Setup.bat "
             "after restarting.",
         )
         if answer == QMessageBox.StandardButton.Yes:
@@ -262,7 +262,7 @@ class SetupWindow(QMainWindow):
         """Runs right after a successful setup, unprompted. Launched with
         -m from the project root (not `cwd=BRIDGE_DIR` + a bare script
         path) so bridge.ui.onboarding_wizard's own package imports resolve
-        regardless of where this process happened to start from -- see
+        regardless of where this process happened to start from, see
         boot_overlay_qt.py's docstring for the exact bug this avoids."""
         self._onboarding_process = subprocess.Popen(
             [sys.executable, "-m", "bridge.ui.onboarding_wizard"], cwd=str(BRIDGE_DIR.parent)

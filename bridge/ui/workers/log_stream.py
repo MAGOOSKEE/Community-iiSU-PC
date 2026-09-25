@@ -14,7 +14,7 @@ class LogStreamRedirector(QObject):
     """A writable stream (assignable to sys.stdout) that emits text_written
     per write() call, so a background thread's plain print() calls can
     reach a Qt log widget without the printing code needing to know a GUI
-    exists -- same role as the old QueueWriter."""
+    exists, same role as the old QueueWriter."""
 
     text_written = Signal(str)
 

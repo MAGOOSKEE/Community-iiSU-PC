@@ -1,7 +1,7 @@
 """
 Step-by-step first-run onboarding: ROM directory, emulator search folders,
 display, and hotkeys, walked through one screen at a time with live
-feedback -- instead of dropping a fresh install straight into the
+feedback, instead of dropping a fresh install straight into the
 Manager's settings pages, meant for occasional later editing (still
 reachable afterward from its sidebar).
 
@@ -10,14 +10,14 @@ rewrite. Launched automatically by bridge/ui/setup_app.py right after
 setup finishes. Shares its emulator-mapping dialog with the Manager
 (bridge/ui/dialogs/emulator_dialog.py) and its data helpers (console-folder
 recognition, monitor detection, executable search) with the same modules
-the Manager uses, but keeps its own simpler step-flow UI -- a wizard is a
+the Manager uses, but keeps its own simpler step-flow UI, a wizard is a
 different shape of problem than a settings page.
 
 Architecturally simpler than the tkinter version it replaces: each step is
 built once as its own QWidget and kept alive in a QStackedWidget, rather
 than destroyed and rebuilt from scratch on every visit. That removes the
 old _capture_current_step() dance entirely (copying live widget state back
-into plain-Python fields before a rebuild could destroy it) -- a step's
+into plain-Python fields before a rebuild could destroy it), a step's
 own widgets are simply always there to read from directly.
 """
 
@@ -25,11 +25,11 @@ import json
 import sys
 from pathlib import Path
 
-import bridge.ui  # noqa: F401 -- import-time side effect: puts root/bridge/installer on sys.path
+import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
 import setup_wizard
 
-# PySide6 is this file's own GUI toolkit -- has to be confirmed installed
+# PySide6 is this file's own GUI toolkit, has to be confirmed installed
 # before the imports below, which need it. This file is also launched
 # standalone (as its own process, by bridge/ui/setup_app.py), so it can't
 # rely on some other entry point having already checked.
@@ -62,7 +62,7 @@ MODIFIER_NAMES = ["ctrl", "alt", "shift", "win"]
 STEP_TITLES = ["Welcome", "ROM Directory", "Emulator Folders", "Emulator Mappings", "Display", "Hotkeys", "Finish"]
 
 # Qt.Key -> the exact lowercase name bridge/launch_bridge.py's NAMED_KEY_VK
-# expects (originally a Tk keysym, lowercased) -- anything not listed here
+# expects (originally a Tk keysym, lowercased), anything not listed here
 # falls back to the pressed character itself, which already covers every
 # plain letter/digit key. Must stay in sync with launch_bridge.py's table;
 # that module is untouched by this rewrite, so the *stored* format can't
@@ -87,7 +87,7 @@ def save_config(config: dict) -> None:
 def read_avd_display(avd_name: str) -> dict:
     """The ground truth for whether display settings actually need
     (re)applying is the AVD's own config.ini, not config.json's "display"
-    block -- that block gets written from a generic template default
+    block, that block gets written from a generic template default
     regardless of whether it was ever really applied to the VM's hardware
     profile (see apply_display.py). Returns {} if it can't be read, which
     callers should treat as "assume changed" rather than "assume matches"."""
@@ -118,7 +118,7 @@ def _hotkey_signature(hotkey: dict) -> tuple[frozenset, str]:
 
 
 class KeyCaptureDialog(QDialog):
-    """Modal key capture -- upgrades the old tkinter approach (temporarily
+    """Modal key capture, upgrades the old tkinter approach (temporarily
     stealing the main window's own keypress binding while a button read
     "press any key...") to a real dialog: modal focus trapping and Esc-to-
     cancel are idiomatic here in a way they weren't for a plain button."""
@@ -142,7 +142,7 @@ class KeyCaptureDialog(QDialog):
             self.reject()
             return
         if key in _MODIFIER_KEYS:
-            return  # keep listening -- a bare modifier press isn't a usable hotkey key
+            return  # keep listening, a bare modifier press isn't a usable hotkey key
         if key in _NAMED_KEYS:
             self.captured_key = _NAMED_KEYS[key]
         else:
@@ -153,7 +153,7 @@ class KeyCaptureDialog(QDialog):
 
 
 class HotkeyEditor(QWidget):
-    """One "modifiers + key" row (quit hotkey, shutdown hotkey) -- used
+    """One "modifiers + key" row (quit hotkey, shutdown hotkey), used
     twice by HotkeysStep, and reused as-is by whatever Manager Advanced
     page eventually replaces bridge/manager.py's identical hotkey editor."""
 
@@ -322,7 +322,7 @@ class RomsStep(QWidget):
         if not raw:
             return False, "Pick a ROM folder to continue."
         if not Path(raw).is_dir():
-            return False, "That folder doesn't exist yet -- create it or pick a different one."
+            return False, "That folder doesn't exist yet, create it or pick a different one."
         return True, ""
 
 
@@ -341,7 +341,7 @@ class EmulatorFoldersStep(QWidget):
 
         subtitle = QLabel(
             "Community-iiSU-PC searches these folders for the emulators it knows about "
-            "(DuckStation, Dolphin, RetroArch, and more) -- install those yourself first "
+            "(DuckStation, Dolphin, RetroArch, and more), install those yourself first "
             "if you haven't already, this project doesn't bundle them."
         )
         subtitle.setWordWrap(True)
@@ -425,7 +425,7 @@ class EmulatorFoldersStep(QWidget):
         total = len(self.scan_results)
         lines = [f"Found {len(found_labels)} of {total} known emulators: {', '.join(found_labels) or '(none yet)'}"]
         if missing_labels:
-            lines.append(f"Not found yet: {', '.join(missing_labels)} -- install any of these and Community-iiSU-PC will pick them up automatically.")
+            lines.append(f"Not found yet: {', '.join(missing_labels)}, install any of these and Community-iiSU-PC will pick them up automatically.")
         self.status_label.setText("\n".join(lines))
         self.status_label.setStyleSheet(f"color: {GREEN};" if found_labels else "")
 
@@ -444,7 +444,7 @@ class EmulatorMappingsStep(QWidget):
 
         subtitle = QLabel(
             "Maps each console's Android package to the real PC emulator that runs it. "
-            "The defaults above already cover most installs -- edit here only if you're "
+            "The defaults above already cover most installs, edit here only if you're "
             "using an unusual fork with a different executable name (e.g. a build of "
             "Azahar that ships as azahar.exe instead of citra-qt.exe)."
         )
@@ -503,7 +503,7 @@ class EmulatorMappingsStep(QWidget):
             QMessageBox.information(
                 self, "Can't edit here",
                 "This entry maps a different executable per ROM file extension "
-                "(see shared/emulator_defaults.py) -- editing it as one flat "
+                "(see shared/emulator_defaults.py), editing it as one flat "
                 "executable/flags pair isn't supported here. Edit config.json "
                 "directly if you need to change it.",
             )
@@ -523,7 +523,7 @@ class EmulatorMappingsStep(QWidget):
         """"by_extension" entries (RetroArch, which maps a different real
         PC emulator per ROM extension rather than one fixed exe) show a
         human-readable summary in the tree (see describe_profile), not the
-        real underlying data -- always keep the original entry verbatim
+        real underlying data, always keep the original entry verbatim
         rather than reconstructing it from that summary text. The edit
         dialog already refuses to open on these, so the only way one of
         these rows changes at all is via Remove."""
@@ -694,7 +694,7 @@ class FinishStep(QWidget):
         # setParent(None), not deleteLater(): deleteLater() only schedules
         # deletion for the next event-loop pass, so a widget it "removed"
         # was still being painted (overlapping the freshly added ones) for
-        # however long that took -- visible, confirmed live, whenever
+        # however long that took, visible, confirmed live, whenever
         # refresh() ran more than once before Qt caught up.
         while self._layout.count():
             item = self._layout.takeAt(0)
@@ -770,7 +770,7 @@ class OnboardingWizard(QMainWindow):
         self.display_step._autodetect(silent=True)
         self._show_step(0)
 
-    # -- Chrome -------------------------------------------------
+    # == Chrome ==
 
     def _build_chrome(self) -> None:
         central = QWidget()
@@ -822,7 +822,7 @@ class OnboardingWizard(QMainWindow):
         nav.addWidget(self.next_button)
         root.addLayout(nav)
 
-    # -- Step machinery -------------------------------------------------
+    # == Step machinery ==
 
     def _show_step(self, index: int) -> None:
         self.step_index = index
@@ -861,18 +861,18 @@ class OnboardingWizard(QMainWindow):
             return
         self._show_step(self.step_index - 1)
 
-    # -- Finish -------------------------------------------------
+    # == Finish ==
 
     def _missing_emulators_warning(self) -> str:
         """Surfaced here, not just on the Emulator Folders step itself, so
         it's the last thing seen before saving rather than something only
-        visible if you happen to scroll back -- a console mapped to an
+        visible if you happen to scroll back, a console mapped to an
         emulator that was never found here will silently fail to launch
         later with no obvious link back to this step."""
         results = self.folders_step.scan_results
         if results is None:
             return (
-                "You haven't scanned for installed PC emulators yet -- go back to "
+                "You haven't scanned for installed PC emulators yet, go back to "
                 "\"Emulator Folders\" and click \"Scan for installed emulators\" to confirm "
                 "they'll actually be found before finishing."
             )
@@ -880,12 +880,12 @@ class OnboardingWizard(QMainWindow):
         if not missing:
             return ""
         return (
-            f"Still not found: {', '.join(missing)} -- games mapped to these won't launch until "
+            f"Still not found: {', '.join(missing)}, games mapped to these won't launch until "
             "they're installed and you rescan (back on \"Emulator Folders\")."
         )
 
     def _summary_lines(self) -> list[str]:
-        """Only what this pass through the wizard actually changed --
+        """Only what this pass through the wizard actually changed,
         listing every setting regardless of whether it was touched just
         buries the handful that matter in restating the defaults back."""
         lines = []
@@ -918,7 +918,7 @@ class OnboardingWizard(QMainWindow):
         if _hotkey_signature(self.hotkeys_step.shutdown_editor.read_hotkey()) != _hotkey_signature(self._original_shutdown_hotkey):
             lines.append(f"Shutdown hotkey: {self.hotkeys_step.shutdown_editor.describe()}")
 
-        return lines or ["Nothing changed from your existing configuration -- it'll be kept as-is."]
+        return lines or ["Nothing changed from your existing configuration, it'll be kept as-is."]
 
     def _display_changed(self) -> bool:
         current = {
@@ -965,7 +965,7 @@ class OnboardingWizard(QMainWindow):
         self.back_button.setEnabled(False)
         self.next_button.setEnabled(False)
 
-        # Writes straight into the AVD's own config.ini (no boot needed --
+        # Writes straight into the AVD's own config.ini (no boot needed,
         # see _write_avd_display_profile) rather than cold-booting the VM
         # right here to "apply" it: this AVD always cold-boots on its very
         # first real start regardless, so the setting is already going to
@@ -1000,7 +1000,7 @@ class OnboardingWizard(QMainWindow):
         try:
             apply_display.update_config_ini(config_ini, config["display"])
         except OSError as e:
-            print(f"[onboarding] couldn't write the AVD's display profile ({e}) -- it'll get applied next time Display settings are saved")
+            print(f"[onboarding] couldn't write the AVD's display profile ({e}), it'll get applied next time Display settings are saved")
 
 
 def main() -> None:

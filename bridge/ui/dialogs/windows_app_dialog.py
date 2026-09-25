@@ -1,9 +1,9 @@
 """Add/edit a single Windows app mapping (executable, Steam game, or
-custom URI) -- replaces manager.py's _windows_app_dialog() Toplevel.
+custom URI), replaces manager.py's _windows_app_dialog() Toplevel.
 
 Simplified from the original in one respect: Steam Game selection is a
 "Choose from installed library..." button opening SteamLibraryDialog
-rather than an inline live-search list with fetched box-art thumbnails --
+rather than an inline live-search list with fetched box-art thumbnails,
 same end result (an App ID gets filled in), without the extra async
 image-fetching machinery. Can grow inline search back later if wanted."""
 
@@ -65,7 +65,7 @@ class WindowsAppDialog(QDialog):
         self.stack = QStackedWidget()
         layout.addWidget(self.stack)
 
-        # -- Executable page --
+        # == Executable page ==
         exe_page = QWidget()
         exe_layout = QGridLayout(exe_page)
         exe_layout.addWidget(QLabel("Executable:"), 0, 0)
@@ -88,7 +88,7 @@ class WindowsAppDialog(QDialog):
         exe_layout.addWidget(work_browse, 2, 2)
         self.stack.addWidget(exe_page)
 
-        # -- Steam Game page --
+        # == Steam Game page ==
         steam_page = QWidget()
         steam_layout = QGridLayout(steam_page)
         steam_layout.addWidget(QLabel("Steam App ID:"), 0, 0)
@@ -101,7 +101,7 @@ class WindowsAppDialog(QDialog):
         steam_layout.addWidget(pick_button, 1, 0, 1, 2)
         self.stack.addWidget(steam_page)
 
-        # -- Custom URI page --
+        # == Custom URI page ==
         uri_page = QWidget()
         uri_layout = QGridLayout(uri_page)
         uri_layout.addWidget(QLabel("URI:"), 0, 0)

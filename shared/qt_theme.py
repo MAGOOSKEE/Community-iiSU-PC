@@ -1,6 +1,6 @@
 """
 Shared dark-UI theme for Community-iiSU-PC's PySide6 front ends (replaces
-shared/theme.py's tkinter/ttk version during the Qt rewrite -- see
+shared/theme.py's tkinter/ttk version during the Qt rewrite, see
 C:\\Users\\Jaemin\\.claude\\plans\\robust-giggling-thompson.md).
 
 Same palette and font roles as the tkinter theme (this is a brand carried
@@ -10,7 +10,7 @@ didn't: real rounded corners, a native gradient brush instead of a strip of
 dropdown popups, which stayed native/unstyled under ttk on Windows).
 
 The palette echoes iiSU's own in-app look (dark background, tile-style
-panels, its cyan-to-purple gradient) -- colors and layout only, not any of
+panels, its cyan-to-purple gradient), colors and layout only, not any of
 iiSU's actual asset files (fonts, icons), since those are iiSU's own
 copyrighted assets and not ours to include.
 """
@@ -49,7 +49,7 @@ FONT_FAMILY_MONO = "Consolas"
 
 
 class Fonts:
-    """Factory methods, not module-level QFont instances -- constructing a
+    """Factory methods, not module-level QFont instances, constructing a
     QFont before a QGuiApplication exists is unreliable, so these are only
     ever called after the app is up."""
 
@@ -73,7 +73,7 @@ class Fonts:
 def gradient_brush(width: float, height: float = 0.0) -> QLinearGradient:
     """The cyan-to-purple accent gradient as a real QLinearGradient, for
     anything painted directly (GradientDivider, a card's accent edge, a
-    hover glow) -- horizontal by default (height=0), matching every place
+    hover glow), horizontal by default (height=0), matching every place
     this brand gradient is actually used today."""
     gradient = QLinearGradient(0, 0, width, height)
     n = len(GRADIENT_STOPS)
@@ -85,7 +85,7 @@ def gradient_brush(width: float, height: float = 0.0) -> QLinearGradient:
 def build_palette() -> QPalette:
     """Base colors QPalette can express directly; anything QPalette can't
     (rounded corners, gradients, hover-state transitions, the dropdown
-    popup) lives in STYLESHEET instead -- the two-layer approach avoids
+    popup) lives in STYLESHEET instead, the two-layer approach avoids
     fighting Qt's style engine, rather than trying to force everything
     through one or the other."""
     palette = QPalette()
@@ -109,9 +109,9 @@ def build_palette() -> QPalette:
 # Object/dynamic-property names the QSS below keys off of, so page code
 # reads "Card()" / button.setProperty("dirty", True) rather than sprinkling
 # raw stylesheet strings through every page file:
-#   QFrame#Card                              -- shared/widgets/card.py
-#   QPushButton#accent / #ghost               -- primary / secondary actions
-#   QPushButton[dirty="true"]                 -- amber "unsaved changes" Save button
+#   QFrame#Card                             , shared/widgets/card.py
+#   QPushButton#accent / #ghost              , primary / secondary actions
+#   QPushButton[dirty="true"]                , amber "unsaved changes" Save button
 STYLESHEET = f"""
 QWidget {{
     color: {TEXT};
@@ -371,7 +371,7 @@ QPushButton#SubnavPill:checked {{
 
 def apply_theme(app) -> None:
     """Applies the palette, stylesheet, and default body font to a
-    QApplication -- called once at each entry point's startup, mirroring
+    QApplication, called once at each entry point's startup, mirroring
     the tkinter theme's apply_ttk_styles(style) call."""
     app.setStyle("Fusion")
     app.setPalette(build_palette())

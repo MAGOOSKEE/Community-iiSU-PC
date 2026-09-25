@@ -23,7 +23,7 @@ java -version >nul 2>nul
 if errorlevel 1 (
     echo.
     echo Java was not found on PATH.
-    echo This installer needs a JDK ^(for apktool and key generation^) -- install one,
+    echo This installer needs a JDK ^(for apktool and key generation^), install one,
     echo e.g. Eclipse Temurin: https://adoptium.net/
     echo Make sure java and keytool are on PATH afterward, then run this again.
     echo.

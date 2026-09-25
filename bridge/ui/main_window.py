@@ -1,5 +1,5 @@
 """The Manager's top-level window: sidebar + page container + shared Save
-bar -- replaces manager.py's Manager(tk.Tk) chrome (_build_ui/_build_
+bar, replaces manager.py's Manager(tk.Tk) chrome (_build_ui/_build_
 sidebar/_build_group_shell/_show_page/_show_subpage/_update_save_bar, plus
 its config-reload and status-polling glue). Individual pages are ported one
 at a time (see the plan); anything not yet ported shows a plain "coming
@@ -7,12 +7,12 @@ soon" placeholder so the app stays runnable throughout the rewrite.
 
 Page-specific side effects (refreshing a page's own data when it becomes
 visible) go through an `on_shown()` duck-typed hook instead of manager.py's
-hardcoded _trigger_page_side_effects elif chain -- each newly-ported page
+hardcoded _trigger_page_side_effects elif chain, each newly-ported page
 just implements the method it needs, nothing here has to know its name in
 advance.
 """
 
-import bridge.ui  # noqa: F401 -- import-time side effect: puts root/bridge/installer on sys.path
+import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QIcon
@@ -53,7 +53,7 @@ SAVE_BAR_PAGES = {"roms", "emulators", "settings", "advanced"}
 
 class _ComingSoonPage(QWidget):
     """Placeholder for a nav destination whose page hasn't been ported to
-    Qt yet -- keeps every nav entry clickable throughout the rewrite
+    Qt yet, keeps every nav entry clickable throughout the rewrite
     instead of hiding unported destinations."""
 
     def __init__(self, label: str, parent=None):
@@ -63,7 +63,7 @@ class _ComingSoonPage(QWidget):
         title = QLabel(label)
         title.setFont(Fonts.title())
         layout.addWidget(title)
-        note = QLabel("Not yet ported to the new interface -- coming soon.")
+        note = QLabel("Not yet ported to the new interface, coming soon.")
         note.setStyleSheet(f"color: {TEXT_DIM};")
         layout.addWidget(note)
         layout.addStretch(1)
@@ -152,7 +152,7 @@ class ManagerWindow(QMainWindow):
                 self.register_subpage(sub_key, _ComingSoonPage(sub_label))
 
         # Ported settings pages replace their placeholders here as each one
-        # is written -- roms/emulators share one Save action and one dirty
+        # is written, roms/emulators share one Save action and one dirty
         # flag (see _gather_settings), matching manager.py's original
         # single-config-write-covers-four-pages behavior.
         self.roms_page = RomsPage(self)
@@ -192,7 +192,7 @@ class ManagerWindow(QMainWindow):
         self._dirty_timer.timeout.connect(self._poll_settings_dirty)
         self._dirty_timer.start(500)
 
-    # -- Style / icon -------------------------------------------------
+    # == Style / icon ==
 
     def _apply_window_icon(self) -> None:
         import create_shortcut
@@ -205,7 +205,7 @@ class ManagerWindow(QMainWindow):
         if icon_path.is_file():
             self.setWindowIcon(QIcon(str(icon_path)))
 
-    # -- Config state -------------------------------------------------
+    # == Config state ==
 
     def _reload_config(self) -> None:
         if CONFIG_PATH.is_file():
@@ -232,7 +232,7 @@ class ManagerWindow(QMainWindow):
             return False
 
     def rebuild_settings_pages(self) -> None:
-        """Placeholder for manager.py's _build_settings_pages -- once the
+        """Placeholder for manager.py's _build_settings_pages, once the
         settings/ROMs/emulators pages are ported, each one registers a
         rebuild-from-config_data callback here instead of this method
         knowing their internals directly."""
@@ -240,13 +240,13 @@ class ManagerWindow(QMainWindow):
             handler()
 
     def _gather_settings(self, silent: bool = False) -> dict | None:
-        """Builds the settings dict exactly as Save would write it -- ports
+        """Builds the settings dict exactly as Save would write it, ports
         manager.py's _gather_settings, but starting from a copy of the
         last-saved config_data rather than reading every field off self:
         only pages that exist yet override their own keys, so this grows
         as more settings pages get ported without touching the ones that
         already work. silent=True (the dirty-check timer) swallows invalid
-        input instead of popping up a message box -- a field being mid-
+        input instead of popping up a message box, a field being mid-
         edit shouldn't interrupt typing, it just reads as dirty until it's
         valid and saved."""
         settings = dict(self.config_data)
@@ -308,7 +308,7 @@ class ManagerWindow(QMainWindow):
 
     def _write_avd_display_profile(self, config: dict) -> None:
         """Writes the chosen resolution/density straight into the AVD's own
-        config.ini -- the file emulator.exe actually reads at boot --
+        config.ini, the file emulator.exe actually reads at boot,
         without booting anything, same as onboarding_wizard.py's own copy
         of this. Save is locked out while the VM is running (see
         refresh_save_lock), so this only ever runs while it's stopped.
@@ -326,14 +326,14 @@ class ManagerWindow(QMainWindow):
         except OSError as e:
             print(f"[manager] couldn't write the AVD's display profile ({e})")
 
-    # -- Chrome: sidebar + page container -------------------------------------------------
+    # == Chrome: sidebar + page container ==
 
     def _register_page(self, key: str, widget: QWidget) -> None:
         self.pages[key] = widget
         self.page_stack.addWidget(widget)
 
     def register_subpage(self, sub_key: str, widget: QWidget) -> None:
-        """Swaps a placeholder for a real ported page -- called by whatever
+        """Swaps a placeholder for a real ported page, called by whatever
         sets up that page (currently nothing; each future page-porting
         step will call this once its widget exists)."""
         stack = self.subpage_stacks[self._group_for_sub(sub_key)]
@@ -445,7 +445,7 @@ class ManagerWindow(QMainWindow):
         if callable(on_shown):
             on_shown()
 
-    # -- Save bar / dirty tracking -------------------------------------------------
+    # == Save bar / dirty tracking ==
 
     def _visible_save_key(self) -> str | None:
         return self.current_subpage if self.current_page in NAV_GROUPS else self.current_page
@@ -489,7 +489,7 @@ class ManagerWindow(QMainWindow):
         self.rebuild_settings_pages()
         return True
 
-    # -- Save/lock (called by HomePage's status poll) -------------------------------------------------
+    # == Save/lock (called by HomePage's status poll) ==
 
     def refresh_save_lock(self, avd_up: bool | None, bridge_up: bool | None) -> None:
         running = bool(avd_up) or bool(bridge_up)
@@ -501,7 +501,7 @@ class ManagerWindow(QMainWindow):
             self.save_status_label.setText("")
             self.save_status_label.setStyleSheet(f"color: {GREEN};")
 
-    # -- Close -------------------------------------------------
+    # == Close ==
 
     def closeEvent(self, event) -> None:
         if self.home_page.confirm_close():

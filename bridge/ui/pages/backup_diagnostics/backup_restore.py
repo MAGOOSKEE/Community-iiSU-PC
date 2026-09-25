@@ -1,7 +1,7 @@
-"""Backup & Restore page -- ports manager.py's _build_backup_restore_page.
+"""Backup & Restore page, ports manager.py's _build_backup_restore_page.
 Backed by bridge/services/backup_service.py."""
 
-import bridge.ui  # noqa: F401 -- import-time side effect: puts root/bridge/installer on sys.path
+import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
 from pathlib import Path
 

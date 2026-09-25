@@ -1,7 +1,7 @@
 name: Tests
 
 # windows-latest, not ubuntu: bridge/winapi.py (and everything that
-# imports it -- launch_bridge.py, manager.py, onboarding_wizard.py, ...)
+# imports it, launch_bridge.py, manager.py, onboarding_wizard.py, ...)
 # uses ctypes.windll at import time, so this project only imports
 # cleanly on Windows in the first place, same as it only ever runs on
 # Windows.

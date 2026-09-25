@@ -4,13 +4,13 @@ AVD), plus anything else standing in the way of a clean slate. This is
 what runs when you click Stop on manager.py's Home page.
 
 Tries a graceful `adb emu kill` first and gives qemu a few seconds to exit
-on its own -- a clean exit is what lets it release its own lock files
+on its own, a clean exit is what lets it release its own lock files
 (hardware-qemu.ini.lock, multiinstance.lock) under the portable AVD's own
 directory (android-sdk-portable/avd-home/<name>.avd/, see portable_sdk.py).
 Skipping straight to a force-kill leaves those locks behind and the *next*
 start then fails immediately with "emulator.exe exited early (code 1)", so
 force-taskkill is only a fallback for whatever the graceful path doesn't
-manage to stop in time -- and even then, any leftover lock files are swept
+manage to stop in time, and even then, any leftover lock files are swept
 away afterward so the next start isn't blocked by them.
 
 Also stops the adb server (it's a persistent background process that
@@ -74,7 +74,7 @@ def kill_by_cmdline_match(needle: str) -> None:
     PowerShell/WMI (wmic itself is deprecated/removed on newer Windows
     builds). This is the fallback for launch_bridge.py that bridge_pid
     alone can't cover: start_iisu_pc.py only ever records bridge_pid when
-    *it* started the bridge process -- if it instead found one already
+    *it* started the bridge process, if it instead found one already
     running (port already open, e.g. left over from a previous session
     that didn't get a clean Stop) it skips straight past that assignment,
     so the freshly-written state file has no bridge_pid at all and this
@@ -93,7 +93,7 @@ def kill_by_cmdline_match(needle: str) -> None:
 
 def _remove_path_with_retry(path: Path, attempts: int = 5, delay: float = 1.0) -> None:
     """A process that just got taskkilled doesn't always release its file
-    handle the instant it exits -- Windows can hold a lock file for a
+    handle the instant it exits, Windows can hold a lock file for a
     moment longer, which raises PermissionError if removal is attempted
     immediately. Retrying briefly avoids that for what's normally a
     sub-second timing gap, without ever blocking indefinitely if something
@@ -107,7 +107,7 @@ def _remove_path_with_retry(path: Path, attempts: int = 5, delay: float = 1.0) -
             return
         except OSError:
             if attempt == attempts - 1:
-                print(f"[stop] couldn't remove {path.name}, leaving it -- the next start will retry")
+                print(f"[stop] couldn't remove {path.name}, leaving it, the next start will retry")
                 return
             time.sleep(delay)
 
@@ -153,7 +153,7 @@ def main() -> None:
     # taskkill by image name alone can't safely target "emulator.exe" or
     # "qemu-system-x86_64.exe" without also risking a real Android Studio
     # emulator instance someone has open for unrelated app development, or
-    # another qemu-based tool entirely (e.g. WSL2) -- every process this
+    # another qemu-based tool entirely (e.g. WSL2), every process this
     # project launches runs out of android-sdk-portable/, which is a
     # distinctive enough path to scope the sweep to just this AVD.
     print("[stop] sweeping for any orphaned launch_bridge.py process...")
@@ -163,7 +163,7 @@ def main() -> None:
 
     # adb.exe runs as a persistent background server (any `adb` command
     # spawns it if it isn't already running) and never exits on its own
-    # just because the AVD it was talking to did -- left alone, it stays
+    # just because the AVD it was talking to did, left alone, it stays
     # running indefinitely after every single Stop. `adb kill-server` is
     # the documented graceful shutdown for it, unlike taskkill against the
     # other two processes above.

@@ -1,5 +1,5 @@
 """
-Unit tests for bridge/services/windows_apps_service.py -- the Windows Apps
+Unit tests for bridge/services/windows_apps_service.py, the Windows Apps
 page's non-UI logic, extracted ahead of porting that page to Qt (see the
 Qt rewrite plan: the two largest pages get their service layer extracted
 and tested before their UI is written).

@@ -10,7 +10,7 @@ name: Build Installer
 # takes several minutes (JDK setup, two runtime downloads, an LZMA
 # compile of the whole bundle) and isn't relevant to every push the way
 # the unit tests are, so it only runs when someone actually wants an
-# installer built -- a version tag, or a manual dispatch to try one out
+# installer built, a version tag, or a manual dispatch to try one out
 # before cutting a real release.
 on:
   push:
@@ -34,7 +34,7 @@ jobs:
           python-version: "3.11"
 
       # Temurin 21, matching the JDK this was developed and verified
-      # against (see installer/build_jre.py) -- any recent JDK works,
+      # against (see installer/build_jre.py), any recent JDK works,
       # jlink's module detection is mechanical (jdeps against
       # apktool.jar), not tied to a specific vendor/version.
       - uses: actions/setup-java@v4
@@ -65,7 +65,7 @@ jobs:
           path: dist/installer/*.exe
           if-no-files-found: error
 
-      # Only on an actual version tag -- workflow_dispatch runs (used to
+      # Only on an actual version tag, workflow_dispatch runs (used to
       # try a build without cutting a release) stop at the artifact
       # upload above.
       - name: Create GitHub release

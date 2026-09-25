@@ -1,4 +1,4 @@
-"""Smoke tests for bridge/services/diagnostics_service.py -- most of what
+"""Smoke tests for bridge/services/diagnostics_service.py, most of what
 it does is genuinely environment-dependent (is ADB present, is the bridge
 listening, is Steam installed), so these mainly confirm it runs cleanly
 and returns well-formed results rather than asserting exact findings."""

@@ -1,11 +1,11 @@
-"""Console Games page -- ports manager.py's _build_games_console_page.
+"""Console Games page, ports manager.py's _build_games_console_page.
 Backed entirely by sync_library.py (already non-GUI and tested) and
-console_names.py -- no new service module needed, this page just wires
+console_names.py, no new service module needed, this page just wires
 those straight to a tree."""
 
 from pathlib import Path, PurePosixPath
 
-import bridge.ui  # noqa: F401 -- import-time side effect: puts root/bridge/installer on sys.path
+import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
@@ -40,7 +40,7 @@ class ConsoleBrowserPage(PageBase):
 
         self.add_header(
             "Console Games",
-            "Every game detected in your ROM library, grouped the same way syncing to the AVD does -- "
+            "Every game detected in your ROM library, grouped the same way syncing to the AVD does, "
             "a multi-disc game backed by an .m3u/.cue shows up here as one entry, not one per disc.",
         )
 
@@ -74,7 +74,7 @@ class ConsoleBrowserPage(PageBase):
         action_row_layout.addWidget(rescan_button)
         action_row_layout.addStretch(1)
         # Left-click never reveals the bulk actions themselves (see
-        # _update_selection_hint) -- this is purely a status/discoverability
+        # _update_selection_hint), this is purely a status/discoverability
         # line pointing at right-click, not a button.
         self.selection_hint = QLabel("Select rows, then right-click for bulk actions.")
         self.selection_hint.setStyleSheet(f"color: {TEXT_DIM};")
@@ -82,7 +82,7 @@ class ConsoleBrowserPage(PageBase):
         self.body_layout.addWidget(action_row)
 
         note = QLabel(
-            "Multi-disc playlists sync as one entry by default -- right-click a selection for the "
+            "Multi-disc playlists sync as one entry by default, right-click a selection for the "
             "\"Keep Discs Separate\"/\"Merge Discs Together\" options (details in the project README)."
         )
         note.setWordWrap(True)
@@ -163,7 +163,7 @@ class ConsoleBrowserPage(PageBase):
         game_count = len({(r["shortname"], r["name"]) for r in rows if not r["hidden_from_iisu"]})
         status = f"{game_count} game(s) across {len(consoles)} console(s)"
         if skipped:
-            status += f" -- {len(skipped)} folder(s) not recognized as a console"
+            status += f", {len(skipped)} folder(s) not recognized as a console"
         return rows, status, False
 
     def _apply_scan_result(self, result) -> None:
@@ -217,12 +217,12 @@ class ConsoleBrowserPage(PageBase):
         return [row for row in self._rows if row["exception_key"] in selected_keys]
 
     def _update_selection_hint(self) -> None:
-        """Status text only -- never a button. Left-clicking to select rows
+        """Status text only, never a button. Left-clicking to select rows
         must not surface the bulk actions themselves; right-click is the
         only path to them (see _show_context_menu)."""
         selected = self._selected_rows()
         if selected:
-            self.selection_hint.setText(f"{len(selected)} selected -- right-click for bulk actions.")
+            self.selection_hint.setText(f"{len(selected)} selected, right-click for bulk actions.")
         else:
             self.selection_hint.setText("Select rows, then right-click for bulk actions.")
 
@@ -231,7 +231,7 @@ class ConsoleBrowserPage(PageBase):
         if item is None:
             return
         # Right-clicking an item outside the current selection replaces
-        # it, matching how Explorer/most list UIs treat a right-click --
+        # it, matching how Explorer/most list UIs treat a right-click,
         # right-clicking *inside* an existing multi-selection acts on the
         # whole selection instead of collapsing it to just the one row.
         if item not in self.tree.selectedItems():

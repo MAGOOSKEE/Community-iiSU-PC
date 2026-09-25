@@ -1,13 +1,13 @@
-"""Browse iiDB Media -- search, preview, collect, and install iiDB media
+"""Browse iiDB Media, search, preview, collect, and install iiDB media
 through MediaBridge. Replaces manager.py's _iidb_open_browser() Toplevel.
 
 Non-modal (shown via show(), not exec()) so it can stay open alongside
-the rest of the Manager, matching the original's singleton Toplevel --
+the rest of the Manager, matching the original's singleton Toplevel,
 MediaLibraryPage holds one instance and re-raises it on a second click
 instead of creating a duplicate.
 
 Category filtering is a QComboBox here instead of the original's
-regenerated row of pill buttons -- same information, simpler to keep in
+regenerated row of pill buttons, same information, simpler to keep in
 sync when a new game's categories are loaded."""
 
 from pathlib import Path
@@ -161,7 +161,7 @@ class IidbBrowserDialog(QDialog):
         self._stop_audio()
         super().closeEvent(event)
 
-    # -- Search -------------------------------------------------
+    # == Search ==
 
     def _search(self) -> None:
         query = self.search_edit.text().strip()
@@ -236,7 +236,7 @@ class IidbBrowserDialog(QDialog):
             item = QTreeWidgetItem([svc.type_label(asset.get("type", "")), resolution, human_size(asset.get("size")), asset.get("filename") or str(asset.get("id") or "")])
             self.assets_tree.addTopLevelItem(item)
 
-    # -- Asset preview -------------------------------------------------
+    # == Asset preview ==
 
     def _on_asset_selected(self) -> None:
         items = self.assets_tree.selectedItems()
@@ -297,7 +297,7 @@ class IidbBrowserDialog(QDialog):
         self.preview_label.setText("Preview unavailable")
         self.status_label.setText("Preview failed: " + message)
 
-    # -- Cart -------------------------------------------------
+    # == Cart ==
 
     def _refresh_cart_button(self) -> None:
         if not self._selected_asset:
@@ -329,7 +329,7 @@ class IidbBrowserDialog(QDialog):
         self.cart_button.setText(f"Cart ({len(self._cart)})")
         self._refresh_cart_button()
 
-    # -- Soundbite preview -------------------------------------------------
+    # == Soundbite preview ==
 
     def _play_selected_soundbite(self) -> None:
         asset = self._selected_asset

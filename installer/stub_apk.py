@@ -4,20 +4,20 @@ declare a specific package name and nothing else, so iiSU's own
 installed-package check resolves a console's chosen emulator to a package
 our patched LaunchBridge already knows how to intercept (see
 shared/emulator_defaults.py for why, and which packages this covers by
-default). The stub is never actually launched in normal operation -- our
+default). The stub is never actually launched in normal operation, our
 patch redirects to the real PC emulator before Android would ever start
 it, so its one Activity does nothing but immediately finish() if it ever
 somehow is.
 
 Uses the same apktool.jar already bundled for patch_iisu.py to compile
 the manifest and assemble the (identical, hand-written) smali for every
-stub -- only the manifest's declared package/label differ between builds,
+stub, only the manifest's declared package/label differ between builds,
 never the code. Needs zipalign/apksigner from Android's build-tools;
 unlike patch_iisu.py's one-time use of the installer's own SDK copy
 (deleted after setup, see setup_wizard.py's cleanup_installer_sdk()),
 stub building can happen any time from the configurator, so a copy of
 build-tools is kept permanently under installer/tools/ instead (see
-preserve_build_tools()) -- ~137MB, small next to the ~3.5GB that actually
+preserve_build_tools()), ~137MB, small next to the ~3.5GB that actually
 does get cleaned up.
 """
 
@@ -34,7 +34,7 @@ from jre_env import java_subprocess_env
 INSTALLER_DIR = Path(__file__).parent
 
 sys.path.insert(0, str(INSTALLER_DIR.parent / "bridge"))
-import portable_sdk  # noqa: E402,F401 -- imported for its import-time PATH fix (adb), not used directly here
+import portable_sdk  # noqa: E402,F401, imported for its import-time PATH fix (adb), not used directly here
 
 TEMPLATE_DIR = INSTALLER_DIR / "stub_apk_template"
 APKTOOL_JAR = INSTALLER_DIR / "tools" / "apktool.jar"
@@ -67,7 +67,7 @@ def preserve_build_tools(source_sdk_root: Path) -> None:
     """Copies build-tools out of the installer's temporary SDK copy before
     cleanup_installer_sdk() deletes it. Safe to call even if build-tools
     are already preserved or the source is gone (e.g. re-running this
-    against an install that already cleaned up) -- just a no-op then."""
+    against an install that already cleaned up), just a no-op then."""
     if build_tools_available():
         return
     source = source_sdk_root / "build-tools" / BUILD_TOOLS_VERSION
@@ -118,7 +118,7 @@ def _run(args: list[str], **kwargs) -> subprocess.CompletedProcess:
 
 
 def _manifest_xml(package_name: str, app_label: str) -> str:
-    # Full XML-attribute escaping (&/</>/"), not just quotes -- app_label is
+    # Full XML-attribute escaping (&/</>/"), not just quotes, app_label is
     # only ever one of this project's own hardcoded labels today, but a
     # future one containing e.g. "&" would otherwise produce a manifest
     # apktool can't parse.
@@ -132,7 +132,7 @@ def _manifest_xml(package_name: str, app_label: str) -> str:
         # picker builds its list from a plain PackageManager query
         # (ACTION_MAIN + CATEGORY_LAUNCHER, MATCH_ALL; verified by
         # decompiling iiSU's own APK) that this manifest already satisfies
-        # with no icon at all -- a real icon was tried once (a mipmap
+        # with no icon at all, a real icon was tried once (a mipmap
         # resource, see git history) but broke every stub install outright
         # on API 30+ system images: PackageManager rejects any APK there
         # whose resources.arsc isn't stored uncompressed and 4-byte
@@ -154,11 +154,11 @@ def _manifest_xml(package_name: str, app_label: str) -> str:
 def build_stub_apk(package_name: str, app_label: str, output_apk: Path) -> None:
     """Builds one signed, installable stub APK declaring package_name and
     nothing else. The manifest is the only thing that changes between
-    stubs -- the smali (a single Activity that finish()es immediately) is
+    stubs, the smali (a single Activity that finish()es immediately) is
     identical every time, copied from stub_apk_template/ verbatim."""
     if not build_tools_available():
         raise RuntimeError(
-            f"build-tools not found under {BUILD_TOOLS_DIR} -- re-run Setup.bat once to restore them "
+            f"build-tools not found under {BUILD_TOOLS_DIR}, re-run Setup.bat once to restore them "
             "(preserve_build_tools() keeps a permanent copy going forward)."
         )
 
@@ -176,7 +176,7 @@ def build_stub_apk(package_name: str, app_label: str, output_apk: Path) -> None:
 
     keystore, keystore_pass = ensure_keystore()
     output_apk.parent.mkdir(parents=True, exist_ok=True)
-    # apksigner.bat resolves its own `java` via JAVA_HOME/PATH internally --
+    # apksigner.bat resolves its own `java` via JAVA_HOME/PATH internally,
     # env= makes sure that resolves to a bundled JRE once one exists,
     # without ever touching the user's real system PATH/JAVA_HOME.
     _run([
@@ -196,7 +196,7 @@ def install_stub_apk(apk_path: Path, package_name: str, replace_existing: bool =
     "conflict" if something else is installed under this exact package
     and replace_existing is False.
 
-    A signature mismatch here is ambiguous -- it could be an old-style
+    A signature mismatch here is ambiguous, it could be an old-style
     hand-installed stub (safe to replace), but it could just as easily be
     the console's *real* Android app the person actually installed on
     purpose (replacing that would be a genuinely surprising, unwanted

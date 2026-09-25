@@ -1,21 +1,21 @@
-"""Media Library page -- ports manager.py's _build_media_library_page and
+"""Media Library page, ports manager.py's _build_media_library_page and
 its core Check/Restore/preview flow. Backed by
 bridge/services/media_library_service.py and the native soundbite player
 in bridge/ui/audio/winmm_playback.py.
 
 Deliberately not carried over in this pass: the iiDB Browser (a whole
-separate search/cart/install sub-window, ~1300 lines in the original) --
+separate search/cart/install sub-window, ~1300 lines in the original),
 "Browse iiDB" is present but reports it isn't ported yet rather than being
 silently missing. Everything that manages ALREADY-saved media (the actual
 point of this page day to day: Check/Restore/preview) is real.
 
 Connection status is checked when this page becomes visible rather than
-on Home's continuous 2-second poll regardless of which page is showing --
+on Home's continuous 2-second poll regardless of which page is showing,
 a deliberate simplification, and arguably better (no ADB traffic for a
 page nobody's looking at).
 """
 
-import bridge.ui  # noqa: F401 -- import-time side effect: puts root/bridge/installer on sys.path
+import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QPixmap
@@ -172,7 +172,7 @@ class MediaLibraryPage(PageBase):
         self.refresh()
         self._check_connection()
 
-    # -- Registry summary + tree -------------------------------------------------
+    # == Registry summary + tree ==
 
     def refresh(self) -> None:
         try:
@@ -196,7 +196,7 @@ class MediaLibraryPage(PageBase):
             f"{games} game{'s' if games != 1 else ''} • {len(rows)} saved asset{'s' if len(rows) != 1 else ''} "
             f"• {total_bytes / (1024 * 1024):.1f} MB"
         )
-        self.detail_label.setText('Stored locally -- use "Open Local Library" below to browse the actual folder.')
+        self.detail_label.setText('Stored locally, use "Open Local Library" below to browse the actual folder.')
 
     def _populate_tree(self, rows, checked: bool = False) -> None:
         """rows: (key, game, asset) or (key, game, asset, status, info)."""
@@ -227,7 +227,7 @@ class MediaLibraryPage(PageBase):
                 self._tree_assets[asset_key] = (game, asset)
         self.tree.expandAll()
 
-    # -- Selection / preview -------------------------------------------------
+    # == Selection / preview ==
 
     def _on_selection_changed(self) -> None:
         items = self.tree.selectedItems()
@@ -297,7 +297,7 @@ class MediaLibraryPage(PageBase):
         except Exception as exc:
             QMessageBox.critical(self, "Media Library", f"Couldn't open:\n{local}\n\n{exc}")
 
-    # -- Soundbite playback -------------------------------------------------
+    # == Soundbite playback ==
 
     def _toggle_audio(self) -> None:
         if not self._selected:
@@ -371,7 +371,7 @@ class MediaLibraryPage(PageBase):
         self.time_label.setText("0:00 / 0:00")
         self.seek_slider.setValue(0)
 
-    # -- Connection indicator -------------------------------------------------
+    # == Connection indicator ==
 
     def _check_connection(self) -> None:
         self.connection_dot.set_state("unknown")
@@ -390,7 +390,7 @@ class MediaLibraryPage(PageBase):
         self.connection_dot.set_state(state)
         self.connection_label.setText(text)
 
-    # -- Actions -------------------------------------------------
+    # == Actions ==
 
     def _open_local_library(self) -> None:
         import os

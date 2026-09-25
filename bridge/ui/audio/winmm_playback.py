@@ -1,10 +1,10 @@
-"""Native Windows waveOut (WinMM) playback for short PCM WAV soundbites --
+"""Native Windows waveOut (WinMM) playback for short PCM WAV soundbites,
 verbatim carry-over of manager.py's ctypes WinMM code, just reorganized
 into a plain state-machine class with no GUI-toolkit dependency (no Tk,
 no Qt) so bridge/ui/pages/media_library.py can drive it with a QTimer the
 same way manager.py drove it with self.after().
 
-Only plays uncompressed PCM WAV -- iiDB soundbites are always this format,
+Only plays uncompressed PCM WAV, iiDB soundbites are always this format,
 so no other codec support was ever needed here.
 """
 
@@ -84,7 +84,7 @@ def _raise_on_error(code: int, operation: str) -> None:
 
 
 class WinmmPlayer:
-    """One soundbite at a time -- state is one of "stopped"/"playing"/
+    """One soundbite at a time, state is one of "stopped"/"playing"/
     "paused". Callers poll position_ms()/state on a timer (e.g. every
     100ms) to drive a seek bar/time label; there is no playback-finished
     callback, matching the original polling-based design."""
@@ -159,7 +159,7 @@ class WinmmPlayer:
         return max(0, min(self.length_ms, base))
 
     def mark_ended(self) -> None:
-        """Called by the caller's tick once position reaches length_ms --
+        """Called by the caller's tick once position reaches length_ms,
         resets to the start without tearing down the loaded buffer/handle,
         so toggle() can replay the same soundbite immediately."""
         self.state = "stopped"
@@ -177,7 +177,7 @@ class WinmmPlayer:
             pass
 
     def close(self) -> None:
-        """Full teardown -- releases the WinMM handle and forgets the
+        """Full teardown, releases the WinMM handle and forgets the
         loaded audio entirely. Call this when switching to a different
         asset, not when a track merely finishes (see mark_ended)."""
         if self._handle and self._winmm:
@@ -197,7 +197,7 @@ class WinmmPlayer:
         self.length_ms = 0
         self._base_ms = 0
 
-    # -- Internals -------------------------------------------------
+    # == Internals ==
 
     def _open(self, audio: dict) -> None:
         winmm = ctypes.WinDLL("winmm")

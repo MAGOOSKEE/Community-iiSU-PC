@@ -1,11 +1,11 @@
 """
-Standalone PySide6 entry point for the fullscreen boot/hand-off overlay --
+Standalone PySide6 entry point for the fullscreen boot/hand-off overlay,
 launched as its own OS process by boot_overlay_qt.py's show(), the same
 way the PowerShell+WinForms version it replaces (bridge/boot_overlay.py)
 already was. Kept as a separate process rather than an in-process QWidget
 for the same reason as before: start_iisu_pc.py is a synchronous script
 that may not be running inside any QApplication at all, and manager.py
-calls show()/close() from background threads -- an in-process widget
+calls show()/close() from background threads, an in-process widget
 would reintroduce the "second GUI root from a non-owning thread" problem
 this design exists to avoid.
 
@@ -16,14 +16,14 @@ import math
 import sys
 import winreg
 
-import bridge.ui  # noqa: F401 -- import-time side effect: puts root/bridge/installer on sys.path
+import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QGuiApplication, QLinearGradient, QPainter
 from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
-# Same brand gradient used elsewhere (shared/qt_theme.py's GRADIENT_STOPS)
-# -- kept in sync by eye since this overlay is a standalone process with
+# Same brand gradient used elsewhere (shared/qt_theme.py's GRADIENT_STOPS),
+# kept in sync by eye since this overlay is a standalone process with
 # its own tiny theme, not a consumer of that module.
 _GRADIENT_HEX = ["#71e0ff", "#68ccff", "#5e84ff", "#8258fa", "#c56eff"]
 
@@ -49,7 +49,7 @@ _THEMES = {
 
 def _detect_windows_theme() -> str:
     """Reads the same registry value Windows' own Settings > Colors page
-    ("Choose your default app mode") writes -- best-effort, since a
+    ("Choose your default app mode") writes, best-effort, since a
     loading screen guessing wrong about system theme is purely cosmetic,
     never worth failing the boot sequence over."""
     try:
@@ -65,7 +65,7 @@ def _detect_windows_theme() -> str:
 
 class _AnimatedBackground(QWidget):
     """A slow-rotating, low-alpha linear gradient laid over a flat theme
-    background -- subtle by design (the brand gradient at ~20% opacity,
+    background, subtle by design (the brand gradient at ~20% opacity,
     ticking a few degrees a second) rather than a full-strength moving
     rainbow, which would fight with the text sitting on top of it."""
 
@@ -102,7 +102,7 @@ class _AnimatedBackground(QWidget):
 
 
 class _BounceBar(QWidget):
-    """A small filled rectangle bouncing back and forth across a track --
+    """A small filled rectangle bouncing back and forth across a track,
     Qt has no built-in "indeterminate" progress style that looks like this,
     so it's hand-painted the same way the original WinForms Panel-in-a-
     Panel + Timer version was."""
@@ -142,7 +142,7 @@ class OverlayWindow(QWidget):
         super().__init__()
         theme = _THEMES[_detect_windows_theme()]
 
-        # Tool: hides it from the taskbar/Alt-Tab -- you shouldn't be able
+        # Tool: hides it from the taskbar/Alt-Tab, you shouldn't be able
         # to switch *to* a loading overlay, only have it appear over you.
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.Tool
@@ -151,7 +151,7 @@ class OverlayWindow(QWidget):
         # Belt-and-suspenders against a default white flash before the
         # animated background's first paintEvent fires. An ID selector
         # (not a bare type/property rule) so this doesn't cascade onto
-        # every child QLabel and paint each one an opaque box -- Qt
+        # every child QLabel and paint each one an opaque box, Qt
         # stylesheets otherwise inherit down the widget tree like CSS.
         self.setObjectName("overlayRoot")
         self.setStyleSheet(f"#overlayRoot {{ background-color: {theme['bg'].name()}; }}")
@@ -168,7 +168,7 @@ class OverlayWindow(QWidget):
         layout.setContentsMargins(48, 48, 48, 48)
 
         # Bahnschrift SemiBold (bundled with Windows 10+), not this
-        # project's usual Segoe UI -- a blockier, more technical/console-ish
+        # project's usual Segoe UI, a blockier, more technical/console-ish
         # face echoing iiSU's own branding without using any of iiSU's
         # actual (copyrighted, not ours to include) font files.
         self._title = QLabel(self._TITLE_TEXT)
@@ -194,7 +194,7 @@ class OverlayWindow(QWidget):
         layout.addWidget(flavor_label)
 
         # Cycles 0..3 dots on a fixed-length string (padded with trailing
-        # spaces) so the label's width -- and therefore its centering --
+        # spaces) so the label's width, and therefore its centering,
         # never jitters as the dot count changes.
         self._dot_count = 0
         self._dot_timer = QTimer(self)

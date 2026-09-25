@@ -1,6 +1,6 @@
 """
 Completely removes everything Setup.bat and day-to-day use create on this
-machine, so a fresh Setup.bat run afterward starts truly from scratch --
+machine, so a fresh Setup.bat run afterward starts truly from scratch,
 no reused SDK download, no reused AVD, no leftover config.
 
 Stops the AVD/bridge first (if running) via bridge/stop_iisu_pc.py, then
@@ -11,21 +11,21 @@ removes:
   - installer/'s generated state: its own SDK download, the patch
     keystore, the preserved build-tools copy, working directories
   - the actual AVD(s) under ~/.android/avd/ (and the stray per-AVD log
-    directories the emulator leaves alongside it -- see NOTE below)
+    directories the emulator leaves alongside it, see NOTE below)
   - the desktop shortcut
 
 Deliberately does NOT touch:
-  - installer/input/*.apk -- that's your own supplied file, not
+  - installer/input/*.apk, that's your own supplied file, not
     something this project installed
-  - installer/tools/apktool.jar -- a bundled project asset, not
+  - installer/tools/apktool.jar, a bundled project asset, not
     generated state
-  - %LOCALAPPDATA%\\Android\\Sdk -- see the printed note at the end for
+  - %LOCALAPPDATA%\\Android\\Sdk, see the printed note at the end for
     why this is left alone by default
 
 NOTE on ~/.android/avd/medium_phone.avd: sdk_bootstrap.py creates the
 AVD under Android's own hardcoded device-profile name first and renames
 it afterward (`android emulator create` doesn't support naming it
-directly) -- an interrupted first-time setup can leave that intermediate
+directly), an interrupted first-time setup can leave that intermediate
 name behind before the rename happens, so it's cleaned up defensively
 alongside whatever the real configured name is.
 
@@ -61,7 +61,7 @@ def dir_size(path: Path) -> int:
 def _remove_tree_best_effort(root: Path) -> list[Path]:
     """Deletes everything under root bottom-up, collecting whatever
     couldn't be removed instead of aborting the whole operation the
-    moment one locked file is hit the way a bare shutil.rmtree() would --
+    moment one locked file is hit the way a bare shutil.rmtree() would,
     a single still-open handle deep inside a multi-GB tree (android-sdk-
     portable/ in particular, several GB across thousands of files) should
     never be able to leave everything else in that tree behind too,
@@ -85,7 +85,7 @@ def _remove_tree_best_effort(root: Path) -> list[Path]:
 
 def remove_path(path: Path, attempts: int = 5, delay: float = 1.0) -> int:
     """Removes a file or directory tree, retrying briefly on a locked
-    file -- a process that was just stopped doesn't always release its
+    file, a process that was just stopped doesn't always release its
     handles the instant it exits, which can otherwise leave a chunk of a
     large directory tree behind on the first attempt. Returns the size
     actually reclaimed, which can be less than the full size if some of
@@ -109,7 +109,7 @@ def remove_path(path: Path, attempts: int = 5, delay: float = 1.0) -> int:
             time.sleep(delay)
 
     remaining = dir_size(path) if path.exists() else 0
-    print(f"  ! {len(locked)} item(s) under {path} are still locked -- close whatever's using them and remove by hand:")
+    print(f"  ! {len(locked)} item(s) under {path} are still locked, close whatever's using them and remove by hand:")
     for locked_path in locked[:10]:
         print(f"      {locked_path}")
     if len(locked) > 10:
@@ -118,7 +118,7 @@ def remove_path(path: Path, attempts: int = 5, delay: float = 1.0) -> int:
 
 
 def stop_running_instance() -> None:
-    """Run first, before anything else is deleted -- stop_iisu_pc.py
+    """Run first, before anything else is deleted, stop_iisu_pc.py
     needs bridge/config.json (for the real avd_name) and
     .runtime_state.json (for the tracked PIDs) to do a clean shutdown,
     both of which this script is about to remove."""
@@ -129,8 +129,8 @@ def stop_running_instance() -> None:
         import stop_iisu_pc
         stop_iisu_pc.main()
     except Exception as e:
-        print(f"[uninstall] couldn't run a clean stop ({e}) -- falling back to a process sweep")
-        # Matched by command line, not by bare image name -- taskkill /IM
+        print(f"[uninstall] couldn't run a clean stop ({e}), falling back to a process sweep")
+        # Matched by command line, not by bare image name, taskkill /IM
         # emulator.exe (or qemu-system-x86_64.exe) would also take down an
         # unrelated Android Studio emulator instance or another qemu-based
         # tool on the same PC. Every process this project launches runs out
@@ -152,7 +152,7 @@ def detect_avd_name() -> str:
 
 
 def collect_targets(avd_name: str) -> list[Path]:
-    """Every path a full uninstall removes -- used both for the preview
+    """Every path a full uninstall removes, used both for the preview
     printed before confirmation and for the actual removal, so the two
     can never drift out of sync with each other."""
     targets = [
@@ -194,11 +194,11 @@ def collect_targets(avd_name: str) -> list[Path]:
 def print_preview(targets: list[Path]) -> None:
     """Sizes everything up front and shows it before the confirmation
     prompt, instead of only finding out how much got reclaimed after it's
-    already gone -- makes the "type yes" prompt an informed decision
+    already gone, makes the "type yes" prompt an informed decision
     rather than a leap of faith."""
     existing = [path for path in targets if path.exists()]
     if not existing:
-        print("Nothing to remove -- this already looks like a clean slate.\n")
+        print("Nothing to remove, this already looks like a clean slate.\n")
         return
     total = 0
     print("This will remove:")
@@ -223,7 +223,7 @@ def main() -> None:
     if "--yes" not in sys.argv:
         answer = input("Type 'yes' to continue: ").strip().lower()
         if answer != "yes":
-            print("Cancelled -- nothing was removed.")
+            print("Cancelled, nothing was removed.")
             return
 
     stop_running_instance()
@@ -231,12 +231,12 @@ def main() -> None:
     print("\n[uninstall] removing...")
     reclaimed = sum(remove_path(path) for path in targets)
 
-    print(f"\n=== Done -- reclaimed {reclaimed / 1e9:.1f} GB ===")
+    print(f"\n=== Done, reclaimed {reclaimed / 1e9:.1f} GB ===")
     print(f"Kept: installer/input/*.apk (your own file) and installer/tools/apktool.jar (a project asset).")
     print(
         "\nNot touched: %LOCALAPPDATA%\\Android\\Sdk. Depending on how the SDK\n"
         "downloader's underlying tool resolves its install root, packages can end\n"
-        "up there instead of (or alongside) installer/android-sdk/ -- if you don't\n"
+        "up there instead of (or alongside) installer/android-sdk/, if you don't\n"
         "have a real Android Studio install of your own and want that reclaimed\n"
         "too, check for build-tools/34.0.0 and\n"
         "system-images/android-36/google_apis_playstore/x86_64 there before\n"

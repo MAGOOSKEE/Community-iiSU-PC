@@ -7,7 +7,7 @@ multi-hundred-MB/GB ROM data pushed into the VM.
 Why placeholders work: iiSU only needs a file to exist with the right name
 to index it, scrape metadata for it (by filename), and build a launch
 Intent referencing it. The actual gameplay never touches that file's
-content -- our patched LaunchBridge redirects the launch to the bridge,
+content, our patched LaunchBridge redirects the launch to the bridge,
 which finds the REAL file under roms_dir by matching filename and hands
 that to the real PC emulator. So placeholders can be tiny (a few KB, not
 0 bytes, in case iiSU's scanner distrusts empty files) and their content
@@ -23,12 +23,12 @@ expected form (e.g. "psx") automatically.
 Runs automatically on every start (see start_iisu_pc.py), and skips the
 actual rebuild whenever nothing's changed since the last one. For a
 large library, walking the real filesystem is fast even for tens of
-thousands of files -- what used to be slow was creating each placeholder
+thousands of files, what used to be slow was creating each placeholder
 with its own adb shell round trip (a `mkdir` and a `dd`, forked fresh
 inside the guest, once per file). This instead builds one tar archive
 locally (pure local disk I/O, no adb involved) and pushes+extracts it in
 a single adb push plus a single `tar xf` inside the guest, so the sync
-cost no longer scales with round trips at all -- one archive regardless
+cost no longer scales with round trips at all, one archive regardless
 of whether it holds a hundred files or a hundred thousand. The "last synced" signal lives
 *inside* the AVD itself (a fingerprint file dropped alongside the
 placeholders), not a local cache file here: a local cache would go stale
@@ -50,7 +50,7 @@ import tarfile
 import time
 from pathlib import Path, PurePosixPath
 
-import portable_sdk  # noqa: F401 -- imported for its import-time PATH fix (adb), not used directly here
+import portable_sdk  # noqa: F401; imported for its import-time PATH fix (adb), not used directly here
 from console_names import load_console_lookup, resolve_console_shortname
 
 CONFIG_PATH = Path(__file__).parent / "config.json"
@@ -72,7 +72,7 @@ CUE_FILE_LINE = re.compile(r'^\s*FILE\s+"([^"]+)"', re.IGNORECASE)
 
 def _read_text_best_effort(path: Path) -> str:
     """Disc playlists/sheets are usually ASCII but occasionally shipped in
-    whatever codepage the ripping tool's locale used -- utf-8 first, a
+    whatever codepage the ripping tool's locale used, utf-8 first, a
     permissive fallback rather than letting one oddly-encoded file abort
     the whole sync."""
     for encoding in ("utf-8-sig", "utf-8", "cp1252"):
@@ -85,11 +85,11 @@ def _read_text_best_effort(path: Path) -> str:
 
 def load_dedupe_exceptions() -> set[str]:
     """Keys are "<iiSU shortname>/<path relative to that console folder>",
-    e.g. "psx/Gran Turismo 2/Gran Turismo 2.m3u" -- keyed by the normalized
+    e.g. "psx/Gran Turismo 2/Gran Turismo 2.m3u", keyed by the normalized
     shortname rather than whatever the on-disk console folder happens to
     be named, so renaming "PSX" to "Playstation 1" later doesn't silently
     detach the exception from the game it was set for. Opts a specific
-    .m3u/.cue out of the disc-collapsing below -- iiSU sees the individual
+    .m3u/.cue out of the disc-collapsing below, iiSU sees the individual
     discs it names as their own entries instead, and the playlist/sheet
     itself is hidden rather than also shown alongside them. For a game like
     Gran Turismo 2, where what an .m3u bundles are actually distinct,
@@ -97,7 +97,7 @@ def load_dedupe_exceptions() -> set[str]:
     game, so collapsing them away isn't right the way it is for an
     ordinary multi-disc RPG. Set from the Games > Console page in
     manager.py, one entry per opted-out playlist/sheet, not per console or
-    per folder -- opting out one game should never affect its neighbors."""
+    per folder, opting out one game should never affect its neighbors."""
     if not DEDUPE_EXCEPTIONS_PATH.is_file():
         return set()
     try:
@@ -140,7 +140,7 @@ def referenced_disc_filenames(
     something else in this same folder already accounts for them.
 
     Ordinarily that's every filename an .m3u playlist or .cue sheet
-    references -- without this, a 2-disc PS1 game (game.m3u +
+    references, without this, a 2-disc PS1 game (game.m3u +
     disc1.bin/.cue + disc2.bin/.cue) shows up in iiSU as 5 separate "games"
     instead of one, since the .m3u/.cue itself is what a PC emulator is
     actually pointed at (the tracks/discs it names are matched by filename
@@ -149,7 +149,7 @@ def referenced_disc_filenames(
     A .m3u/.cue listed in dedupe_exceptions (see load_dedupe_exceptions)
     inverts that: it's the playlist/sheet itself that gets excluded instead,
     so its individual discs show up as their own entries and iiSU never
-    sees the collapsed, one-entry version at all -- for a game like Gran
+    sees the collapsed, one-entry version at all, for a game like Gran
     Turismo 2, where what iiSU would otherwise show as one game is really
     two distinct, separately-launchable modes.
 
@@ -191,7 +191,7 @@ def scan_library(
     roms_dir: Path, exact: dict, by_compact: dict, dedupe_exceptions: set[str] | None = None
 ) -> tuple[dict[str, list[tuple[str, int, int]]], list[str]]:
     """Walks roms_dir once, grouping recognized console folders' files by
-    iiSU short name with (relative path, size, mtime) for each -- both
+    iiSU short name with (relative path, size, mtime) for each, both
     what's needed to build the sync archive AND to fingerprint the library
     for change detection come from this one walk."""
     if dedupe_exceptions is None:
@@ -233,7 +233,7 @@ def scan_library(
 def scan_windows_stubs() -> list[tuple[str, int, int]]:
     """Windows Apps' .pcgame placeholders live in the install directory
     (see manager.py's WINDOWS_STUBS_DIR), not under roms_dir, so they
-    never clutter the real ROM library on disk -- scanned separately here
+    never clutter the real ROM library on disk, scanned separately here
     and merged into the "windows" console's entries so Windows Apps games
     still show up in iiSU."""
     if not WINDOWS_STUBS_DIR.is_dir():
@@ -248,7 +248,7 @@ def scan_windows_stubs() -> list[tuple[str, int, int]]:
 def merge_windows_stubs(consoles: dict[str, list[tuple[str, int, int]]]) -> None:
     """Merges scan_windows_stubs() into consoles["windows"] in place,
     de-duplicating by filename against whatever scan_library() already
-    found under a legacy <roms_dir>/windows folder -- an install mid-
+    found under a legacy <roms_dir>/windows folder, an install mid-
     migration (see manager.py's _migrate_legacy_windows_stubs) can
     otherwise have the same placeholder in both places."""
     stub_entries = scan_windows_stubs()
@@ -261,7 +261,7 @@ def merge_windows_stubs(consoles: dict[str, list[tuple[str, int, int]]]) -> None
 
 
 def fingerprint(roms_dir: Path, consoles: dict[str, list[tuple[str, int, int]]]) -> str:
-    """A stable hash of everything that would change what gets synced --
+    """A stable hash of everything that would change what gets synced,
     which consoles, and each file's relative path/size/mtime."""
     h = hashlib.sha256()
     h.update(str(roms_dir).encode("utf-8"))
@@ -279,12 +279,12 @@ def read_avd_fingerprint() -> str | None:
 
 def wait_for_external_storage(timeout: float = 60.0) -> bool:
     """adb becoming reachable only means the AVD booted far enough to
-    accept a connection -- it doesn't mean /sdcard's own storage stack has
+    accept a connection, it doesn't mean /sdcard's own storage stack has
     finished mounting yet, the same class of post-boot race launch_iisu()
     already retries around for the package manager. Calling this too
     early on a genuinely fresh cold boot fails every mkdir under
     AVD_ROMS_ROOT with "No such file or directory" since /sdcard itself
-    isn't there yet; an already-running AVD (the common case -- this runs
+    isn't there yet; an already-running AVD (the common case, this runs
     on every start, not just the first) has always been up long enough
     for this to return immediately."""
     deadline = time.time() + timeout
@@ -298,7 +298,7 @@ def wait_for_external_storage(timeout: float = 60.0) -> bool:
 def build_placeholder_tar(consoles: dict[str, list[tuple[str, int, int]]], current_fingerprint: str) -> Path:
     """Builds one local tar archive holding every placeholder file (plus the
     fingerprint file) with paths already relative to /sdcard, so extracting
-    it there with a plain `tar xf` recreates the whole Roms/ tree -- tar
+    it there with a plain `tar xf` recreates the whole Roms/ tree, tar
     creates whatever parent directories a member needs, so nothing here has
     to mkdir anything up front. All of this is local disk I/O; nothing here
     talks to the device."""
@@ -327,7 +327,7 @@ def main() -> None:
         sys.exit(1)
 
     if not wait_for_external_storage():
-        print("The AVD's storage never became available -- skipping this sync, the next start will retry.")
+        print("The AVD's storage never became available, skipping this sync, the next start will retry.")
         sys.exit(1)
 
     exact, by_compact = load_console_lookup()
@@ -346,7 +346,7 @@ def main() -> None:
     file_count = sum(len(entries) for entries in consoles.values())
     current_fingerprint = fingerprint(roms_dir, consoles)
     if read_avd_fingerprint() == current_fingerprint:
-        print(f"Library unchanged ({file_count} file(s) across {len(consoles)} console(s)) -- skipping resync.")
+        print(f"Library unchanged ({file_count} file(s) across {len(consoles)} console(s)), skipping resync.")
         return
 
     print(f"Building one archive for {len(consoles)} console folder(s), {file_count} placeholder file(s)...")
@@ -359,7 +359,7 @@ def main() -> None:
     push_elapsed = max(time.time() - push_start, 0.01)
     print(f"Pushed in {push_elapsed:.1f}s ({push_size_mb / push_elapsed:.1f} MB/s).")
     # rm -rf first so a console removed from the real library (or renamed)
-    # doesn't leave its old placeholders behind -- tar only ever adds/
+    # doesn't leave its old placeholders behind, tar only ever adds/
     # overwrites, it never removes what a previous sync left there.
     extract_cmd = (
         f"rm -rf {shlex.quote(AVD_ROMS_ROOT)} && "

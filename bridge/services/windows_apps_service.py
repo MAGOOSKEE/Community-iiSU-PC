@@ -1,12 +1,12 @@
 """Non-UI logic behind the Windows Apps page, extracted out of
 bridge/manager.py's tkinter Manager class ahead of porting that page to Qt
-(the two largest pages -- this one and Media Library -- get their service
+(the two largest pages, this one and Media Library, get their service
 layer extracted first, per the Qt rewrite plan, so the eventual page file
 is just "wire a service call to a signal/slot").
 
 Every function here takes its state as plain arguments instead of reading
 instance attributes, and reports errors by raising WindowsAppsServiceError
-instead of popping up a messagebox -- whichever UI toolkit calls this
+instead of popping up a messagebox, whichever UI toolkit calls this
 decides how (or whether) to show that to the user.
 """
 
@@ -25,11 +25,11 @@ WINDOWS_STUBS_DIR = BRIDGE_DIR / "windows_stubs"
 
 
 class WindowsAppsServiceError(Exception):
-    """Raised instead of showing a messagebox directly -- callers decide
+    """Raised instead of showing a messagebox directly, callers decide
     how to present this (a QMessageBox, a log line, etc.)."""
 
 
-# -- windows_apps.json -------------------------------------------------
+# == windows_apps.json ==
 
 
 def load_windows_apps() -> dict:
@@ -55,7 +55,7 @@ def ensure_added_at(entry: dict) -> dict:
     return entry
 
 
-# -- Placeholder (.pcgame) filenames -------------------------------------------------
+# == Placeholder (.pcgame) filenames ==
 
 
 def windows_reserved_filename(name: str) -> bool:
@@ -101,7 +101,7 @@ def unique_windows_app_name(base: str, apps: dict) -> str:
     return f"{base} ({number})"
 
 
-# -- Legacy stub-folder migration -------------------------------------------------
+# == Legacy stub-folder migration ==
 
 
 def legacy_windows_stubs_dir(roms_dir: str) -> Path | None:
@@ -114,7 +114,7 @@ def legacy_windows_stubs_dir(roms_dir: str) -> Path | None:
 def migrate_legacy_windows_stubs(roms_dir: str) -> int:
     """One-time, additive copy of pre-relocation .pcgame placeholders from
     <roms_dir>/windows into WINDOWS_STUBS_DIR. Never deletes or modifies
-    anything under roms_dir -- that's live content in the user's own ROM
+    anything under roms_dir, that's live content in the user's own ROM
     directory. Returns how many files were copied (0 if there was nothing
     to migrate)."""
     legacy_dir = legacy_windows_stubs_dir(roms_dir)
@@ -136,14 +136,14 @@ def migrate_legacy_windows_stubs(roms_dir: str) -> int:
 def delete_legacy_windows_stubs(roms_dir: str) -> None:
     legacy_dir = legacy_windows_stubs_dir(roms_dir)
     if legacy_dir is None:
-        raise WindowsAppsServiceError("No old placeholder folder found under your ROM directory -- nothing to delete.")
+        raise WindowsAppsServiceError("No old placeholder folder found under your ROM directory, nothing to delete.")
     try:
         shutil.rmtree(legacy_dir)
     except OSError as e:
         raise WindowsAppsServiceError(f"Couldn't delete {legacy_dir}:\n\n{e}") from e
 
 
-# -- Steam discovery -------------------------------------------------
+# == Steam discovery ==
 
 
 def valid_uri(uri: str) -> bool:
@@ -282,7 +282,7 @@ def steam_artwork_cache_file(appid: str) -> Path:
     return BRIDGE_DIR / "cache" / "steam_artwork" / f"{appid}.jpg"
 
 
-# -- Per-row status/display -------------------------------------------------
+# == Per-row status/display ==
 
 
 def windows_app_status(name: str, entry: dict, installed_steam_ids_set: set[str] | None = None) -> str:
@@ -325,12 +325,12 @@ def windows_app_display_type(entry: dict) -> str:
     return "Executable"
 
 
-# -- Create / edit / remove / repair placeholders -------------------------------------------------
+# == Create / edit / remove / repair placeholders ==
 
 
 def create_windows_app(name: str, entry: dict, apps: dict, windows_dir: Path) -> None:
     """Adds `name` to `apps` (in place) and creates its .pcgame placeholder.
-    Raises on a case-insensitive name collision or filesystem failure --
+    Raises on a case-insensitive name collision or filesystem failure,
     callers that already validated uniqueness (e.g. edit, which excludes
     the entry being edited) should check before calling this."""
     if any(existing.casefold() == name.casefold() for existing in apps):
@@ -389,7 +389,7 @@ def find_missing_and_orphan_placeholders(apps: dict, windows_dir: Path) -> tuple
     return missing, orphans
 
 
-# -- Health scan -------------------------------------------------
+# == Health scan ==
 
 
 def scan_windows_apps_health(apps: dict, windows_dir: Path, installed_steam_ids_set: set[str]) -> dict:
@@ -452,7 +452,7 @@ def scan_windows_apps_health(apps: dict, windows_dir: Path, installed_steam_ids_
     return findings
 
 
-# -- Export / import -------------------------------------------------
+# == Export / import ==
 
 
 def build_export_payload(apps: dict) -> dict:
@@ -462,7 +462,7 @@ def build_export_payload(apps: dict) -> dict:
 def parse_import_payload(payload) -> dict | None:
     """Accepts either the wrapped export format ({"apps": {...}}) or a bare
     apps mapping. A non-dict top level has nothing to extract from and is
-    treated as an empty mapping, not an error -- matches the original
+    treated as an empty mapping, not an error, matches the original
     behavior this was ported from."""
     incoming = payload.get("apps", payload) if isinstance(payload, dict) else {}
     return incoming if isinstance(incoming, dict) else None
@@ -497,7 +497,7 @@ def import_windows_apps(incoming: dict, apps: dict, windows_dir: Path, existing_
     return added, skipped
 
 
-# -- Launching -------------------------------------------------
+# == Launching ==
 
 
 def resolve_uri_launch(entry: dict) -> str:
@@ -533,7 +533,7 @@ def resolve_executable_launch(entry: dict) -> tuple[Path, list[str], Path]:
 
 
 def windows_app_sort_key(column: str, name: str, entry: dict, display_type: str, status: str):
-    """column is one of "name"/"type"/"status"/"added" -- callers already
+    """column is one of "name"/"type"/"status"/"added", callers already
     have display_type/status computed per row for the UI, so this takes
     them rather than recomputing (which would also need the installed-
     Steam-ids set threaded through again for no benefit)."""

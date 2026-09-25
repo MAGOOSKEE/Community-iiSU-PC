@@ -1,9 +1,9 @@
-"""Windows MCI playback for iiDB soundbite previews -- a second, simpler
+"""Windows MCI playback for iiDB soundbite previews, a second, simpler
 audio path than winmm_playback.py's WinmmPlayer, used here specifically
 because MCI opens compressed formats (mp3, wma, ogg...) natively, unlike
 raw waveOut which only understands PCM. iiDB soundbite previews arrive in
 whatever format iiDB served them in, whereas Media Library's saved
-soundbites are always the PCM WAV MediaBridge installed -- hence two
+soundbites are always the PCM WAV MediaBridge installed, hence two
 different players for two different guarantees."""
 
 import ctypes

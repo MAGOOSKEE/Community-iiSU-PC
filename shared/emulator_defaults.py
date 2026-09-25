@@ -7,23 +7,23 @@ Two shapes, matching bridge/config.json's "emulators" map:
 
 STANDALONE_DEFAULTS: one Android package -> one PC executable. The
 Android package chosen is iiSU's own top-priority candidate for that
-console (the first "emulators" entry with a "packages" list) -- it's
+console (the first "emulators" entry with a "packages" list), it's
 stubbed (see installer/stub_apk.py) purely so iiSU's installed-package
 check resolves that console to a package our patched LaunchBridge already
 recognizes. What that Android package's real app would actually do is
 irrelevant: our patch intercepts the launch before Android would ever
 start it, and redirects to whatever PC executable is configured here
 instead, regardless of whether the two projects are related at all (e.g.
-PS2 is stubbed under AetherSX2's package but redirected to PCSX2 on PC --
+PS2 is stubbed under AetherSX2's package but redirected to PCSX2 on PC,
 there's no Android PCSX2 to begin with).
 
 RETROARCH_BY_EXTENSION: a *fallback* for consoles routed through a single
 shared com.retroarch stub, used only when iiSU doesn't report which core
 it actually launched with (see bridge/launch_bridge.py's
-find_emulator_for_package -- the LIBRETRO intent extra is trusted first
+find_emulator_for_package, the LIBRETRO intent extra is trusted first
 and unconditionally whenever it's present, since it identifies the
 console directly instead of guessing from the ROM's file extension, which
-can be ambiguous -- .chd is chdman's container for both PS1 and Dreamcast
+can be ambiguous, .chd is chdman's container for both PS1 and Dreamcast
 -- or just plain missing for a console never explicitly added to this
 list at all, e.g. an arcade/MAME core resolved from a .zip). Only
 extensions that don't collide with another entry in this same map are
@@ -34,7 +34,7 @@ on this list to guess correctly from the extension alone.
 
 RetroArch itself is launched as retroarch.exe -L <core> -f <rom>, so
 pre_args includes -L and a core path relative to wherever retroarch.exe
-is found (standard "cores/xxx_libretro.dll" layout) -- this assumes the
+is found (standard "cores/xxx_libretro.dll" layout), this assumes the
 matching core is already installed there (launch_bridge.py's
 ensure_retroarch_core downloads a missing one from the libretro buildbot
 automatically), same as RetroArch itself needs to be already installed
@@ -75,10 +75,10 @@ STANDALONE_DEFAULTS = [
         "app_label": "Cemu",
         "exe_names": ["Cemu.exe"],
         # Confirmed live: bare "-f" errors out with a parameter-parse dialog
-        # ("the argument '<rom path>' for option '--fullscreen' is invalid")
-        # -- this Cemu build's -f/--fullscreen always consumes the next
+        # ("the argument '<rom path>' for option '--fullscreen' is invalid"),
+        # this Cemu build's -f/--fullscreen always consumes the next
         # token as its required on/off value, so a bare trailing rom path
-        # (how every other emulator here takes its rom -- see
+        # (how every other emulator here takes its rom, see
         # launch_bridge.py's `args = [exe, *pre_args, rom_path]`) gets
         # swallowed as that value instead. Needs an explicit value, and the
         # rom path needs its own --game flag rather than relying on
@@ -99,7 +99,7 @@ STANDALONE_DEFAULTS = [
         "package": "org.azahar_emu.azahar",
         "app_label": "Azahar",
         # Azahar Plus (a further fork of Azahar) renamed its binary to
-        # azahar.exe -- mainline Azahar builds still ship as citra-qt.exe,
+        # azahar.exe, mainline Azahar builds still ship as citra-qt.exe,
         # inherited from Azahar's own Citra ancestry. Both are searched for
         # under this one slot since they're the same PC-side choice from
         # iiSU's perspective, just two forks' different binary names.
@@ -134,7 +134,7 @@ STANDALONE_DEFAULTS = [
         "console": "nds",
         "console_label": "Nintendo DS (melonDualDS)",
         # melonDualDS is a separate Android package, not a suffixed variant
-        # of me.magnum.melonds -- "me.magnum.melondualds".startswith("me.magnum.melonds")
+        # of me.magnum.melonds, "me.magnum.melondualds".startswith("me.magnum.melonds")
         # is False (they diverge after "melond"), so without this as its
         # own entry a melonDualDS install would never match the prefix
         # lookup in launch_bridge.find_emulator_for_package at all.
@@ -159,7 +159,7 @@ STANDALONE_DEFAULTS = [
         "exe_names": ["rpcs3.exe"],
         "pre_args": ["--no-gui", "--fullscreen"],
         # RPCS3's actual CLI order is the opposite of every other
-        # emulator here: "rpcs3.exe <game_path> --no-gui --fullscreen" --
+        # emulator here: "rpcs3.exe <game_path> --no-gui --fullscreen",
         # confirmed live, the boot target has to come *before* these
         # flags or RPCS3 parses neither flag as having a boot target at
         # all ("Missing command-line arguments! Cannot run no-gui mode
@@ -183,7 +183,7 @@ STANDALONE_DEFAULTS = [
         # Citron is the actively-maintained continuation of Yuzu after
         # Yuzu's takedown; both packages below are routed to the same
         # citron.exe since that's the only Switch emulator this project
-        # can point to now. No Ryujinx entry exists here on purpose --
+        # can point to now. No Ryujinx entry exists here on purpose,
         # iiSU's own bundled emulator list has no Ryujinx package at all,
         # so iiSU would never report it as the launching package regardless
         # of whether it's installed on the PC side.
@@ -219,7 +219,7 @@ STANDALONE_DEFAULTS = [
         "console_label": "Microsoft Xbox 360",
         "package": "emu.x360.mobile",
         "app_label": "Xenia",
-        # Xenia Canary is the actively-maintained fork -- mainline xenia.exe
+        # Xenia Canary is the actively-maintained fork, mainline xenia.exe
         # is kept as a fallback for whichever's actually installed, same
         # pattern as the Citra/Azahar and melonDS/melonDualDS slots above.
         "exe_names": ["xenia_canary.exe", "xenia.exe"],
@@ -230,7 +230,7 @@ STANDALONE_DEFAULTS = [
         "console_label": "Valve Steam (via GameNative)",
         "package": "app.gamenative",
         "app_label": "Steam",
-        # exe_names/pre_args are never actually used for this one --
+        # exe_names/pre_args are never actually used for this one,
         # launch_bridge.py special-cases app.gamenative entirely (it
         # launches via Steam's own steam://rungameid/<id> URI handler, not
         # a subprocess.Popen'd exe, since the "ROM" here is really just a
@@ -247,7 +247,7 @@ RETROARCH_APP_LABEL = "RetroArch"
 
 # iiSU lists RetroArch as its *first*-priority candidate for most consoles
 # (including ones with a dedicated STANDALONE_DEFAULTS entry above, like
-# PS1 and Dreamcast) -- if you ever explicitly pick "RetroArch" instead of
+# PS1 and Dreamcast), if you ever explicitly pick "RetroArch" instead of
 # the dedicated standalone option for one of those in iiSU's own settings,
 # this is what keeps that launch redirecting somewhere real instead of
 # trying to run a RetroArch that was only ever a stub.
@@ -303,7 +303,7 @@ RETROARCH_BY_EXTENSION = [
 
 # A handful of Android libretro cores append a GPU-backend suffix that
 # Windows builds don't use (Windows resolves the rendering backend a
-# different way, not via the core filename) -- these need an explicit
+# different way, not via the core filename), these need an explicit
 # remap rather than the generic "strip _android, swap .so for .dll"
 # transform retroarch_core_dll_for_android_core() otherwise applies.
 ANDROID_CORE_NAME_OVERRIDES = {
@@ -315,11 +315,11 @@ ANDROID_CORE_NAME_OVERRIDES = {
 # guess, but keyed by the *actual* core RetroArch/iiSU reports launching
 # (via retroarch_core_dll_for_android_core) instead of the ROM's file
 # extension. Needed because some formats are genuinely ambiguous by
-# extension alone -- .chd is chdman's container for both PS1 CDs and
+# extension alone, .chd is chdman's container for both PS1 CDs and
 # Dreamcast GD-ROMs/CDs, but RETROARCH_SAFETY_NET_EXTENSIONS can only
 # point ".chd" at one of them (DuckStation). A Dreamcast game shipped as
 # .chd would silently launch DuckStation instead of Flycast without this
-# override -- confirmed as the cause of "some Dreamcast games won't
+# override, confirmed as the cause of "some Dreamcast games won't
 # launch": the LIBRETRO extra (flycast_libretro_android.so) is present
 # and unambiguous even when the extension isn't, so it's checked first
 # and wins outright, the same way an extension safety-net entry already
@@ -334,7 +334,7 @@ def retroarch_core_dll_for_android_core(android_core_filename: str) -> str | Non
     itself reports launching (the LIBRETRO intent extra) into the matching
     Windows core .dll filename, so a RetroArch launch uses whichever core
     is actually configured on the Android side instead of this module's
-    own per-extension guess (RETROARCH_BY_EXTENSION) -- the two can
+    own per-extension guess (RETROARCH_BY_EXTENSION), the two can
     legitimately disagree, since the curated guess is only a reasonable
     per-console default, not necessarily what a given install actually
     has configured. Returns None if the filename doesn't look like a
@@ -350,7 +350,7 @@ def retroarch_core_dll_for_android_core(android_core_filename: str) -> str | Non
 def standalone_profile_for_core_dll(core_dll: str) -> dict | None:
     """The dedicated-emulator profile for a resolved Windows core dll, per
     RETROARCH_CORE_OVERRIDES, in the same {exe_names, pre_args} shape as
-    any other emulators-map entry -- or None if this core has no dedicated
+    any other emulators-map entry, or None if this core has no dedicated
     override (the ordinary by-extension guess applies instead)."""
     override = RETROARCH_CORE_OVERRIDES.get(core_dll)
     if override is None:
@@ -389,7 +389,7 @@ def build_emulators_map() -> dict:
 
 def all_stub_packages() -> list[tuple[str, str]]:
     """Every (package, app_label) that needs a redirector stub installed
-    for these defaults to actually resolve in iiSU -- one per unique
+    for these defaults to actually resolve in iiSU, one per unique
     package, RetroArch included once even though it covers many consoles."""
     seen = {}
     for entry in STANDALONE_DEFAULTS:
@@ -400,7 +400,7 @@ def all_stub_packages() -> list[tuple[str, str]]:
 
 def all_emulator_exe_names() -> list[tuple[str, list[str]]]:
     """(app_label, exe_names) for every standalone emulator plus RetroArch
-    itself, one per unique label -- for UIs that want to check which of
+    itself, one per unique label, for UIs that want to check which of
     these are actually installed under a set of search folders (see
     bridge/launch_bridge.py's find_executable, which this is meant to be
     used with for a result that matches what a real launch would find)."""
@@ -416,12 +416,12 @@ def describe_profile(profile: dict) -> tuple[str, str]:
     config.json "emulators" map entry, for UIs that list these in a table.
 
     A "by_extension" entry (RetroArch) has neither a flat exe_names nor
-    pre_args list -- it maps a different one of each per ROM extension --
+    pre_args list, it maps a different one of each per ROM extension,
     so reading those keys directly gives an empty string on both columns,
     which reads as "nothing configured" even though it's fully set up.
     Showing every distinct exe_names value across all mapped extensions
     would surface RETROARCH_SAFETY_NET_EXTENSIONS' DuckStation/Flycast
-    redirects too, which reads as a jumbled, unrelated list -- the single
+    redirects too, which reads as a jumbled, unrelated list, the single
     most common executable across all mapped extensions is what a user
     actually means by "what does this run," so that's what's shown; only
     the flags genuinely vary per extension."""
@@ -429,5 +429,5 @@ def describe_profile(profile: dict) -> tuple[str, str]:
         by_ext = profile["by_extension"]
         exe_counts = Counter(name for entry in by_ext.values() for name in entry.get("exe_names", []))
         primary_exe = exe_counts.most_common(1)[0][0] if exe_counts else "?"
-        return primary_exe, f"(varies by file extension -- {len(by_ext)} mapped)"
+        return primary_exe, f"(varies by file extension, {len(by_ext)} mapped)"
     return ", ".join(profile.get("exe_names", [])), ", ".join(profile.get("pre_args", []))

@@ -1,15 +1,15 @@
 """Builds the embeddable CPython runtime the Inno Setup installer bundles,
-at {project_root}/runtime/python -- the path the installer's Start Menu
+at {project_root}/runtime/python, the path the installer's Start Menu
 shortcut launches via pythonw.exe -m bridge.ui.app. Run this once per
 release on a build machine with internet access; the *installed* app
 never needs Python pre-installed, only this runtime.
 
-Downloads python.org's official embeddable zip (not a full installer --
+Downloads python.org's official embeddable zip (not a full installer,
 no venv/tkinter/idle, ~15MB), enables `import site` in its `._pth` file
 (disabled by default in the embeddable distribution, which would
 otherwise make pip-installed packages unimportable), bootstraps pip via
 the standard get-pip.py, then pip-installs this project's two runtime
-dependencies (PySide6, Pillow -- see installer/setup_wizard.py's
+dependencies (PySide6, Pillow, see installer/setup_wizard.py's
 ensure_pyside6()/ensure_pillow(), the same two packages that script
 installs into a system Python today) directly into the runtime.
 
@@ -38,7 +38,7 @@ PYTHON_VERSION = "3.11.9"
 EMBED_ZIP_URL = f"https://www.python.org/ftp/python/{PYTHON_VERSION}/python-{PYTHON_VERSION}-embed-amd64.zip"
 GET_PIP_URL = "https://bootstrap.pypa.io/get-pip.py"
 
-# Mirrors installer/setup_wizard.py's ensure_pyside6()/ensure_pillow() --
+# Mirrors installer/setup_wizard.py's ensure_pyside6()/ensure_pillow(),
 # same two packages, same "no pinned version" approach that script already
 # uses for a system Python install.
 RUNTIME_PACKAGES = ["PySide6", "Pillow"]
@@ -74,7 +74,7 @@ def enable_import_site() -> Path:
     for turning the embeddable zip into a runtime that can use pip at all.
 
     The ._pth file also *replaces* Python's normal sys.path setup rather
-    than extending it -- confirmed by testing directly against this
+    than extending it, confirmed by testing directly against this
     build: neither `python -c "import bridge"` nor `python -m bridge.x`
     picks up the current working directory the way a regular install
     does. So this also appends "..\\.." (this project's own app source,
@@ -91,7 +91,7 @@ def enable_import_site() -> Path:
     text = pth_path.read_text(encoding="utf-8")
     patched = text.replace("#import site", "import site")
     if patched == text:
-        raise RuntimeError(f"{pth_path.name} didn't contain the expected '#import site' line -- check its contents")
+        raise RuntimeError(f"{pth_path.name} didn't contain the expected '#import site' line, check its contents")
     patched = patched.replace("python311.zip\n", "python311.zip\n..\\..\n", 1)
     pth_path.write_text(patched, encoding="utf-8")
     return pth_path

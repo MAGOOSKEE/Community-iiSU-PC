@@ -1,4 +1,4 @@
-"""Uninstall page -- ports manager.py's _build_uninstall_page and its
+"""Uninstall page, ports manager.py's _build_uninstall_page and its
 supporting scan/confirm/run methods. Deliberately never locked behind
 LOCKED_NAV (see sidebar.py) so it stays reachable against a partial or
 broken install, same as the original."""
@@ -6,7 +6,7 @@ broken install, same as the original."""
 import sys
 import traceback
 
-import bridge.ui  # noqa: F401 -- import-time side effect: puts root/bridge/installer on sys.path
+import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
@@ -134,7 +134,7 @@ class UninstallPage(PageBase):
         reply = QMessageBox.warning(
             self,
             "Remove everything?",
-            f"This will permanently remove {existing_count} item(s) -- the Android VM, its SDK, "
+            f"This will permanently remove {existing_count} item(s), the Android VM, its SDK, "
             "your bridge config, the signing keystore, and the desktop shortcut.\n\n"
             "This cannot be undone. Continue?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -156,7 +156,7 @@ class UninstallPage(PageBase):
                 if path.exists():
                     print(f"  removing {path}...")
                 reclaimed += uninstall_cli.remove_path(path)
-            print(f"\n=== Done -- reclaimed {reclaimed / 1e9:.1f} GB ===")
+            print(f"\n=== Done, reclaimed {reclaimed / 1e9:.1f} GB ===")
         except Exception:
             print(f"\n[uninstall] error:\n{traceback.format_exc()}")
         finally:

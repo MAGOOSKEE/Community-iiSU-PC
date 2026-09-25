@@ -1,5 +1,5 @@
 """
-Unit tests for bridge/updater.py's _copy_release_tree -- the file-copy
+Unit tests for bridge/updater.py's _copy_release_tree, the file-copy
 step a real, live auto-update applies to every non-git install. Pure
 filesystem logic against real temp directories, no network/git/adb
 involved.
@@ -13,7 +13,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "bridge"))
 
-from updater import _copy_release_tree  # noqa: E402 -- path set up above
+from updater import _copy_release_tree  # noqa: E402; path set up above
 
 
 class CopyReleaseTreeTests(unittest.TestCase):

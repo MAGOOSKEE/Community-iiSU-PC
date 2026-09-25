@@ -1,9 +1,9 @@
-"""Diagnostics page -- ports manager.py's _build_diagnostics_page. Backed
+"""Diagnostics page, ports manager.py's _build_diagnostics_page. Backed
 by bridge/services/diagnostics_service.py."""
 
 import os
 
-import bridge.ui  # noqa: F401 -- import-time side effect: puts root/bridge/installer on sys.path
+import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
 from PySide6.QtWidgets import (
     QCheckBox,

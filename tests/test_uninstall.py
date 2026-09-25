@@ -17,7 +17,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "installer"))
 sys.path.insert(0, str(PROJECT_ROOT / "bridge"))
 
-from uninstall import _remove_tree_best_effort, remove_path  # noqa: E402 -- path set up above
+from uninstall import _remove_tree_best_effort, remove_path  # noqa: E402; path set up above
 
 
 class RemoveTreeBestEffortTests(unittest.TestCase):
@@ -51,7 +51,7 @@ class RemoveTreeBestEffortTests(unittest.TestCase):
         finally:
             handle.close()
 
-        # The root itself is reported too -- it can't rmdir() while
+        # The root itself is reported too, it can't rmdir() while
         # locked.txt is still sitting inside it.
         self.assertEqual(set(locked), {locked_file, self.root})
         self.assertFalse((self.root / "removable.txt").exists())
