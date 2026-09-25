@@ -167,6 +167,9 @@ QPushButton#ghost {{
 QPushButton#ghost:hover {{
     background-color: {PANEL_BG_HOVER};
 }}
+QPushButton#ghost:disabled {{
+    color: {TEXT_DIM};
+}}
 QPushButton[dirty="true"] {{
     background-color: {DIRTY_BG};
     color: {DIRTY_TEXT};

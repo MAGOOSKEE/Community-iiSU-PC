@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QMenu,
     QMessageBox,
     QPushButton,
     QTreeWidget,
@@ -71,16 +72,35 @@ class ConsoleBrowserPage(PageBase):
         rescan_button.setObjectName("accent")
         rescan_button.clicked.connect(self.refresh)
         action_row_layout.addWidget(rescan_button)
-        keep_separate_button = QPushButton("Keep Discs Separate")
-        keep_separate_button.setObjectName("ghost")
-        keep_separate_button.clicked.connect(self._add_exceptions)
-        action_row_layout.addWidget(keep_separate_button)
-        merge_button = QPushButton("Merge Discs Together")
-        merge_button.setObjectName("ghost")
-        merge_button.clicked.connect(self._remove_exceptions)
-        action_row_layout.addWidget(merge_button)
         action_row_layout.addStretch(1)
+        # Left-click affordance for the selection toolbar below: it's
+        # invisible until something's selected, so without this line
+        # there's no clue the bulk actions exist at all until you stumble
+        # onto right-click.
+        self.selection_hint = QLabel("Select rows for bulk actions, or right-click a selection.")
+        self.selection_hint.setStyleSheet(f"color: {TEXT_DIM};")
+        action_row_layout.addWidget(self.selection_hint)
         self.body_layout.addWidget(action_row)
+
+        # Hidden until the tree selection is non-empty -- replaces having
+        # "Keep Discs Separate"/"Merge Discs Together" sit as permanently
+        # visible, mostly-disabled-feeling buttons above an empty selection.
+        self.selection_toolbar = QWidget()
+        selection_toolbar_layout = QHBoxLayout(self.selection_toolbar)
+        selection_toolbar_layout.setContentsMargins(0, 0, 0, 0)
+        self.selection_count_label = QLabel("")
+        selection_toolbar_layout.addWidget(self.selection_count_label)
+        self.keep_separate_button = QPushButton("Keep Discs Separate")
+        self.keep_separate_button.setObjectName("ghost")
+        self.keep_separate_button.clicked.connect(self._add_exceptions)
+        selection_toolbar_layout.addWidget(self.keep_separate_button)
+        self.merge_button = QPushButton("Merge Discs Together")
+        self.merge_button.setObjectName("ghost")
+        self.merge_button.clicked.connect(self._remove_exceptions)
+        selection_toolbar_layout.addWidget(self.merge_button)
+        selection_toolbar_layout.addStretch(1)
+        self.selection_toolbar.setVisible(False)
+        self.body_layout.addWidget(self.selection_toolbar)
 
         note = QLabel(
             '"Keep Discs Separate" is for a game like Gran Turismo 2, where an .m3u actually bundles '
@@ -102,6 +122,9 @@ class ConsoleBrowserPage(PageBase):
         self.tree.setColumnWidth(1, 90)
         self.tree.setColumnWidth(2, 160)
         self.tree.setColumnWidth(3, 260)
+        self.tree.itemSelectionChanged.connect(self._update_selection_toolbar)
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._show_context_menu)
         self.body_layout.addWidget(self.tree, 1)
 
         self._scan_signals = None
@@ -217,6 +240,41 @@ class ConsoleBrowserPage(PageBase):
     def _selected_rows(self) -> list[dict]:
         selected_keys = {item.data(0, Qt.ItemDataRole.UserRole) for item in self.tree.selectedItems()}
         return [row for row in self._rows if row["exception_key"] in selected_keys]
+
+    def _update_selection_toolbar(self) -> None:
+        selected = self._selected_rows()
+        self.selection_toolbar.setVisible(bool(selected))
+        self.selection_hint.setVisible(not selected)
+        if not selected:
+            return
+        self.selection_count_label.setText(f"{len(selected)} selected:")
+        self.keep_separate_button.setEnabled(any(row["is_playlist"] for row in selected))
+        self.merge_button.setEnabled(any(row["excepted"] for row in selected))
+
+    def _show_context_menu(self, pos) -> None:
+        item = self.tree.itemAt(pos)
+        if item is None:
+            return
+        # Right-clicking an item outside the current selection replaces
+        # it, matching how Explorer/most list UIs treat a right-click --
+        # right-clicking *inside* an existing multi-selection acts on the
+        # whole selection instead of collapsing it to just the one row.
+        if item not in self.tree.selectedItems():
+            self.tree.setCurrentItem(item)
+        selected = self._selected_rows()
+        if not selected:
+            return
+
+        menu = QMenu(self)
+        keep_action = menu.addAction("Keep Discs Separate")
+        keep_action.setEnabled(any(row["is_playlist"] for row in selected))
+        merge_action = menu.addAction("Merge Discs Together")
+        merge_action.setEnabled(any(row["excepted"] for row in selected))
+        chosen = menu.exec(self.tree.viewport().mapToGlobal(pos))
+        if chosen == keep_action:
+            self._add_exceptions()
+        elif chosen == merge_action:
+            self._remove_exceptions()
 
     def _add_exceptions(self) -> None:
         selected = [row for row in self._selected_rows() if row["is_playlist"]]
