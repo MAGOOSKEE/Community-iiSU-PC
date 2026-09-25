@@ -105,23 +105,18 @@ class WindowsAppsPage(PageBase):
         add_button.setObjectName("accent")
         add_button.clicked.connect(self._add_windows_app)
         action_row_layout.addWidget(add_button)
-        edit_button = QPushButton("Edit...")
-        edit_button.setObjectName("ghost")
-        edit_button.clicked.connect(self._edit_windows_app)
-        action_row_layout.addWidget(edit_button)
-        remove_button = QPushButton("Remove Selected")
-        remove_button.setObjectName("ghost")
-        remove_button.clicked.connect(self._remove_windows_app)
-        action_row_layout.addWidget(remove_button)
-        test_button = QPushButton("Test...")
-        test_button.setObjectName("ghost")
-        test_button.clicked.connect(self._test_windows_app)
-        action_row_layout.addWidget(test_button)
         more_button = QPushButton("More...")
         more_button.setObjectName("ghost")
         more_button.clicked.connect(lambda: self._show_more_menu(more_button))
         action_row_layout.addWidget(more_button)
         action_row_layout.addStretch(1)
+        # Edit/Remove Selected/Test used to duplicate the right-click menu
+        # below as always-visible buttons -- same convention as every other
+        # list page now: those actions live only in the context menu, this
+        # is just a status hint.
+        self.selection_hint = QLabel("")
+        self.selection_hint.setStyleSheet(f"color: {TEXT_DIM};")
+        action_row_layout.addWidget(self.selection_hint)
         self.body_layout.addWidget(action_row)
 
         self.tree = QTreeWidget()
@@ -134,6 +129,7 @@ class WindowsAppsPage(PageBase):
         self.tree.setColumnWidth(3, 110)
         self.tree.setColumnWidth(4, 140)
         self.tree.itemDoubleClicked.connect(lambda *_: self._edit_windows_app())
+        self.tree.itemSelectionChanged.connect(self._update_selection_hint)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._show_context_menu)
         self.tree.header().sectionClicked.connect(self._on_header_clicked)
@@ -141,6 +137,14 @@ class WindowsAppsPage(PageBase):
 
         self._steam_signals = None
         self.reload_from_config()
+        self._update_selection_hint()
+
+    def _update_selection_hint(self) -> None:
+        count = len(self.tree.selectedItems())
+        if count:
+            self.selection_hint.setText(f"{count} selected, right-click for actions.")
+        else:
+            self.selection_hint.setText("Select row(s), then right-click for actions.")
 
     # == Data ==
 

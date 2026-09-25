@@ -8,10 +8,13 @@ from pathlib import Path
 
 import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QFileDialog,
     QHBoxLayout,
+    QLabel,
+    QMenu,
     QMessageBox,
     QPushButton,
     QTreeWidget,
@@ -24,6 +27,7 @@ from bridge.ui.dialogs.emulator_dialog import EmulatorDialog
 from bridge.ui.dialogs.redirector_install_dialog import RedirectorInstallDialog
 from bridge.ui.pages.base import PageBase
 from shared.emulator_defaults import build_emulators_map, describe_profile
+from shared.qt_theme import TEXT_DIM
 
 
 class EmulatorsPage(PageBase):
@@ -39,6 +43,10 @@ class EmulatorsPage(PageBase):
         self.tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.tree.setColumnWidth(0, 320)
         self.tree.setColumnWidth(1, 260)
+        self.tree.itemSelectionChanged.connect(self._update_selection_hint)
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._show_context_menu)
+        self.tree.itemDoubleClicked.connect(lambda *_: self._edit_emulator())
         self.body_layout.addWidget(self.tree, 1)
 
         btn_row = QWidget()
@@ -48,19 +56,13 @@ class EmulatorsPage(PageBase):
         add_button.setObjectName("ghost")
         add_button.clicked.connect(self._add_emulator)
         btn_row_layout.addWidget(add_button)
-        edit_button = QPushButton("Edit selected...")
-        edit_button.setObjectName("ghost")
-        edit_button.clicked.connect(self._edit_emulator)
-        btn_row_layout.addWidget(edit_button)
-        remove_button = QPushButton("Remove selected")
-        remove_button.setObjectName("ghost")
-        remove_button.clicked.connect(self._remove_emulator)
-        btn_row_layout.addWidget(remove_button)
-        test_button = QPushButton("Test selected...")
-        test_button.setObjectName("ghost")
-        test_button.clicked.connect(self._test_emulator_mapping)
-        btn_row_layout.addWidget(test_button)
         btn_row_layout.addStretch(1)
+        # Same convention as Console Games: left-click selection never
+        # surfaces Edit/Remove/Test as buttons, only this status hint --
+        # the actions themselves live in the right-click menu.
+        self.selection_hint = QLabel("")
+        self.selection_hint.setStyleSheet(f"color: {TEXT_DIM};")
+        btn_row_layout.addWidget(self.selection_hint)
         self.body_layout.addWidget(btn_row)
 
         btn_row2 = QWidget()
@@ -78,6 +80,7 @@ class EmulatorsPage(PageBase):
         self.body_layout.addWidget(btn_row2)
 
         self.reload_from_config()
+        self._update_selection_hint()
 
     def reload_from_config(self) -> None:
         self.tree.clear()
@@ -101,6 +104,36 @@ class EmulatorsPage(PageBase):
             }
         return emulators
 
+    def _update_selection_hint(self) -> None:
+        count = len(self.tree.selectedItems())
+        if count:
+            self.selection_hint.setText(f"{count} selected, right-click for actions.")
+        else:
+            self.selection_hint.setText("Select a mapping, then right-click for actions.")
+
+    def _show_context_menu(self, pos) -> None:
+        item = self.tree.itemAt(pos)
+        if item is None:
+            return
+        if item not in self.tree.selectedItems():
+            self.tree.setCurrentItem(item)
+        selected = self.tree.selectedItems()
+
+        menu = QMenu(self)
+        edit_action = menu.addAction("Edit selected...")
+        edit_action.setEnabled(len(selected) == 1)
+        test_action = menu.addAction("Test selected...")
+        test_action.setEnabled(len(selected) == 1)
+        menu.addSeparator()
+        remove_action = menu.addAction("Remove selected")
+        chosen = menu.exec(self.tree.viewport().mapToGlobal(pos))
+        if chosen == edit_action:
+            self._edit_emulator()
+        elif chosen == test_action:
+            self._test_emulator_mapping()
+        elif chosen == remove_action:
+            self._remove_emulator()
+
     def _find_item(self, prefix: str) -> QTreeWidgetItem | None:
         for i in range(self.tree.topLevelItemCount()):
             item = self.tree.topLevelItem(i)
@@ -120,6 +153,7 @@ class EmulatorsPage(PageBase):
             return
         self.window.config_data["emulators"] = build_emulators_map()
         self.reload_from_config()
+        self._update_selection_hint()
 
     def _add_emulator(self) -> None:
         dialog = EmulatorDialog(self, "Add emulator mapping")
@@ -156,10 +190,12 @@ class EmulatorsPage(PageBase):
             index = self.tree.indexOfTopLevelItem(item)
             self.tree.takeTopLevelItem(index)
             self.tree.addTopLevelItem(QTreeWidgetItem([new_prefix, ", ".join(exe_names), ", ".join(pre_args)]))
+            self._update_selection_hint()
 
     def _remove_emulator(self) -> None:
         for item in self.tree.selectedItems():
             self.tree.takeTopLevelItem(self.tree.indexOfTopLevelItem(item))
+        self._update_selection_hint()
 
     def _test_emulator_mapping(self) -> None:
         selected = self.tree.selectedItems()

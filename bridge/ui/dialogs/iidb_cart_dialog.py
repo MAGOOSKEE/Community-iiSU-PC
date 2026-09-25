@@ -2,7 +2,7 @@
 Replaces manager.py's _iidb_open_cart() Toplevel."""
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout
+from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QMenu, QMessageBox, QPushButton, QTreeWidget, QTreeWidgetItem, QVBoxLayout
 
 from bridge.services import iidb_service as svc
 from bridge.ui.workers.task_runner import run_in_background
@@ -32,19 +32,23 @@ class IidbCartDialog(QDialog):
         self.tree.setRootIsDecorated(False)
         self.tree.setColumnWidth(0, 190)
         self.tree.setColumnWidth(1, 130)
+        self.tree.itemSelectionChanged.connect(self._update_selection_hint)
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._show_context_menu)
         layout.addWidget(self.tree, 1)
         self._refill()
 
         row = QHBoxLayout()
-        remove_button = QPushButton("Remove Selected")
-        remove_button.setObjectName("ghost")
-        remove_button.clicked.connect(self._remove_selected)
-        row.addWidget(remove_button)
         clear_button = QPushButton("Clear Cart")
         clear_button.setObjectName("ghost")
         clear_button.clicked.connect(self._clear_all)
         row.addWidget(clear_button)
         row.addStretch(1)
+        # Remove Selected lives only in the right-click menu -- same
+        # convention as Console Games/Emulators/Android Storage.
+        self.selection_hint = QLabel("")
+        self.selection_hint.setStyleSheet(f"color: {TEXT_DIM};")
+        row.addWidget(self.selection_hint)
         close_button = QPushButton("Close")
         close_button.setObjectName("ghost")
         close_button.clicked.connect(self.accept)
@@ -56,6 +60,25 @@ class IidbCartDialog(QDialog):
         layout.addLayout(row)
 
         self._install_signals = None
+        self._update_selection_hint()
+
+    def _update_selection_hint(self) -> None:
+        count = len(self.tree.selectedItems())
+        if count:
+            self.selection_hint.setText(f"{count} selected, right-click to remove.")
+        else:
+            self.selection_hint.setText("Select item(s), then right-click to remove.")
+
+    def _show_context_menu(self, pos) -> None:
+        item = self.tree.itemAt(pos)
+        if item is None:
+            return
+        if item not in self.tree.selectedItems():
+            self.tree.setCurrentItem(item)
+        menu = QMenu(self)
+        remove_action = menu.addAction("Remove Selected")
+        if menu.exec(self.tree.viewport().mapToGlobal(pos)) == remove_action:
+            self._remove_selected()
 
     def _refill(self) -> None:
         self.tree.clear()

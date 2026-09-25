@@ -8,12 +8,14 @@ from pathlib import Path
 
 import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
+    QMenu,
     QPushButton,
     QWidget,
 )
@@ -53,6 +55,9 @@ class RomsPage(PageBase):
         self.body_layout.addWidget(QLabel("Folders to search for emulator executables:"))
         self.search_roots_list = QListWidget()
         self.search_roots_list.setSelectionMode(QListWidget.SelectionMode.ExtendedSelection)
+        self.search_roots_list.itemSelectionChanged.connect(self._update_selection_hint)
+        self.search_roots_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.search_roots_list.customContextMenuRequested.connect(self._show_context_menu)
         self.body_layout.addWidget(self.search_roots_list, 1)
 
         btn_row = QWidget()
@@ -62,14 +67,34 @@ class RomsPage(PageBase):
         add_button.setObjectName("ghost")
         add_button.clicked.connect(self._add_search_root)
         btn_row_layout.addWidget(add_button)
-        remove_button = QPushButton("Remove selected")
-        remove_button.setObjectName("ghost")
-        remove_button.clicked.connect(self._remove_search_root)
-        btn_row_layout.addWidget(remove_button)
         btn_row_layout.addStretch(1)
+        # Remove selected lives only in the right-click menu -- same
+        # convention as every other selection-driven list in the app.
+        self.selection_hint = QLabel("")
+        self.selection_hint.setStyleSheet(f"color: {TEXT_DIM};")
+        btn_row_layout.addWidget(self.selection_hint)
         self.body_layout.addWidget(btn_row)
 
         self.reload_from_config()
+        self._update_selection_hint()
+
+    def _update_selection_hint(self) -> None:
+        count = len(self.search_roots_list.selectedItems())
+        if count:
+            self.selection_hint.setText(f"{count} selected, right-click to remove.")
+        else:
+            self.selection_hint.setText("Select folder(s), then right-click to remove.")
+
+    def _show_context_menu(self, pos) -> None:
+        item = self.search_roots_list.itemAt(pos)
+        if item is None:
+            return
+        if item not in self.search_roots_list.selectedItems():
+            self.search_roots_list.setCurrentItem(item)
+        menu = QMenu(self)
+        remove_action = menu.addAction("Remove selected")
+        if menu.exec(self.search_roots_list.viewport().mapToGlobal(pos)) == remove_action:
+            self._remove_search_root()
 
     def reload_from_config(self) -> None:
         self.roms_dir_edit.setText(self.window.config_data.get("roms_dir", ""))
@@ -125,3 +150,4 @@ class RomsPage(PageBase):
     def _remove_search_root(self) -> None:
         for item in self.search_roots_list.selectedItems():
             self.search_roots_list.takeItem(self.search_roots_list.row(item))
+        self._update_selection_hint()

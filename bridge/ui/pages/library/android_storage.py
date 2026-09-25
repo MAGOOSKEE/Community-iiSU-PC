@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QLabel,
     QLineEdit,
+    QMenu,
     QMessageBox,
     QPushButton,
     QTreeWidget,
@@ -75,6 +76,9 @@ class AndroidStoragePage(PageBase):
         self.tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.tree.setColumnWidth(0, 470)
         self.tree.itemDoubleClicked.connect(self._open_selected)
+        self.tree.itemSelectionChanged.connect(self._update_selection_hint)
+        self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.tree.customContextMenuRequested.connect(self._show_context_menu)
         self.body_layout.addWidget(self.tree, 1)
 
         buttons = QWidget()
@@ -83,21 +87,24 @@ class AndroidStoragePage(PageBase):
         for label, handler in (
             ("Upload File...", self._upload_file),
             ("Upload Folder...", self._upload_folder),
-            ("Download...", self._download),
-            ("Edit Text...", self._edit_text),
             ("New Folder...", self._new_folder),
-            ("Rename...", self._rename),
-            ("Delete", self._delete),
         ):
             button = QPushButton(label)
             button.setObjectName("ghost")
             button.clicked.connect(handler)
             buttons_layout.addWidget(button)
         buttons_layout.addStretch(1)
+        # Download/Edit Text/Rename/Delete act on the current selection --
+        # same convention as Console Games and Emulators: no always-visible
+        # buttons for those, just this hint plus the right-click menu.
+        self.selection_hint = QLabel("")
+        self.selection_hint.setStyleSheet(f"color: {TEXT_DIM};")
+        buttons_layout.addWidget(self.selection_hint)
         self.body_layout.addWidget(buttons)
 
         self._refresh_signals = None
         self._action_signals = None
+        self._update_selection_hint()
 
     def on_shown(self) -> None:
         self.refresh()
@@ -140,6 +147,41 @@ class AndroidStoragePage(PageBase):
 
     def _selected(self) -> list[tuple[str, bool]]:
         return [(item.text(0), item.text(1) == "Folder") for item in self.tree.selectedItems()]
+
+    def _update_selection_hint(self) -> None:
+        count = len(self.tree.selectedItems())
+        if count:
+            self.selection_hint.setText(f"{count} selected, right-click for actions.")
+        else:
+            self.selection_hint.setText("Select item(s), then right-click for actions.")
+
+    def _show_context_menu(self, pos) -> None:
+        item = self.tree.itemAt(pos)
+        if item is None:
+            return
+        if item not in self.tree.selectedItems():
+            self.tree.setCurrentItem(item)
+        selected = self._selected()
+        if not selected:
+            return
+
+        menu = QMenu(self)
+        download_action = menu.addAction("Download...")
+        edit_action = menu.addAction("Edit Text...")
+        edit_action.setEnabled(len(selected) == 1 and not selected[0][1])
+        rename_action = menu.addAction("Rename...")
+        rename_action.setEnabled(len(selected) == 1)
+        menu.addSeparator()
+        delete_action = menu.addAction("Delete")
+        chosen = menu.exec(self.tree.viewport().mapToGlobal(pos))
+        if chosen == download_action:
+            self._download()
+        elif chosen == edit_action:
+            self._edit_text()
+        elif chosen == rename_action:
+            self._rename()
+        elif chosen == delete_action:
+            self._delete()
 
     def _open_selected(self, *_args) -> None:
         selected = self._selected()
