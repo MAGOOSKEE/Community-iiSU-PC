@@ -1,4 +1,4 @@
-"""Resolves the environment a Java-invoking subprocess call should use --
+"""Resolves the environment a Java-invoking subprocess call should use,
 shared by patch_iisu.py's/stub_apk.py's apksigner calls and
 create_shortcut.py's apktool invocation, all three of which shell out to
 Java tooling.
@@ -9,10 +9,10 @@ there's no bundled JRE, so every call site keeps using whatever `java`/
 the system PATH, exactly as before. Once the Inno Setup build (Phase 3-4
 of the Qt rewrite plan) starts shipping a jlink-trimmed JRE under
 {app}\\runtime\\jre, this starts returning an environment with that JRE's
-bin/ prepended and JAVA_HOME set -- apksigner.bat in particular resolves
+bin/ prepended and JAVA_HOME set, apksigner.bat in particular resolves
 its own `java` via JAVA_HOME/PATH internally and won't find a bundled JRE
 otherwise. Deliberately never touches the user's real system PATH/
-JAVA_HOME -- only the subprocess's own copy of the environment.
+JAVA_HOME, only the subprocess's own copy of the environment.
 """
 
 import os

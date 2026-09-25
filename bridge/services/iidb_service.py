@@ -1,11 +1,11 @@
-"""Non-UI logic behind the iiDB Browser -- search/browse iiDB's public
+"""Non-UI logic behind the iiDB Browser, search/browse iiDB's public
 media API, build a cart install plan, and push originals into iiSU
 through MediaBridge. Extracted ahead of porting that sub-window to Qt.
 
 iiDB installs are Windows-Apps-only by design (see _windows_target):
 Install All requires an exact Windows game-name match against an existing
 .pcgame placeholder, so it never risks writing media to the wrong console
-ROM entry. This is a real, if narrow, existing limitation -- not something
+ROM entry. This is a real, if narrow, existing limitation, not something
 this port introduces.
 """
 
@@ -48,7 +48,7 @@ _TYPE_LABELS = {
 
 # Maps an iiDB category to the iiSU MediaBridge logical slot. bool=True
 # means the category supports numbered slots. Windows box art is mapped to
-# iiSU's icon slot deliberately -- verified against the current iiSU
+# iiSU's icon slot deliberately, verified against the current iiSU
 # Windows platform implementation, not a guess.
 _INSTALL_MAPPING = {
     "hero": ("hero", True),
@@ -80,7 +80,7 @@ def install_mapping(asset_type: str) -> tuple[str, bool]:
 
 def _json_get(path: str, params: dict | None = None, timeout: int = 15):
     """Read one iiDB JSON endpoint. iiDB is currently an unauthenticated
-    public API, but it is not treated as a stable contract -- callers
+    public API, but it is not treated as a stable contract, callers
     validate fields defensively."""
     url = IIDB_API_BASE + path
     if params:
@@ -178,7 +178,7 @@ def fetch_thumbnail(url: str) -> Path:
 
 def fetch_soundbite_preview(url: str) -> Path:
     """Downloads (or reuses a cached copy of) a soundbite preview for MCI
-    playback -- unlike Media Library's saved soundbites (always PCM WAV),
+    playback, unlike Media Library's saved soundbites (always PCM WAV),
     iiDB previews can be mp3/wav/etc., so this is played back via Windows'
     MCI (handles compressed formats natively) rather than WinmmPlayer."""
     IIDB_AUDIO_CACHE_DIR.mkdir(parents=True, exist_ok=True)

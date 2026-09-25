@@ -1,7 +1,7 @@
 """
 Quick manual test: opens the new Qt onboarding wizard for real interaction.
 
-Safe to click all the way through, including "Finish" -- this redirects
+Safe to click all the way through, including "Finish", this redirects
 config saves to a temp file, NOT your real bridge/config.json, so there's
 no risk to your actual install no matter what you do in here.
 

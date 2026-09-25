@@ -5,7 +5,7 @@ done (~30+ call sites across the old bridge/manager.py). A QThreadPool
 worker plus queued signals gets the same "do I/O off the main thread, then
 safely touch widgets back on the main thread" result, since Qt already
 marshals a signal emitted from a worker thread onto its receiver's own
-thread automatically (a queued connection) -- no extra plumbing needed
+thread automatically (a queued connection), no extra plumbing needed
 for that part.
 """
 
@@ -31,15 +31,15 @@ class _Runnable(QRunnable):
     def run(self) -> None:
         try:
             result = self._fn(*self._args, **self._kwargs)
-        except Exception as e:  # noqa: BLE001 -- reported to the caller's on_error either way
+        except Exception as e:  # noqa: BLE001; reported to the caller's on_error either way
             self._emit_safely(self._signals.error, str(e))
         else:
             self._emit_safely(self._signals.finished, result)
 
     @staticmethod
     def _emit_safely(signal, value) -> None:
-        # A worker can still be mid-run when the window/app closes -- e.g.
-        # HomePage's 2-second status poll -- and by the time it's done, the
+        # A worker can still be mid-run when the window/app closes, e.g.
+        # HomePage's 2-second status poll, and by the time it's done, the
         # WorkerSignals QObject its caller held (self._status_signals etc.)
         # may already be gone along with the rest of the widget tree.
         # emit() on a deleted QObject raises RuntimeError from a background
@@ -63,7 +63,7 @@ def run_in_background(
     or on_error(message) fires back on the Qt main thread once it's done.
 
     Callers must keep the returned WorkerSignals alive (e.g. `self._x_signals
-    = run_in_background(...)`) until on_done/on_error fires -- same reason
+    = run_in_background(...)`) until on_done/on_error fires, same reason
     the old code kept its QueueWriter/thread references on self rather than
     as a throwaway local."""
     signals = WorkerSignals()

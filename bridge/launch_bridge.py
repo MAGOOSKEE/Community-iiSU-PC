@@ -22,7 +22,7 @@ For each request, this:
      fullscreen, forces it to the foreground, synthesizes a click so
      keyboard/controller input is picked up immediately (Qt apps track
      actual input focus on their render widget, separately from the OS-level
-     foreground window), then drops the overlay -- without it, the moment
+     foreground window), then drops the overlay, without it, the moment
      between iiSU minimizing and the emulator's window taking over would
      show raw desktop.
   5. Waits for the emulator to exit (either normally, or forced via the
@@ -53,12 +53,12 @@ from ctypes import wintypes
 from pathlib import Path
 from urllib.parse import unquote
 
-import portable_sdk  # noqa: F401 -- imported for its import-time PATH fix (adb), not used directly here
+import portable_sdk  # noqa: F401; imported for its import-time PATH fix (adb), not used directly here
 from bridge_config import ConfigMissingError, load_config
 from controller_bridge import ControllerBridge
 
 # Needed to reach bridge.ui.boot_overlay_qt below regardless of this
-# script's own cwd -- start_iisu_pc.py always launches this as its own
+# script's own cwd, start_iisu_pc.py always launches this as its own
 # subprocess with cwd set to this directory, not the project root.
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from bridge.ui import boot_overlay_qt as boot_overlay
@@ -109,12 +109,12 @@ SHUTDOWN_HOTKEY_ID = 2
 MODIFIER_FLAGS = {"alt": 0x0001, "ctrl": 0x0002, "shift": 0x0004, "win": 0x0008}
 MOD_NOREPEAT = 0x4000
 
-# Virtual-key codes for GetAsyncKeyState, used by quit_key_watcher below --
+# Virtual-key codes for GetAsyncKeyState, used by quit_key_watcher below,
 # separate from MODIFIER_FLAGS (RegisterHotKey's own bitflags), which
 # don't apply here since polling needs each modifier's actual key code.
 MODIFIER_VK = {"ctrl": 0x11, "alt": 0x12, "shift": 0x10, "win": 0x5B}
 # Named (non-single-character) keys quit_hotkey's "key" can be set to,
-# via manager.py's key-capture UI (Tk keysym, lowercased) -- anything not
+# via manager.py's key-capture UI (Tk keysym, lowercased), anything not
 # listed here falls back to ord(key.upper()[0]), which already covers
 # every plain letter/digit key (the only kind this config supported before
 # Escape became the default).
@@ -125,7 +125,7 @@ NAMED_KEY_VK = {
     "prior": 0x21, "next": 0x22,
     **{f"f{n}": 0x6F + n for n in range(1, 13)},
 }
-KEY_POLL_INTERVAL = 0.03  # seconds -- responsive without busy-looping
+KEY_POLL_INTERVAL = 0.03  # seconds, responsive without busy-looping
 BOOTANIM_WAIT_SECONDS = 90  # generous cap; see launch_iisu's docstring
 
 
@@ -138,7 +138,7 @@ def _is_key_down(vk: int) -> bool:
 
 # Loopback only: the AVD reaches this over its host-loopback alias
 # (10.0.2.2), which is routed to the host's own 127.0.0.1 regardless of
-# which local address this actually binds -- there's no reason for this to
+# which local address this actually binds, there's no reason for this to
 # be reachable from the LAN. The protocol has no authentication at all
 # (anything that can open the socket can make this launch an arbitrary
 # configured emulator, or hand an arbitrary app_id to Steam's URI handler),
@@ -149,13 +149,13 @@ INTENT_CMP_RE = re.compile(r"cmp=(\S+)")
 INTENT_DAT_RE = re.compile(r"dat=(\S+)")
 
 # iiSU's own default emulator list routes Steam/GOG/Epic-style entries to
-# GameNative, an Android app that runs Windows PC games under Wine/Box64 --
+# GameNative, an Android app that runs Windows PC games under Wine/Box64,
 # irrelevant here, since this project always has the real thing (Steam
 # itself) available PC-side already. Its launch command
 # (emuladores_default.json's "%PACKAGE%/.MainActivity -a
 # app.gamenative.LAUNCH_GAME -e app_id %GAMENATIVE_APP_ID_INT%") passes the
-# Steam App ID as a plain int Intent extra, not a file path or ClipData URI
-# -- there's no "rom" to find under roms_dir at all, unlike every other
+# Steam App ID as a plain int Intent extra, not a file path or ClipData URI,
+# there's no "rom" to find under roms_dir at all, unlike every other
 # entry in config.json's emulators map, so this is handled as its own
 # special case below rather than forced into the exe_names/rom_path shape
 # every other profile uses.
@@ -346,14 +346,14 @@ def save_path_cache(cache: dict) -> None:
 
 
 def log_launch(line: str, notify: bool = False, notify_title: str = "Community-iiSU-PC") -> None:
-    """Appends one line to launch_history.log with a timestamp -- every
+    """Appends one line to launch_history.log with a timestamp, every
     launch attempt gets logged here regardless of outcome, not just
     failures, so there's always a record to check against ("did this
     actually try to launch, and with what") rather than only ever finding
     out about a problem after the fact with nothing to look back on.
     notify additionally raises a tray balloon (see boot_overlay.
-    notify_error) for anything worth interrupting someone over -- a
-    failure, not a routine successful launch -- since the bridge runs
+    notify_error) for anything worth interrupting someone over, a
+    failure, not a routine successful launch, since the bridge runs
     with no visible window normally and a log file nobody's looking at
     doesn't "make the user aware" of anything by itself."""
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -376,12 +376,12 @@ def _find_by_name(root: Path, names: set[str], max_depth: int) -> Path | None:
     depth 0). Replaces Path.rglob(), whose unbounded recursion means one
     slow, unavoidable round-trip per folder for every folder in the
     *entire* tree when root lives on a network share (search_roots and
-    roms_dir are both commonly a Windows-mapped X:\\ drive here) --
+    roms_dir are both commonly a Windows-mapped X:\\ drive here),
     exactly the "takes forever" scan this exists to fix. Emulator installs
     and this project's curated ROM folders are never more than a few
     levels deep, so a modest cap avoids wandering into irrelevant,
     deeply-nested subfolders an rglob can't tell apart from a real match
-    ahead of time -- an emulator's own save states/BIOS/thumbnails/cache
+    ahead of time, an emulator's own save states/BIOS/thumbnails/cache
     dirs, or (worse, since it recurses *into* it for no reason) a
     multi-gigabyte Xbox 360 title's own .data folder sitting right next to
     the file actually being searched for. BFS also means a shallower
@@ -409,7 +409,7 @@ def _find_by_name(root: Path, names: set[str], max_depth: int) -> Path | None:
 
 def find_executable(names: list[str], search_roots: list[Path], cache: dict) -> Path | None:
     """Scanning search_roots (which commonly include all of C:/Program
-    Files) on every single launch is real, avoidable latency -- the result
+    Files) on every single launch is real, avoidable latency, the result
     almost never changes between launches, so it's cached by exe name and
     only re-scanned if the cached path stops existing (e.g. the emulator
     got moved/reinstalled elsewhere).
@@ -417,7 +417,7 @@ def find_executable(names: list[str], search_roots: list[Path], cache: dict) -> 
     The cache key includes search_roots itself (not just the exe names),
     so editing search_roots in manager.py naturally invalidates the old
     entry instead of it staying wrong until the previously-found file
-    happens to disappear -- manager.py documents that path changes apply
+    happens to disappear, manager.py documents that path changes apply
     on the very next launch with no restart needed, and a stale cache hit
     would quietly break that."""
     cache_key = "|".join(names) + "::" + "|".join(str(r) for r in search_roots)
@@ -456,41 +456,41 @@ def find_rom(rom_filename: str, roms_dir: Path, cache: dict) -> Path | None:
 
 def find_emulator_for_package(package: str, emulators: dict, rom_filename: str | None, android_core: str | None) -> dict | None:
     """Every package here (RetroArch aside) is single-system, so the
-    package match alone already tells the whole story -- no guessing from
+    package match alone already tells the whole story, no guessing from
     the ROM's extension involved, or needed, for any of those.
 
     RetroArch (com.retroarch) is the one exception: it's a multi-core,
     multi-console frontend on the Android side, and iiSU reports that same
     package for it regardless of which system the game actually is. But
-    iiSU also always reports *which core it actually launched with* --
-    the intent's LIBRETRO extra (android_core) -- and that's a strictly
+    iiSU also always reports *which core it actually launched with*,
+    the intent's LIBRETRO extra (android_core), and that's a strictly
     better signal than the ROM's file extension, which can be outright
     wrong: .chd is chdman's container for both PS1 CDs and Dreamcast GD-
     ROMs, and plenty of consoles here share .zip/.7z, so guessing the
     console from extension alone is guessing at something android_core
     already just told us. android_core is trusted first, unconditionally,
-    whenever it's present -- not just for a curated subset of extensions --
+    whenever it's present, not just for a curated subset of extensions,
     which also means any core this project has never explicitly curated
     (e.g. an arcade/MAME core resolved for a .zip) still gets routed
     correctly instead of falling through to a guess.
 
-    A resolved core first checks RETROARCH_CORE_OVERRIDES -- cores with
+    A resolved core first checks RETROARCH_CORE_OVERRIDES, cores with
     their own dedicated, better-suited standalone emulator PC-side (e.g.
-    Flycast over RetroArch-with-flycast-core for Dreamcast) -- confirmed
+    Flycast over RetroArch-with-flycast-core for Dreamcast), confirmed
     live as necessary: a Dreamcast .gdi launched com.retroarch with
     LIBRETRO=flycast_libretro_android.so even with standalone Flycast
     picked in iiSU. Failing that override, the core is passed straight
-    through to a generic RetroArch launch (-L cores/<core>.dll) -- so
+    through to a generic RetroArch launch (-L cores/<core>.dll), so
     long as that core is actually present on the Windows RetroArch
     install (launch_bridge.ensure_retroarch_core downloads it from the
-    libretro buildbot if it isn't) -- rather than substituted into one of
+    libretro buildbot if it isn't), rather than substituted into one of
     this module's own curated per-extension templates, so this isn't
     limited to consoles/cores someone has explicitly added here.
 
     Only when android_core is missing entirely (or doesn't look like a
     libretro-android core filename at all) does this fall back to the
     plain extension-based guess in RETROARCH_BY_EXTENSION/
-    RETROARCH_SAFETY_NET_EXTENSIONS -- a reasonable default for the rare
+    RETROARCH_SAFETY_NET_EXTENSIONS, a reasonable default for the rare
     case iiSU doesn't report a core, never the primary mechanism."""
     for prefix, profile in emulators.items():
         if not package.startswith(prefix):
@@ -521,7 +521,7 @@ def core_dll_from_pre_args(pre_args: list[str]) -> str | None:
 
 def ensure_retroarch_core(retroarch_dir: Path, core_dll: str) -> bool:
     """RetroArch loads its core list from disk, not from anything iiSU or
-    this bridge tracks -- a core this project's own config.json expects
+    this bridge tracks, a core this project's own config.json expects
     (e.g. fceumm_libretro.dll for NES) can easily not actually be there if
     it was never downloaded through RetroArch's own Online Updater. RetroArch
     doesn't error visibly when that happens: it just fails to load the core
@@ -531,7 +531,7 @@ def ensure_retroarch_core(retroarch_dir: Path, core_dll: str) -> bool:
     RetroArch's in-app updater itself pulls from) instead of leaving that
     silent failure to happen. Returns True if the core is present by the
     time this returns (already there, or freshly downloaded), False if it
-    couldn't be obtained -- the caller still attempts the launch either way,
+    couldn't be obtained, the caller still attempts the launch either way,
     since a download failure here shouldn't be worse than today's silent
     RetroArch exit."""
     core_path = retroarch_dir / "cores" / core_dll
@@ -539,14 +539,14 @@ def ensure_retroarch_core(retroarch_dir: Path, core_dll: str) -> bool:
         return True
 
     url = LIBRETRO_CORE_URL.format(core_dll=core_dll)
-    print(f"[bridge] {core_dll} isn't installed -- downloading it from the libretro buildbot...")
+    print(f"[bridge] {core_dll} isn't installed, downloading it from the libretro buildbot...")
     try:
         with urllib.request.urlopen(url, timeout=30) as resp:
             zip_bytes = resp.read()
         with zipfile.ZipFile(io.BytesIO(zip_bytes)) as z:
             data = z.read(core_dll)
     except Exception as e:
-        print(f"[bridge] couldn't download {core_dll} ({e}) -- the game launch will likely fail")
+        print(f"[bridge] couldn't download {core_dll} ({e}), the game launch will likely fail")
         return False
 
     core_path.parent.mkdir(parents=True, exist_ok=True)
@@ -558,8 +558,8 @@ def ensure_retroarch_core(retroarch_dir: Path, core_dll: str) -> bool:
 def friendly_emulator_name(executable: Path) -> str:
     """Human-readable name for the handoff overlay's status line (e.g.
     "Waiting on DuckStation..." instead of "Waiting on duckstation-qt-x64-
-    ReleaseLTCG.exe..."). Falls back to the executable's own filename --
-    still readable, just less polished -- for anything not in this
+    ReleaseLTCG.exe..."). Falls back to the executable's own filename,
+    still readable, just less polished, for anything not in this
     project's curated list, e.g. some other RetroArch-compatible fork."""
     for app_label, exe_names in all_emulator_exe_names():
         if executable.name in exe_names:
@@ -588,11 +588,11 @@ def launch_iisu(config: dict) -> None:
     where waiting longer is fine): boot_completed only flips once *every*
     system app's BOOT_COMPLETED receiver has finished, including this
     project's own redirector stubs, and can lag well behind bootanim once
-    more of them are installed -- confirmed live on an earlier run
+    more of them are installed, confirmed live on an earlier run
     (iiSU sitting on the stock home screen for 1-2 minutes with
     boot_completed still unset). Retries every second after that since
     `am start` can still fail with a transient "does not exist" error for
-    a moment even once the system looks interactive -- package manager
+    a moment even once the system looks interactive, package manager
     can still be resolving components (confirmed via `dumpsys package`:
     the activity is genuinely registered, `am start` just tried too
     early)."""
@@ -624,12 +624,12 @@ def launch_iisu(config: dict) -> None:
 
 def set_volume_max() -> None:
     """A fresh boot comes up at whatever media volume level the system
-    image defaults to (usually well below max) -- silent enough that
+    image defaults to (usually well below max), silent enough that
     anything iiSU itself plays (UI sounds, trailers) needs a manual
     volume raise inside the VM on every single boot otherwise. Repeated
     VOLUME_UP keyevents clamp at the device's actual max regardless of
     AOSP vs OEM MAX_VOLUME differences, so this doesn't need to know the
-    exact volume index -- one `adb shell input keyevent` call with the
+    exact volume index, one `adb shell input keyevent` call with the
     keycode repeated is enough, no need for 20 separate subprocess calls."""
     subprocess.run(
         ["adb", "shell", "input", "keyevent"] + ["24"] * 20, capture_output=True, text=True,
@@ -641,7 +641,7 @@ def show_iisu_window(config: dict) -> None:
     """Brings the iiSU/AVD window to the foreground, borderless-fullscreen
     if "iisu_fullscreen" is set in config.json. Plain SW_MAXIMIZE doesn't
     work on this window (it clamps its own max size), so true fullscreen
-    means stripping the title bar/border and resizing to the screen -- see
+    means stripping the title bar/border and resizing to the screen, see
     winapi.make_fullscreen."""
     end_game_handoff()
     hwnd = find_window_by_title(config["iisu_window_title"])
@@ -674,11 +674,11 @@ def wait_and_restore_iisu(process: subprocess.Popen, config: dict, emulator_name
     game exits.
 
     A non-zero exit code is only a heuristic for "this launch actually
-    failed," not a certainty -- some emulators exit non-zero on a normal
-    quit too -- but it's the only signal available for the class of
+    failed," not a certainty, some emulators exit non-zero on a normal
+    quit too, but it's the only signal available for the class of
     failure that shows its own error dialog and waits for it to be
     dismissed rather than crashing outright (confirmed live: RPCS3's
-    missing-boot-target dialog, DuckStation's missing-SBI-file dialog --
+    missing-boot-target dialog, DuckStation's missing-SBI-file dialog,
     neither exits until someone clicks through it, so there's no
     "crashed immediately" moment to catch, only the eventual exit code
     once they do). Logged either way; only notified when it looks like a
@@ -717,9 +717,9 @@ def shutdown_everything() -> None:
     process. Runs as a separate process because this one is about to exit
     itself, and because stop_iisu_pc.py needs to be able to kill this
     bridge process by PID. Detached and logged to stop.log by default
-    rather than given a visible console -- a console window for a script
-    that just prints a handful of status lines and exits is pure clutter
-    -- unless config.json's "debug_show_console_windows" says otherwise."""
+    rather than given a visible console, a console window for a script
+    that just prints a handful of status lines and exits is pure clutter,
+    unless config.json's "debug_show_console_windows" says otherwise."""
     with current_process_lock:
         proc = current_process
         native_hwnd = current_native_window
@@ -775,13 +775,13 @@ def hotkey_listener(config: dict) -> None:
     thread with its own message loop, since RegisterHotKey delivers
     WM_HOTKEY via the calling thread's queue.
 
-    quit_hotkey no longer goes through this at all -- see quit_key_watcher,
+    quit_hotkey no longer goes through this at all, see quit_key_watcher,
     which runs as its own separate thread/mechanism (GetAsyncKeyState
     polling, not RegisterHotKey) since it now needs to tell a quick tap
     apart from a multi-second hold, something RegisterHotKey's single
     fire-once-per-press model has no way to express. shutdown_hotkey stays
     on the old mechanism as a distinct, independent combo for anyone who
-    wants one in addition to holding quit_hotkey -- it's optional (None
+    wants one in addition to holding quit_hotkey, it's optional (None
     skips registration entirely) since a fresh install's default
     quit_hotkey (Escape) already covers full shutdown via a hold, with no
     second combo needed."""
@@ -817,7 +817,7 @@ def quit_tap_action(label: str = "quit") -> None:
         handoff_active = game_handoff_active
     if native_hwnd is not None and user32.IsWindow(native_hwnd):
         print(f"[bridge] {label}, quitting native game")
-        log_launch(f"QUIT: {label} -- native HWND {native_hwnd}, PID {native_pid}")
+        log_launch(f"QUIT: {label}, native HWND {native_hwnd}, PID {native_pid}")
         if native_pid and _pid_is_running(native_pid):
             # Once a native game has been identified, its owning PID is
             # authoritative. current_process may only be a launcher or
@@ -833,8 +833,8 @@ def quit_tap_action(label: str = "quit") -> None:
             except Exception:
                 pass
     elif native_pid and _pid_is_running(native_pid):
-        print(f"[bridge] {label}, native game window changed -- terminating tracked PID {native_pid}")
-        log_launch(f"QUIT: {label} -- native HWND changed; terminating PID {native_pid}")
+        print(f"[bridge] {label}, native game window changed, terminating tracked PID {native_pid}")
+        log_launch(f"QUIT: {label}, native HWND changed; terminating PID {native_pid}")
         _terminate_native_pid(native_pid)
         if proc is not None and proc.poll() is None and proc.pid != native_pid:
             try:
@@ -857,11 +857,11 @@ def quit_tap_action(label: str = "quit") -> None:
         # permanently deadlock the calling thread.
         global pending_native_quit
         pending_native_quit = True
-        print(f"[bridge] {label} during native launch handoff -- quit queued")
+        print(f"[bridge] {label} during native launch handoff, quit queued")
         log_launch(f"QUIT: {label} during native launch handoff; queued until HWND/PID is tracked")
     else:
-        print(f"[bridge] {label} with no emulator/native game running -- closing iiSU and the AVD entirely...")
-        log_launch(f"QUIT: {label} -- no tracked emulator/native HWND; shutting down iiSU-PC")
+        print(f"[bridge] {label} with no emulator/native game running, closing iiSU and the AVD entirely...")
+        log_launch(f"QUIT: {label}, no tracked emulator/native HWND; shutting down iiSU-PC")
         shutdown_everything()
 
 
@@ -1059,12 +1059,12 @@ def launch_windows_app(app_name: str, config: dict) -> bool:
 
         if launch_type == "uri":
             print(f"[bridge] launching Windows URI: {uri}")
-            log_launch(f"LAUNCHED: Windows app {app_name} -- URI {uri}")
+            log_launch(f"LAUNCHED: Windows app {app_name}, URI {uri}")
             os.startfile(uri)
         else:
             args = [str(executable), *configured_args]
             print(f"[bridge] launching Windows app: {args}")
-            log_launch(f"LAUNCHED: Windows app {app_name} -- {args}")
+            log_launch(f"LAUNCHED: Windows app {app_name}, {args}")
             process = subprocess.Popen(args, cwd=str(working_dir))
             with current_process_lock:
                 global current_process
@@ -1110,7 +1110,7 @@ def launch_windows_app(app_name: str, config: dict) -> bool:
             current_native_window = hwnd
             current_native_pid = native_pid
         debug_log(f"TRACKING native app={app_name!r} HWND={hwnd} PID={native_pid}")
-        log_launch(f"TRACKING: Windows app {app_name} -- HWND {hwnd}, PID {native_pid}")
+        log_launch(f"TRACKING: Windows app {app_name}, HWND {hwnd}, PID {native_pid}")
         print(f"[bridge] tracking native game window HWND={hwnd}, PID={native_pid}")
 
         # Start lifetime tracking immediately after publishing the native
@@ -1212,7 +1212,7 @@ def launch_steam_game(app_id: str, config: dict) -> None:
             f"TRACKING GameNative Steam app={app_id!r} HWND={hwnd} PID={native_pid}"
         )
         log_launch(
-            f"TRACKING: Steam app {app_id} via GameNative -- HWND {hwnd}, PID {native_pid}"
+            f"TRACKING: Steam app {app_id} via GameNative, HWND {hwnd}, PID {native_pid}"
         )
         print(
             f"[bridge] tracking GameNative Steam window HWND={hwnd}, PID={native_pid}"
@@ -1313,7 +1313,7 @@ def handle_request(raw_intent: str) -> None:
     ]
     # RetroArch launches (and possibly other libretro-frontend launches)
     # pass the ROM and the exact core to use as plain Intent extras instead
-    # of a data URI/ClipData -- iiSU launches RetroArch exclusively this
+    # of a data URI/ClipData, iiSU launches RetroArch exclusively this
     # way, never through the URI mechanism every other emulator here uses,
     # so these have to be parsed separately or RetroArch games never
     # launch regardless of how config.json's by_extension map is set up.
@@ -1334,7 +1334,7 @@ def handle_request(raw_intent: str) -> None:
     if package == GAMENATIVE_PACKAGE:
         app_id = extras.get("app_id")
         if app_id is None:
-            log_launch("FAILED: GameNative launch with no app_id extra -- can't tell Steam what to run", notify=True)
+            log_launch("FAILED: GameNative launch with no app_id extra, can't tell Steam what to run", notify=True)
             return
         log_launch(f"LAUNCHED: Steam app {app_id} via GameNative")
         launch_steam_game(app_id, config)
@@ -1352,7 +1352,7 @@ def handle_request(raw_intent: str) -> None:
     if data_uri:
         rom_filename = unquote(data_uri).rsplit("/", 1)[-1]
     elif "ROM" in extras:
-        # Already a plain filesystem path, not URI-encoded -- no unquote().
+        # Already a plain filesystem path, not URI-encoded, no unquote().
         rom_filename = extras["ROM"].rsplit("/", 1)[-1]
     else:
         rom_filename = None
@@ -1383,12 +1383,12 @@ def handle_request(raw_intent: str) -> None:
         ensure_retroarch_core(executable.parent, core_dll)
 
     # Every emulator here except RPCS3 takes its rom as a trailing
-    # positional argument after any flags -- RPCS3's own CLI is the
+    # positional argument after any flags, RPCS3's own CLI is the
     # opposite (confirmed against its actual usage,
     # "rpcs3.exe <game_path> --no-gui --fullscreen"): the boot target has
     # to come *before* --no-gui/--fullscreen, or it parses as neither
     # flag having a boot target at all ("Cannot run no-gui mode without
-    # boot target" -- confirmed live). rom_before_args, when a profile
+    # boot target", confirmed live). rom_before_args, when a profile
     # sets it, is the escape hatch for that rather than hardcoding RPCS3
     # as a special case here.
     if rom_path and profile.get("rom_before_args"):
@@ -1399,7 +1399,7 @@ def handle_request(raw_intent: str) -> None:
             args.append(str(rom_path))
 
     # Covers the gap between iiSU's window minimizing and the real PC
-    # emulator's own window appearing and taking the foreground -- without
+    # emulator's own window appearing and taking the foreground, without
     # it, that moment shows raw desktop. Skipped when debug_show_console_
     # windows is on, since a fullscreen overlay would just hide the
     # console windows that setting exists to show.
@@ -1413,7 +1413,7 @@ def handle_request(raw_intent: str) -> None:
             print("[bridge] could not locate iiSU window to hide")
 
         print(f"[bridge] launching: {args}")
-        log_launch(f"LAUNCHED: {friendly_emulator_name(executable)} -- {args}")
+        log_launch(f"LAUNCHED: {friendly_emulator_name(executable)}, {args}")
         process = subprocess.Popen(args, cwd=str(executable.parent))
         with current_process_lock:
             global current_process
@@ -1485,7 +1485,7 @@ def recover_from_request_exception(config: dict) -> None:
     # A subprocess-backed emulator may also already be running. Its normal
     # wait_and_restore_iisu thread usually owns frontend restoration, so
     # don't bring iiSU over it merely because later request handling
-    # raised -- but the exception may have occurred *before* handle_request
+    # raised, but the exception may have occurred *before* handle_request
     # reached the line that starts that thread (e.g. bring_emulator_to_
     # foreground() itself raising right after the Popen succeeds), in which
     # case nothing is watching this process at all and iiSU would stay

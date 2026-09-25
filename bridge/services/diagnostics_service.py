@@ -1,4 +1,4 @@
-"""Non-UI logic behind the Diagnostics page -- ports manager.py's
+"""Non-UI logic behind the Diagnostics page, ports manager.py's
 _run_diagnostics/_diagnostics_check_for_updates_now, extracted so it's
 callable/testable without a Tk or Qt event loop.
 

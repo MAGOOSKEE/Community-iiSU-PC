@@ -1,7 +1,7 @@
 """
 Bootstraps a self-contained Android SDK (platform-tools, emulator, system
 image) and creates a fresh AVD, using Google's modern unified "android" CLI
-bundled inside the official "command line tools only" package --
+bundled inside the official "command line tools only" package,
 https://developer.android.com/studio#command-tools (the classic
 sdkmanager/avdmanager duo is deprecated in this SDK generation, and
 avdmanager was confirmed broken against its newer system-image package
@@ -9,7 +9,7 @@ format: "Package path is not valid" even for a package sdkmanager itself
 lists as installed).
 
 The commandlinetools zip's filename is versioned by Google and isn't a
-stable "latest" link -- if COMMANDLINETOOLS_URL below ever 404s, grab the
+stable "latest" link, if COMMANDLINETOOLS_URL below ever 404s, grab the
 current one from the URL above and update the constant.
 
 Only creates the AVD and installs SDK packages; it never touches or
@@ -66,7 +66,7 @@ def is_sdk_ready() -> bool:
 
 def _make_download_reporthook():
     """A urlretrieve reporthook that prints every 10% instead of every
-    block -- there'd otherwise be one line per 8KB chunk, and with nothing
+    block, there'd otherwise be one line per 8KB chunk, and with nothing
     printed at all a ~156MB download over a slow connection looks
     indistinguishable from a hang."""
     state = {"last_reported": -10}
@@ -123,7 +123,7 @@ def _run_with_heartbeat(args: list[str], what: str, interval: float = 15.0) -> N
     """`android sdk install` gives no output of its own worth showing (see
     the note below on why its exit code isn't trustworthy either), so a
     multi-GB system image install would otherwise sit in total silence for
-    several minutes -- indistinguishable from having actually hung. This
+    several minutes, indistinguishable from having actually hung. This
     just proves it's still alive."""
     stop = threading.Event()
 
@@ -149,7 +149,7 @@ def install_packages() -> None:
         print(f"[sdk] installing {package} (this can take a while for the system image, several GB)...")
         # This tool's own exit code is unreliable under non-interactive
         # output redirection (observed non-zero codes on installs that
-        # actually succeeded -- likely a progress-bar/non-TTY quirk), so
+        # actually succeeded, likely a progress-bar/non-TTY quirk), so
         # success is checked below by looking for the resulting files
         # rather than trusting the return code.
         _run_with_heartbeat([str(android_exe()), f"--sdk={SDK_ROOT}", "sdk", "install", package], what=package)
@@ -164,7 +164,7 @@ def install_packages() -> None:
 
 def create_default_avd() -> Path:
     """Creates the AVD in its unavoidable default location
-    (~/.android/avd/medium_phone.avd) -- unlike every other tool used here,
+    (~/.android/avd/medium_phone.avd), unlike every other tool used here,
     `android emulator create` does not honor ANDROID_AVD_HOME. The caller
     renames it to the configured avd_name and portable_sdk.py (in bridge/)
     then adopts it into a fully portable copy, exactly as if it had been
@@ -184,7 +184,7 @@ def create_default_avd() -> Path:
 def rename_avd(old_name: str, new_name: str) -> Path:
     """Renames a just-created AVD (e.g. medium_phone -> iisuwin) in place
     under ~/.android/avd/. Only touches the AVD's own identity (AvdId,
-    displayname, the .ini pointer file) -- hw.device.name inside config.ini
+    displayname, the .ini pointer file), hw.device.name inside config.ini
     is deliberately left alone, since that references the real registered
     device profile/skin ('medium_phone'), not the AVD's own name, and
     changing it would break the AVD."""

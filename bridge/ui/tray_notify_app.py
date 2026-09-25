@@ -1,6 +1,6 @@
 """
 Standalone PySide6 entry point for a one-shot Windows tray balloon
-notification -- launched as its own OS process by boot_overlay_qt.py's
+notification, launched as its own OS process by boot_overlay_qt.py's
 notify_error(), replacing the PowerShell+WinForms NotifyIcon balloon in
 bridge/boot_overlay.py. The bridge normally runs with no visible window at
 all, so a launch failure would otherwise be visible only in a log file
@@ -11,7 +11,7 @@ Usage: python -m bridge.ui.tray_notify_app <title> <message>
 
 import sys
 
-import bridge.ui  # noqa: F401 -- import-time side effect: puts root/bridge/installer on sys.path
+import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
 from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import QApplication, QStyle, QSystemTrayIcon

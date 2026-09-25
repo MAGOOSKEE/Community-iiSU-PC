@@ -8,7 +8,7 @@ Why: emulator.exe launched against the system-wide install under
 "Broken AVD system path" / "not a valid directory" for the AVD's system
 image, even with ANDROID_SDK_ROOT passed explicitly and the files verified
 present and readable moments later. The one thing every failure had in
-common was the path living under the current user's AppData\\Local -- a
+common was the path living under the current user's AppData\\Local, a
 location whose visibility isn't always consistent across processes on
 Windows (AppData redirection, indexing, and sync clients are the usual
 suspects, though the exact cause here was never pinned down). Everything
@@ -16,11 +16,11 @@ the emulator needs is copied once into a plain folder here instead, on
 the same drive as this project, which isn't subject to whatever that was.
 
 This only ever *copies* from the existing installation (never modifies
-it), and only does the copy once -- subsequent launches see the portable
+it), and only does the copy once, subsequent launches see the portable
 copy already in place and skip straight to using it.
 
 Also puts platform-tools (adb) on this process's own PATH as an
-import-time side effect (see _prepend_platform_tools_to_path()) -- every
+import-time side effect (see _prepend_platform_tools_to_path()), every
 script in this project that shells out to a bare `adb` command assumes
 it's resolvable via PATH, which is only true by accident if the machine
 happens to already have some other Android SDK installed. Confirmed live:
@@ -40,8 +40,8 @@ PORTABLE_AVD_HOME = PORTABLE_ROOT / "avd-home"
 
 
 def _prepend_platform_tools_to_path() -> None:
-    """Every caller that already imports this module for its constants --
-    which is effectively everywhere that talks to the AVD -- gets adb
+    """Every caller that already imports this module for its constants,
+    which is effectively everywhere that talks to the AVD, gets adb
     resolvable for free this way, instead of each one needing to remember
     to wire this up itself. A no-op if the portable copy hasn't been
     bootstrapped yet (platform-tools won't exist there, so Windows just
@@ -82,7 +82,7 @@ def _find_real_avd_ini(avd_name: str) -> Path | None:
 
 
 # Android's own "medium_phone" device profile (what `android emulator
-# create` uses -- see sdk_bootstrap.py) turns on a removable SD card by
+# create` uses, see sdk_bootstrap.py) turns on a removable SD card by
 # default, but nothing ever creates the sdcard.img file it needs: the
 # emulator doesn't auto-create one, so this device permanently shows a
 # "mounted" SD card slot with no actual backing storage. Nothing in this
@@ -97,7 +97,7 @@ CONFIG_INI_STATIC_OVERRIDES = {
 def patch_config_ini(config_ini: Path, force_cold_boot: bool = True) -> None:
     """Applies CONFIG_INI_STATIC_OVERRIDES plus fastboot.forceColdBoot,
     which is the one entry re-patched on every single start (not just the
-    one-time bootstrap copy) -- see start_iisu_pc.py's boot-fingerprint
+    one-time bootstrap copy), see start_iisu_pc.py's boot-fingerprint
     check, which decides force_cold_boot each run. This is belt-and-
     suspenders alongside the matching -no-snapshot/no launch flag in
     start_iisu_pc.py, in case anything ever launches this AVD another
@@ -128,7 +128,7 @@ def set_quickboot_autosave(avd_dir: Path, enabled: bool) -> None:
     saveOnExit was left true beforehand. Pinning it explicitly right
     before every launch (not just once) is what actually guarantees the
     outcome this run wants, regardless of what the previous run's exit
-    wrote here. enabled=True is what makes quick resume possible at all --
+    wrote here. enabled=True is what makes quick resume possible at all,
     see start_iisu_pc.py's boot-fingerprint check for when a saved
     snapshot is trusted for the *next* start versus ignored in favor of a
     fresh boot."""
@@ -161,7 +161,7 @@ def ensure_portable_sdk(avd_name: str, source_sdk_root: Path) -> dict:
     (ANDROID_SDK_ROOT, ANDROID_HOME, ANDROID_AVD_HOME) to launch emulator.exe
     with, so it uses this portable copy instead of the system-wide install."""
     # emulator.exe's own SDK-root validity check requires a platform-tools
-    # subdirectory to exist alongside emulator/ and system-images/ -- without
+    # subdirectory to exist alongside emulator/ and system-images/, without
     # it, the root is rejected as invalid regardless of whether the
     # requested AVD's system image is actually there.
     portable_emulator = PORTABLE_SDK / "emulator" / "emulator.exe"
@@ -190,7 +190,7 @@ def ensure_portable_sdk(avd_name: str, source_sdk_root: Path) -> dict:
 
     portable_avd_dir = PORTABLE_AVD_HOME / f"{avd_name}.avd"
     if not (portable_avd_dir / "config.ini").is_file():
-        # Checked via config.ini rather than just the directory existing --
+        # Checked via config.ini rather than just the directory existing,
         # an interrupted previous adoption (killed process, disk full, an
         # AV scanner locking a file mid-copy) can leave portable_avd_dir
         # present but incomplete, and config.ini specifically missing is
@@ -202,7 +202,7 @@ def ensure_portable_sdk(avd_name: str, source_sdk_root: Path) -> dict:
             raise RuntimeError(f"No existing AVD '{avd_name}' found under ~/.android/avd to copy from.")
         print(f"[bootstrap] copying AVD config ({real_avd_dir} -> {portable_avd_dir}), one-time...")
         # Snapshots are just a quickboot resume cache, not needed for
-        # correctness -- skipping them saves a couple of GB and the
+        # correctness, skipping them saves a couple of GB and the
         # emulator just does a normal boot instead of a quickboot resume
         # the first time on the portable copy.
         _robocopy(real_avd_dir, portable_avd_dir, exclude_dirs=["snapshots"])

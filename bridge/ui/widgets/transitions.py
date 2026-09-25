@@ -1,4 +1,4 @@
-"""A subtle opacity cross-fade for QStackedWidget page switches -- a
+"""A subtle opacity cross-fade for QStackedWidget page switches, a
 capability Tk's page-swap (a plain .tkraise(), no cross-fade Tk can do at
 all) never had. Understated on purpose: ~180ms, not a slide or a bounce."""
 

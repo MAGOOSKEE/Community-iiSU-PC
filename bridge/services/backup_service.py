@@ -1,10 +1,10 @@
-"""Non-UI logic behind the Backup & Restore page -- ports manager.py's
+"""Non-UI logic behind the Backup & Restore page, ports manager.py's
 _backup_restore_candidates/_create_manager_backup/_restore_manager_backup/
 _backup_safe_member. Raises BackupServiceError instead of showing a
 messagebox; the caller decides how to present that.
 
 manager_debug.log entries the original wrote around backup/restore are not
-reproduced here -- that whole debug-log tee is Tk-Manager-specific
+reproduced here, that whole debug-log tee is Tk-Manager-specific
 infrastructure the Qt app doesn't have yet (see Diagnostics page, which
 already reports "Not found yet" for it)."""
 
@@ -82,7 +82,7 @@ def backup_safe_member(name: str) -> bool:
 
 def inspect_backup(source: Path) -> dict[str, bytes]:
     """Opens the archive, validates it, and returns {archive_name: bytes}
-    for every safe/known member -- callers should confirm with the user
+    for every safe/known member, callers should confirm with the user
     (showing the returned names) before calling apply_restore()."""
     try:
         with zipfile.ZipFile(source, "r") as zf:

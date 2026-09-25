@@ -1,9 +1,9 @@
-"""Advanced settings page -- ports manager.py's _build_advanced_page.
+"""Advanced settings page, ports manager.py's _build_advanced_page.
 Reuses HotkeyEditor/KeyCaptureDialog from onboarding_wizard.py rather than
 re-implementing hotkey capture a second time (its own docstring already
 anticipated this reuse)."""
 
-import bridge.ui  # noqa: F401 -- import-time side effect: puts root/bridge/installer on sys.path
+import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
 from PySide6.QtWidgets import QCheckBox, QGridLayout, QLabel, QLineEdit, QVBoxLayout, QWidget
 
@@ -18,7 +18,7 @@ class AdvancedPage(PageBase):
         super().__init__(parent, scrollable_body=True)
         self.window = window
 
-        self.add_header("Advanced", "Bridge port, window matching, and hotkeys -- rarely need to change these.")
+        self.add_header("Advanced", "Bridge port, window matching, and hotkeys, rarely need to change these.")
 
         self.body_layout.addWidget(QLabel("iiSU window title match:"))
         self.window_title_edit = QLineEdit()
@@ -104,7 +104,7 @@ class AdvancedPage(PageBase):
         self.show_overlay_check.setChecked(bool(config.get("show_boot_overlay", True)))
         self.debug_console_check.setChecked(bool(config.get("debug_show_console_windows", False)))
 
-    # -- Field getters (used by ManagerWindow._gather_settings) -------------------------------------------------
+    # == Field getters (used by ManagerWindow._gather_settings) ==
 
     def get_window_title(self) -> str:
         return self.window_title_edit.text().strip()

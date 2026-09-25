@@ -1,6 +1,6 @@
 """
 Unit tests for bridge/sync_library.py's multi-disc dedup (m3u/cue) and the
-Windows Apps stub-folder merge, both pure filesystem logic -- no AVD or
+Windows Apps stub-folder merge, both pure filesystem logic, no AVD or
 adb needed, same as this project's other tests.
 """
 
@@ -88,7 +88,7 @@ class ScanLibraryDedupTests(unittest.TestCase):
             self.assertEqual(names, ["Solo Game.cue"])
 
     def test_dedup_is_scoped_per_directory(self):
-        # Two different game folders, each with their own disc.bin -- the
+        # Two different game folders, each with their own disc.bin, the
         # first folder's .m3u must not swallow the second folder's file of
         # the same name.
         with tempfile.TemporaryDirectory() as tmp:
@@ -108,7 +108,7 @@ class ScanLibraryDedupTests(unittest.TestCase):
 
     def test_dedupe_exception_shows_discs_and_hides_the_playlist(self):
         # The Gran Turismo 2 case: an .m3u whose "discs" are actually
-        # distinct modes, not continuation discs -- exempting it should
+        # distinct modes, not continuation discs, exempting it should
         # show its individual files as their own entries and hide the
         # collapsed .m3u entry, the opposite of the usual direction,
         # without affecting any other multi-disc game.
@@ -127,7 +127,7 @@ class ScanLibraryDedupTests(unittest.TestCase):
             self.assertEqual(names, ["Gran Turismo 2/Arcade.bin", "Gran Turismo 2/Simulation.bin"])
 
     def test_exception_is_per_playlist_not_per_folder(self):
-        # Two m3u files sharing a folder -- exempting one (hiding it,
+        # Two m3u files sharing a folder, exempting one (hiding it,
         # showing its disc instead) must not affect the other.
         with tempfile.TemporaryDirectory() as tmp:
             roms_dir = Path(tmp)

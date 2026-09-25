@@ -1,9 +1,9 @@
-"""Display settings page -- ports manager.py's _build_display_page. Reuses
+"""Display settings page, ports manager.py's _build_display_page. Reuses
 DisplayPreview (bridge/ui/widgets/display_preview.py), the same widget
 onboarding_wizard.py's DisplayStep uses, instead of a second hand-drawn
 aspect-ratio canvas."""
 
-import bridge.ui  # noqa: F401 -- import-time side effect: puts root/bridge/installer on sys.path
+import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -27,7 +27,7 @@ RESOLUTION_PRESETS = ["1280 x 720", "1600 x 900", "1920 x 1080", "2560 x 1440", 
 REFRESH_RATE_PRESETS = ["60", "90", "120", "144", "165", "240"]
 GPU_MODE_PRESETS = ["auto", "host", "swiftshader_indirect", "angle_indirect"]
 
-# This project's known-good baseline profile -- auto-detect scales density
+# This project's known-good baseline profile, auto-detect scales density
 # relative to this, not to any fixed Android density bucket, since the
 # goal is "looks the same as it does at 1920x1080@240dpi," not matching a
 # real handheld device's physical DPI.
@@ -39,7 +39,7 @@ class DisplayPage(PageBase):
         super().__init__(parent, scrollable_body=True)
         self.window = window
 
-        self.add_header("Display", "The emulated device's actual hardware profile -- applying it cold-boots the AVD.")
+        self.add_header("Display", "The emulated device's actual hardware profile, applying it cold-boots the AVD.")
 
         columns = QHBoxLayout()
         settings_col = QVBoxLayout()
@@ -187,7 +187,7 @@ class DisplayPage(PageBase):
         self.width_edit.setText(str(width))
         self.height_edit.setText(str(height))
         self.refresh_edit.setText(str(hz))
-        # Density scales with resolution rather than staying fixed -- see
+        # Density scales with resolution rather than staying fixed, see
         # manager.py's original comment: Android's own UI sizing is
         # density-driven, so jumping resolution while density stayed fixed
         # made everything render tiny on higher-resolution displays.

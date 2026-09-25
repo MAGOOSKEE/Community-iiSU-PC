@@ -2,7 +2,7 @@
 known packages into the running AVD, so iiSU's own installed-package check
 resolves each console to something our patched LaunchBridge recognizes
 (see that module's docstring for why a stub is needed at all). The AVD
-needs to already be running -- Start it from Home first if this can't
+needs to already be running, Start it from Home first if this can't
 reach it.
 
 Replaces bridge/emulator_dialogs.py's tkinter RedirectorInstallDialog.
@@ -37,7 +37,7 @@ class RedirectorInstallDialog(QDialog):
             "Installs a placeholder app for each of the emulators below into the "
             "running AVD, purely so iiSU recognizes that console's emulator as "
             "installed. The real launch is still handled by the PC-side emulator "
-            "configured in the Emulators tab -- these apps do nothing themselves."
+            "configured in the Emulators tab, these apps do nothing themselves."
         )
         description.setWordWrap(True)
         description.setProperty("role", "dim")
@@ -85,7 +85,7 @@ class RedirectorInstallDialog(QDialog):
     def _run_installs(self, replace_existing: bool) -> None:
         devices = subprocess.run(["adb", "devices"], capture_output=True, text=True, creationflags=0x08000000)  # CREATE_NO_WINDOW
         if not any(line.startswith("emulator-") and "device" in line for line in devices.stdout.splitlines()):
-            self._log_stream.write("No running AVD found -- start it from Home first, then try again.\n")
+            self._log_stream.write("No running AVD found, start it from Home first, then try again.\n")
             return
 
         for package, label in all_stub_packages():
@@ -93,7 +93,7 @@ class RedirectorInstallDialog(QDialog):
             try:
                 outcome = stub_apk.build_and_install(package, label, replace_existing=replace_existing)
                 self._log_stream.write(f"{outcome}\n")
-            except Exception as e:  # noqa: BLE001 -- reported in the dialog's own log either way
+            except Exception as e:  # noqa: BLE001; reported in the dialog's own log either way
                 self._log_stream.write(f"failed ({e})\n")
         self._log_stream.write("\nDone.\n")
 

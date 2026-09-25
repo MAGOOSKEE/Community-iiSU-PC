@@ -1,5 +1,5 @@
 """Builds the jlink-trimmed JRE the Inno Setup installer bundles, at
-{project_root}/runtime/jre -- exactly the path installer/jre_env.py checks
+{project_root}/runtime/jre, exactly the path installer/jre_env.py checks
 for. Run this once per release on a build machine with a real JDK
 installed (any recent Temurin/OpenJDK build works); the *installed* app
 never needs a full JDK, only this trimmed output.
@@ -7,7 +7,7 @@ never needs a full JDK, only this trimmed output.
 Module list is derived mechanically via jdeps against apktool.jar (the
 only Java-invoked artifact this project ships) rather than hand-picked,
 then verified by actually running both apktool and keytool against the
-trimmed image -- jdeps against apktool alone doesn't fully capture
+trimmed image, jdeps against apktool alone doesn't fully capture
 keytool's own dependency needs (see the Qt rewrite plan's Phase 3-4 notes),
 so both get a real smoke test below, not just a jlink build with no
 verification.
@@ -44,7 +44,7 @@ def require_jdk_tools() -> None:
     if missing:
         raise RuntimeError(
             f"Missing JDK tool(s) on PATH: {', '.join(missing)}. This script needs a full JDK "
-            "installed on the build machine (e.g. Temurin) -- the trimmed output it produces is "
+            "installed on the build machine (e.g. Temurin), the trimmed output it produces is "
             "what actually ships, not this JDK itself."
         )
 

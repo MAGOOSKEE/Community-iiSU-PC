@@ -1,4 +1,4 @@
-"""Non-UI logic behind the Android Storage page -- ADB-backed file
+"""Non-UI logic behind the Android Storage page, ADB-backed file
 browsing/transfer against the Android VM's shared storage. Ports
 manager.py's _adb_*/_android_*/_android_storage_* helper methods as plain
 functions, extracted ahead of porting that page to Qt.
@@ -80,7 +80,7 @@ def media_scan(remote_path: str) -> None:
     """Best-effort: notify Android that an ADB-side shared-storage path
     changed. Failures here are cosmetic (a stale gallery/media index), so
     callers generally shouldn't fail an otherwise-successful transfer over
-    this alone -- but it does raise, so a caller that cares can catch it."""
+    this alone, but it does raise, so a caller that cares can catch it."""
     remote_path = str(remote_path).replace("\\", "/")
     uri = "file://" + remote_path
     result = adb_command("shell", "am", "broadcast", "-a", "android.intent.action.MEDIA_SCANNER_SCAN_FILE", "-d", uri, timeout=15)

@@ -1,4 +1,4 @@
-"""iiDB Cart -- review/remove staged assets and trigger Install All.
+"""iiDB Cart, review/remove staged assets and trigger Install All.
 Replaces manager.py's _iidb_open_cart() Toplevel."""
 
 from PySide6.QtCore import Qt

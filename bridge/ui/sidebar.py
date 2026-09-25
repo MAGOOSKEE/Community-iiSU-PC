@@ -1,10 +1,10 @@
-"""Left navigation rail -- replaces manager.py's hand-built tk.Label nav
+"""Left navigation rail, replaces manager.py's hand-built tk.Label nav
 buttons (_build_sidebar/_add_nav_button) with real QPushButtons, which get
 checked-state styling, keyboard focus, and hover for free instead of the
 three bind()s per button the Tk version needed.
 
 NAV_ITEMS/NAV_GROUPS/DANGER_NAV_ITEMS are the same pure data manager.py
-already had -- only the widgets reading them changed toolkit."""
+already had, only the widgets reading them changed toolkit."""
 
 from PySide6.QtCore import QSize, Signal
 from PySide6.QtGui import QFont
@@ -20,12 +20,12 @@ _ICON_SIZE = 20
 
 def _no_mnemonic(text: str) -> str:
     """QPushButton/QRadioButton/etc. treat a lone '&' as a mnemonic marker
-    (it vanishes and underlines the next character) -- doubling it is Qt's
+    (it vanishes and underlines the next character), doubling it is Qt's
     own escape for a literal ampersand, needed for labels like "Backup &
     Diagnostics" that would otherwise render as "Backup _Diagnostics"."""
     return text.replace("&", "&&")
 
-# Material Icons ligature names -- see bridge/ui/icon_font.py's docstring
+# Material Icons ligature names, see bridge/ui/icon_font.py's docstring
 # for why a name string rather than a codepoint.
 NAV_ITEMS = [
     ("home", "home", "Home"),
@@ -126,7 +126,7 @@ class Sidebar(QWidget):
         return btn
 
     def build_subnav(self, group_key: str, on_pill: QWidget) -> None:
-        """Populates a caller-owned pill row for one group -- the pills
+        """Populates a caller-owned pill row for one group, the pills
         themselves live in the page area (next to that group's content),
         not the sidebar rail, matching manager.py's segmented sub-nav."""
         layout = on_pill.layout() or QHBoxLayout(on_pill)

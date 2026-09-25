@@ -1,4 +1,4 @@
-"""The cyan-to-purple decorative divider drawn under every page header --
+"""The cyan-to-purple decorative divider drawn under every page header,
 replaces shared/theme.py's draw_gradient_bar(), which had to fake a
 gradient with a strip of 1px-wide canvas lines under tkinter. One reusable
 widget instead of 5+ copy-pasted canvas-drawing call sites."""

@@ -7,7 +7,7 @@ outer vertical-scroll wrapper stretched the whole window instead of
 scrolling, and produced doubled scrollbars. QScrollArea has the exact same
 failure mode around a QTableView/QTreeView. So: a page containing a table/
 tree/list gets that widget's size policy set to Expanding and placed
-directly in the page's own top-level layout -- never nested inside a
+directly in the page's own top-level layout, never nested inside a
 QScrollArea. Only a page with no internally-scrolling widget should pass
 scrollable_body=True. This is a per-page, explicit choice (the constructor
 argument below), not a default either way.

@@ -1,4 +1,4 @@
-"""Small colored status indicator (up/down/unknown) -- replaces
+"""Small colored status indicator (up/down/unknown), replaces
 manager.py's tkinter StatusDot(tk.Canvas)."""
 
 from PySide6.QtCore import QSize, Qt

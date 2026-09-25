@@ -1,9 +1,9 @@
-"""Android Storage page -- browse/transfer files on the Android VM's
+"""Android Storage page, browse/transfer files on the Android VM's
 shared storage over ADB. Ports manager.py's _build_android_storage_page
 and its supporting methods. Backed by
 bridge/services/android_storage_service.py."""
 
-import bridge.ui  # noqa: F401 -- import-time side effect: puts root/bridge/installer on sys.path
+import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
@@ -102,7 +102,7 @@ class AndroidStoragePage(PageBase):
     def on_shown(self) -> None:
         self.refresh()
 
-    # -- Listing -------------------------------------------------
+    # == Listing ==
 
     def refresh(self) -> None:
         path = self.path_edit.text().strip() or "/storage/emulated/0"
@@ -152,7 +152,7 @@ class AndroidStoragePage(PageBase):
         self.path_edit.setText(svc.android_parent(self.path_edit.text()))
         self.refresh()
 
-    # -- Actions -------------------------------------------------
+    # == Actions ==
 
     def _run_async(self, description: str, fn, *args) -> None:
         self.status_label.setText(description + "...")

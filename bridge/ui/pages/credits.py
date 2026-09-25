@@ -1,10 +1,10 @@
-"""Credits page -- ports manager.py's _build_credits_page and its avatar-
+"""Credits page, ports manager.py's _build_credits_page and its avatar-
 loading helpers. No internally-scrolling widget here (just stacked Cards),
 so this is one of the pages that gets PageBase's scrollable_body=True."""
 
 import webbrowser
 
-import bridge.ui  # noqa: F401 -- import-time side effect: puts root/bridge/installer on sys.path
+import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
@@ -24,7 +24,7 @@ _CONTRIBUTORS = [
 ]
 
 # Every third-party component this project actually ships or bundles, plus
-# what it's used for -- kept here (not just in a LICENSE file nobody
+# what it's used for, kept here (not just in a LICENSE file nobody
 # opens) so it stays visible from inside the app itself. Listed even
 # where attribution isn't strictly required by the license, on the
 # principle that crediting the work costs nothing and is worth doing
@@ -62,7 +62,7 @@ _THIRD_PARTY = [
 class _AvatarLabel(QLabel):
     """A clickable circular avatar: shows a placeholder immediately, swaps
     in the real GitHub avatar once fetched (best-effort, degrades quietly
-    on any failure -- see shared/qt_avatars.py)."""
+    on any failure, see shared/qt_avatars.py)."""
 
     def __init__(self, username: str, display_name: str, size: int, tooltip: str = ""):
         super().__init__()
@@ -94,10 +94,10 @@ class CreditsPage(PageBase):
 
         self.add_header("Credits", "Who made this, and how.")
 
-        self._add_credit_row("MAGOOSKEE", "MAGOOSKEE", "Project owner -- built and maintains Community-iiSU-PC.")
+        self._add_credit_row("MAGOOSKEE", "MAGOOSKEE", "Project owner, built and maintains Community-iiSU-PC.")
         self._add_credit_row(
             "claude", "Claude (Anthropic)",
-            "AI coding assistant -- wrote and refactored most of this codebase, including this Manager app, "
+            "AI coding assistant, wrote and refactored most of this codebase, including this Manager app, "
             "in collaboration with MAGOOSKEE.",
         )
         self._add_contributors_section()
@@ -109,7 +109,7 @@ class CreditsPage(PageBase):
             "AI disclosure: a large share of this project's code (including this Manager\n"
             "app) was written by Claude, an AI assistant, working under MAGOOSKEE's direction\n"
             "and review. If you're evaluating this project's safety or correctness, keep that\n"
-            "in mind -- read the source rather than assuming a human wrote every line."
+            "in mind, read the source rather than assuming a human wrote every line."
         )
         disclaimer_label.setStyleSheet(f"color: {TEXT_DIM};")
         disclaimer_layout.addWidget(disclaimer_label)
@@ -186,7 +186,7 @@ class CreditsPage(PageBase):
         for entry in _THIRD_PARTY:
             row = QLabel(
                 f'<a href="{entry["url"]}" style="color:{GRADIENT_STOPS[2]};text-decoration:none;">{entry["name"]}</a>'
-                f' -- {entry["license"]}. {entry["note"]}'
+                f', {entry["license"]}. {entry["note"]}'
             )
             row.setOpenExternalLinks(True)
             row.setWordWrap(True)

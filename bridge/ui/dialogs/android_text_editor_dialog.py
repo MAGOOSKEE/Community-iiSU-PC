@@ -1,4 +1,4 @@
-"""Edit a small text file living on the Android VM in place -- replaces
+"""Edit a small text file living on the Android VM in place, replaces
 manager.py's _android_storage_edit_text() Toplevel."""
 
 from pathlib import Path

@@ -1,4 +1,4 @@
-"""ROM Directory settings page -- ports manager.py's _build_roms_page and
+"""ROM Directory settings page, ports manager.py's _build_roms_page and
 its supporting methods (~lines 996-1070). Widgets persist across saves
 instead of being torn down and rebuilt (reload_from_config() just resets
 their values), since Qt has no need for Tk's destroy-and-rebuild-on-every-
@@ -6,7 +6,7 @@ config-change pattern."""
 
 from pathlib import Path
 
-import bridge.ui  # noqa: F401 -- import-time side effect: puts root/bridge/installer on sys.path
+import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
 from PySide6.QtWidgets import (
     QFileDialog,

@@ -1,4 +1,4 @@
-"""Browse locally-installed Steam games -- replaces manager.py's
+"""Browse locally-installed Steam games, replaces manager.py's
 _import_steam_library() Toplevel. Used both for bulk import (multi_select)
 and, from WindowsAppDialog, to pick a single game when adding/editing a
 Steam Game mapping (multi_select=False)."""
