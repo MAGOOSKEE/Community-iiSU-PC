@@ -107,7 +107,7 @@ def extract_iisu_icon(apk_path: Path | None = None) -> Path | None:
         shutil.rmtree(decompile_dir, ignore_errors=True)
         result = subprocess.run(
             ["java", "-jar", str(APKTOOL_JAR), "d", "-s", "-f", str(apk_path), "-o", str(decompile_dir)],
-            capture_output=True, text=True, env=java_subprocess_env(),
+            capture_output=True, text=True, env=java_subprocess_env(), creationflags=0x08000000,  # CREATE_NO_WINDOW
         )
         if result.returncode != 0:
             print(f"[shortcut] apktool failed decoding {apk_path.name} -- using the generic icon")
@@ -142,7 +142,7 @@ def extract_iisu_icon(apk_path: Path | None = None) -> Path | None:
 def desktop_dir() -> Path:
     result = subprocess.run(
         ["powershell", "-NoProfile", "-Command", "[Environment]::GetFolderPath('Desktop')"],
-        capture_output=True, text=True, check=True,
+        capture_output=True, text=True, check=True, creationflags=0x08000000,  # CREATE_NO_WINDOW
     )
     return Path(result.stdout.strip())
 
@@ -179,7 +179,9 @@ def create_desktop_shortcut(apk_path: Path | None = None) -> Path:
         "$shortcut.Description = 'Launch Community-iiSU-PC'\n"
         "$shortcut.Save()\n"
     )
-    result = subprocess.run(["powershell", "-NoProfile", "-Command", script], capture_output=True, text=True)
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", script], capture_output=True, text=True, creationflags=0x08000000,  # CREATE_NO_WINDOW
+    )
     if result.returncode != 0:
         raise RuntimeError(f"Failed to create shortcut:\n{result.stdout}\n{result.stderr}")
     _refresh_shell_icon_cache()

@@ -46,6 +46,14 @@ import subprocess
 import time
 from ctypes import wintypes
 
+# adb.exe is a console-subsystem executable; spawned from pythonw.exe
+# (no console of its own), Windows would otherwise give it a brand new
+# console window every time _ensure_shell() below (re)creates it -- and
+# since this runs continuously while the Manager is open, a dropped/
+# recreated shell here is exactly the "terminal keeps popping up" bug,
+# not a one-off.
+CREATE_NO_WINDOW = 0x08000000
+
 # XINPUT_GAMEPAD.wButtons bitmask
 XINPUT_GAMEPAD_DPAD_UP = 0x0001
 XINPUT_GAMEPAD_DPAD_DOWN = 0x0002
@@ -305,6 +313,7 @@ class ControllerBridge:
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                creationflags=CREATE_NO_WINDOW,
             )
 
     def _send_keyevent(self, code: int) -> None:

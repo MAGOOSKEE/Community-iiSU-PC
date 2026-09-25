@@ -83,7 +83,7 @@ class RedirectorInstallDialog(QDialog):
         )
 
     def _run_installs(self, replace_existing: bool) -> None:
-        devices = subprocess.run(["adb", "devices"], capture_output=True, text=True)
+        devices = subprocess.run(["adb", "devices"], capture_output=True, text=True, creationflags=0x08000000)  # CREATE_NO_WINDOW
         if not any(line.startswith("emulator-") and "device" in line for line in devices.stdout.splitlines()):
             self._log_stream.write("No running AVD found -- start it from Home first, then try again.\n")
             return

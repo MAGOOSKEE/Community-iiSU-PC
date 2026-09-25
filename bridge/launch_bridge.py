@@ -599,7 +599,8 @@ def launch_iisu(config: dict) -> None:
     deadline = time.monotonic() + BOOTANIM_WAIT_SECONDS
     while time.monotonic() < deadline:
         result = subprocess.run(
-            ["adb", "shell", "getprop", "init.svc.bootanim"], capture_output=True, text=True
+            ["adb", "shell", "getprop", "init.svc.bootanim"], capture_output=True, text=True,
+            creationflags=0x08000000,  # CREATE_NO_WINDOW
         )
         if result.stdout.strip() == "stopped":
             break
@@ -608,7 +609,10 @@ def launch_iisu(config: dict) -> None:
     component = config.get("iisu_component", DEFAULT_IISU_COMPONENT)
     result = None
     for _ in range(60):
-        result = subprocess.run(["adb", "shell", "am", "start", "-n", component], capture_output=True, text=True)
+        result = subprocess.run(
+            ["adb", "shell", "am", "start", "-n", component], capture_output=True, text=True,
+            creationflags=0x08000000,  # CREATE_NO_WINDOW
+        )
         if result.returncode == 0 and "Error" not in result.stdout:
             set_volume_max()
             return
@@ -627,7 +631,10 @@ def set_volume_max() -> None:
     AOSP vs OEM MAX_VOLUME differences, so this doesn't need to know the
     exact volume index -- one `adb shell input keyevent` call with the
     keycode repeated is enough, no need for 20 separate subprocess calls."""
-    subprocess.run(["adb", "shell", "input", "keyevent"] + ["24"] * 20, capture_output=True, text=True)
+    subprocess.run(
+        ["adb", "shell", "input", "keyevent"] + ["24"] * 20, capture_output=True, text=True,
+        creationflags=0x08000000,  # CREATE_NO_WINDOW
+    )
 
 
 def show_iisu_window(config: dict) -> None:
