@@ -53,6 +53,17 @@ from ctypes import wintypes
 from pathlib import Path
 from urllib.parse import unquote
 
+# The embeddable Python runtime this app ships with (installer/
+# build_embedded_python.py) does NOT auto-add a launched script's own
+# directory to sys.path the way a normal Python install does -- confirmed
+# live: this exact bare import failed with ModuleNotFoundError on a real
+# installed copy, since start_iisu_pc.py launches this file as a raw
+# script path (subprocess.Popen([sys.executable, str(BRIDGE_SCRIPT)]),
+# not "-m"), and a system Python's implicit sys.path[0] masked the gap
+# during development against a git checkout. Explicit, not implicit, for
+# every bare import below.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 import portable_sdk  # noqa: F401; imported for its import-time PATH fix (adb), not used directly here
 from bridge_config import ConfigMissingError, load_config
 from controller_bridge import ControllerBridge

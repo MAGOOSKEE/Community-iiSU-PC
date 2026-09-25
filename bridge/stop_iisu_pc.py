@@ -26,8 +26,20 @@ before it ever got a chance to be used.
 
 import json
 import subprocess
+import sys
 import time
 from pathlib import Path
+
+# The embeddable Python runtime this app ships with does not auto-add a
+# launched script's own directory to sys.path the way a normal Python
+# install does -- this script is launched as a raw script path by both
+# uninstall.py's own Stop (in-process, unaffected) and, more importantly,
+# launch_bridge.py's quit-hotkey/quit-chord handling
+# (subprocess.Popen([sys.executable, str(STOP_SCRIPT)]), not "-m"), where
+# the bare import below would otherwise fail with ModuleNotFoundError on
+# a real embeddable-Python install (see the identical, confirmed-live fix
+# in launch_bridge.py itself).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from portable_sdk import PORTABLE_AVD_HOME
 
