@@ -1,5 +1,5 @@
 """
-Unit tests for launch_bridge.find_emulator_for_package -- the routing logic
+Unit tests for launch_bridge.find_emulator_for_package, the routing logic
 that decides which PC emulator profile a given (package, rom filename,
 reported RetroArch core) resolves to. Pure function, no sockets/adb/AVD
 involved, but importing launch_bridge.py does pull in its Windows-only
@@ -15,7 +15,7 @@ PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "bridge"))
 
 from launch_bridge import core_dll_from_pre_args, find_emulator_for_package
-from shared.emulator_defaults import build_emulators_map  # noqa: E402 -- path set up above
+from shared.emulator_defaults import build_emulators_map  # noqa: E402; path set up above
 
 
 class FindEmulatorForPackageTests(unittest.TestCase):
@@ -40,7 +40,7 @@ class FindEmulatorForPackageTests(unittest.TestCase):
 
     def test_retroarch_trusts_reported_core_over_extension_safety_net(self):
         # A Dreamcast game shipped as .chd would otherwise hit the PSX
-        # safety-net extension entry -- the reported LIBRETRO core has to
+        # safety-net extension entry, the reported LIBRETRO core has to
         # win, or Dreamcast .chd games launch the wrong emulator entirely
         # (this was a real, live-reported bug; see shared/emulator_defaults
         # .py's RETROARCH_CORE_OVERRIDES docstring).

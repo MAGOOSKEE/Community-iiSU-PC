@@ -2,14 +2,14 @@
 Automatic Xbox-compatible controller support for iiSU's own menu navigation.
 
 Polls XInput (covers Xbox controllers whether wired USB or paired over
-Bluetooth -- XInput doesn't care about transport) and forwards button
+Bluetooth, XInput doesn't care about transport) and forwards button
 presses into the AVD as Android KeyEvents via a persistent `adb shell`
 session, so plugging in or pairing a controller "just works" with no
 manual configuration and no USB passthrough / driver swapping.
 
 Scope: XInput only. PlayStation-style controllers (DualShock/DualSense)
 enumerate as DirectInput/HID on Windows, not XInput, unless something like
-Steam Input or DS4Windows remaps them to XInput -- those aren't covered
+Steam Input or DS4Windows remaps them to XInput, those aren't covered
 here.
 
 Only forwards menu-navigation input while iiSU itself is what you'd be
@@ -28,11 +28,11 @@ down the VM entirely if nothing's running. Fires once per press, not on
 a hold, and the chord can be remapped to any combination of buttons from
 BUTTON_NAME_TO_BIT via manager.py's Advanced page.
 
-Also separately watches (via the legacy winmm joystick API, not XInput --
+Also separately watches (via the legacy winmm joystick API, not XInput,
 see detect_unmapped_sony_controller) for a DualSense/DS4 that's plugged in
 but NOT already appearing as an XInput device, and opens Steam for you
 when it sees one. There's no documented, stable API to flip Steam's
-"PlayStation Configuration Support" setting programmatically -- it lives
+"PlayStation Configuration Support" setting programmatically, it lives
 in Steam's own config.vdf under an internal key that isn't part of any
 public interface and could change or get silently reverted between Steam
 versions, so this deliberately doesn't try to write it directly. Opening
@@ -45,6 +45,14 @@ import ctypes
 import subprocess
 import time
 from ctypes import wintypes
+
+# adb.exe is a console-subsystem executable; spawned from pythonw.exe
+# (no console of its own), Windows would otherwise give it a brand new
+# console window every time _ensure_shell() below (re)creates it, and
+# since this runs continuously while the Manager is open, a dropped/
+# recreated shell here is exactly the "terminal keeps popping up" bug,
+# not a one-off.
+CREATE_NO_WINDOW = 0x08000000
 
 # XINPUT_GAMEPAD.wButtons bitmask
 XINPUT_GAMEPAD_DPAD_UP = 0x0001
@@ -64,7 +72,7 @@ XINPUT_GAMEPAD_Y = 0x8000
 
 ERROR_SUCCESS = 0
 
-# Android KeyEvent codes -- iiSU listens to these directly (confirmed by its
+# Android KeyEvent codes, iiSU listens to these directly (confirmed by its
 # own on-screen "A Select / B Back / LB RB ..." gamepad legends).
 BUTTON_TO_KEYCODE = {
     XINPUT_GAMEPAD_DPAD_UP: 19,
@@ -95,7 +103,7 @@ POLL_HZ = 60
 
 # Every button the quit chord can be remapped to, by the name manager.py's
 # Advanced page uses. "select" matches XInput's BACK bit, which different
-# controller generations label Back, View, or Select -- same physical
+# controller generations label Back, View, or Select, same physical
 # button, same bit, just a naming difference.
 BUTTON_NAME_TO_BIT = {
     "dpad_up": XINPUT_GAMEPAD_DPAD_UP,
@@ -115,7 +123,7 @@ BUTTON_NAME_TO_BIT = {
 }
 DEFAULT_QUIT_CHORD = ["select", "start"]
 
-# Short, standard Xbox-pad labels for the names above -- matches iiSU's own
+# Short, standard Xbox-pad labels for the names above, matches iiSU's own
 # on-screen gamepad legend (see the BUTTON_TO_KEYCODE comment), and far more
 # compact than a plain name.replace("_", " ").title() would be (e.g. "Left
 # Stick" / "Right Shoulder"), which matters for manager.py's Advanced page
@@ -144,7 +152,7 @@ def quit_chord_mask(button_names: list[str]) -> int:
         mask |= BUTTON_NAME_TO_BIT.get(name, 0)
     return mask
 
-SONY_CONTROLLER_CHECK_INTERVAL = 3.0  # seconds -- winmm enumeration, not worth doing at POLL_HZ
+SONY_CONTROLLER_CHECK_INTERVAL = 3.0  # seconds, winmm enumeration, not worth doing at POLL_HZ
 MAXPNAMELEN = 32
 MAX_JOYSTICKOEMVXDNAME = 260
 JOYERR_NOERROR = 0
@@ -186,7 +194,7 @@ _winmm.joyGetDevCapsW.restype = wintypes.UINT
 
 def find_unmapped_sony_controllers() -> list[str]:
     """Enumerates legacy joystick devices (winmm's joyGetDevCapsW) rather
-    than XInput -- a DualSense/DS4 shows up *here* when it's plugged in
+    than XInput, a DualSense/DS4 shows up *here* when it's plugged in
     directly with nothing translating it, which is exactly the condition
     worth catching: if it already worked as an XInput device, Steam Input
     (or DS4Windows, etc.) is already doing that job and there's nothing to
@@ -204,7 +212,7 @@ def find_unmapped_sony_controllers() -> list[str]:
 
 def find_steam_exe() -> str | None:
     """Steam's own install path, from the registry key it writes itself on
-    install -- more reliable than guessing a Program Files location, since
+    install, more reliable than guessing a Program Files location, since
     Steam can be installed anywhere the person chose."""
     import winreg
     try:
@@ -215,20 +223,20 @@ def find_steam_exe() -> str | None:
 
 
 def open_steam_for_controller_setup(controller_name: str) -> None:
-    """Opens Steam -- just the client, no documented way to jump straight
+    """Opens Steam, just the client, no documented way to jump straight
     to Controller settings (see this module's docstring for why this
-    doesn't try to flip the underlying setting itself) -- so a detected
+    doesn't try to flip the underlying setting itself), so a detected
     DualSense/DS4 that isn't already working as an XInput device is one
     click away from being fixed."""
     steam_exe = find_steam_exe()
     if steam_exe is None:
         print(
-            f"[controller] {controller_name} detected, but Steam doesn't appear to be installed -- install it and "
+            f"[controller] {controller_name} detected, but Steam doesn't appear to be installed, install it and "
             "enable \"PlayStation Configuration Support\" under Settings > Controller for it to work with iiSU"
         )
         return
     print(
-        f"[controller] {controller_name} detected -- opening Steam. Enable \"PlayStation Configuration Support\" "
+        f"[controller] {controller_name} detected, opening Steam. Enable \"PlayStation Configuration Support\" "
         "under Settings > Controller > General Controller Settings (one-time, covers every DualSense/DS4 from then on)"
     )
     subprocess.Popen([steam_exe], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -305,6 +313,7 @@ class ControllerBridge:
                 stdin=subprocess.PIPE,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                creationflags=CREATE_NO_WINDOW,
             )
 
     def _send_keyevent(self, code: int) -> None:
@@ -369,12 +378,12 @@ class ControllerBridge:
                     self._last_repeat[key] = now
 
     def _check_sony_controllers(self, now: float) -> None:
-        """Throttled to once every SONY_CONTROLLER_CHECK_INTERVAL -- winmm
+        """Throttled to once every SONY_CONTROLLER_CHECK_INTERVAL, winmm
         device enumeration is cheap but pointless to redo at POLL_HZ.
         Prompts (opens Steam) once per distinct controller name while it
         stays plugged in and un-translated, forgetting it once it
-        disappears so unplugging and replugging -- or a later session,
-        since this state doesn't persist anywhere -- prompts again if it's
+        disappears so unplugging and replugging, or a later session,
+        since this state doesn't persist anywhere, prompts again if it's
         still not fixed."""
         if now < self._sony_controller_check_due:
             return
@@ -407,7 +416,7 @@ class ControllerBridge:
                     print(f"[controller] slot {slot} connected (wired or Bluetooth, detected automatically)")
                     self._connected_slots.add(slot)
 
-                # Checked regardless of game state -- this is a local
+                # Checked regardless of game state, this is a local
                 # quit/shutdown action, not something forwarded into
                 # Android, so there's no reason to gate it on iiSU being
                 # the thing currently in focus.

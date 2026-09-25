@@ -49,11 +49,20 @@ By default, **Escape** controls game quitting and shutdown: tap it while a game 
 
 The Manager's **Windows Apps** page lets iiSU launch native Windows applications in addition to emulated console games. An entry can launch either an executable (`.exe`) or a registered Windows URI/protocol such as `steam://rungameid/...`.
 
-Each entry is represented in iiSU by an empty `.pcgame` placeholder under the `windows` folder in your configured ROM directory. The real launch information stays in `bridge/windows_apps.json`; the launch bridge intercepts iiSU's request for the placeholder and starts the configured Windows target instead.
+Each entry is represented in iiSU by an empty `.pcgame` placeholder under `bridge/windows_stubs/`, kept out of your actual ROM directory so it never shows up when you're browsing your real ROM library. The real launch information stays in `bridge/windows_apps.json`; the launch bridge intercepts iiSU's request for the placeholder and starts the configured Windows target instead. Sync into the AVD merges these placeholders into iiSU's `windows` folder automatically. An install upgraded from a version that kept placeholders under `<roms_dir>/windows` copies them into the new location automatically the first time the Manager notices that folder; the old folder is left alone and is safe to delete yourself once you've confirmed everything still works.
 
-Use **Add** for individual programs, or **Steam Library Import** to find installed Steam games and create URI-based entries automatically. Steam entries can use artwork cached by the Manager; this does not modify iiSU's own artwork or SteamGridDB integration.
+Use **Add** for individual programs, drag and drop an `.exe` file anywhere on the Windows Apps page, or **Steam Library Import** to find installed Steam games and create URI-based entries automatically. Steam entries can use artwork cached by the Manager; this does not modify iiSU's own artwork or SteamGridDB integration.
 
 `windows_apps.json` is local runtime configuration and is intentionally ignored by Git. Executable paths are specific to the PC they were configured on, while URI-based entries are generally more portable. The Windows Apps page also includes import/export and a health check for missing executables, placeholders, and other library inconsistencies.
+
+## Console Games and multi-disc playlists
+
+The Manager's **Games > Console** page lists every game detected in your ROM library, grouped the same way syncing to the AVD does: a multi-disc game backed by an `.m3u`/`.cue` shows up as one entry, not one per disc. Select rows and right-click for two exceptions to that default:
+
+- **Keep Discs Separate** is for a game like Gran Turismo 2, where an `.m3u` actually bundles distinct, separately-launchable modes rather than continuation discs: the individual files show up in iiSU as their own entries instead, and the playlist/sheet itself is hidden from iiSU (still listed on this page, greyed as "hidden", so you can merge it back together later). Only applies to selected playlists/sheets, never to a plain single-file game.
+- **Merge Discs Together** undoes that for a previously-excepted playlist/sheet.
+
+Both take effect on your next Start, not while Community-iiSU-PC is already running.
 
 ## Uninstalling
 

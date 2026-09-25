@@ -2,7 +2,7 @@
 Applies config.json's "display" settings (width/height/density) to the AVD's
 actual hardware profile and cold-boots it so the change takes effect.
 
-gpu_mode is deliberately NOT handled here, unlike the others -- it's passed
+gpu_mode is deliberately NOT handled here, unlike the others, it's passed
 straight to emulator.exe as a plain -gpu launch flag by start_iisu_pc.py
 instead, since it's read fresh from config.json on every launch, so a
 GPU-backend choice needs no dedicated "cold-boot to apply" cycle of its
@@ -19,15 +19,15 @@ Changing the actual hardware profile requires a cold boot, but gives a
 genuinely native resolution with no letterboxing.
 
 Edits the *portable* AVD copy under android-sdk-portable/avd-home/ (see
-portable_sdk.py) -- that's the one every real launch actually uses since
+portable_sdk.py), that's the one every real launch actually uses since
 the portable-SDK migration, not ~/.android/avd/ (only ever a one-time copy
 source). Restarts everything via stop_iisu_pc.main() + start_iisu_pc.main()
--- the same stop/start the control panel's own buttons use -- rather than
+-- the same stop/start the control panel's own buttons use, rather than
 the `android emulator start/stop` CLI wrapper, which start_iisu_pc.py's own
 docstring documents as hanging indefinitely once the AVD is actually up.
 start_iisu_pc.main() also starts the launch bridge and brings iiSU to the
 foreground itself (see launch_bridge.py's launch_iisu()), so this doesn't
-need to duplicate that -- without it, display changes would leave the AVD
+need to duplicate that, without it, display changes would leave the AVD
 freshly booted but with no bridge running to redirect game launches.
 
 Run this after changing display settings in manager.py's Display page.

@@ -5,7 +5,7 @@ ROM-launch startActivity call sites to LaunchBridge.launch(), rebuilds,
 zipaligns, and signs the result with a freshly-generated debug keystore.
 
 This never bundles or redistributes iiSU's own APK. It operates on a copy
-supplied by whoever runs it -- the same relationship any APK-patching /
+supplied by whoever runs it, the same relationship any APK-patching /
 modding tool has to the app it patches.
 
 The patch is anchored on a literal log string ("ROM launch attempt
@@ -13,7 +13,7 @@ package=") rather than hardcoded register names or line numbers, since
 those are compiler-chosen and can differ between iiSU builds. It only
 touches startActivity(Intent) calls inside the single method that contains
 that log string, not just anywhere in the file, since MainActivity has many
-unrelated startActivity calls elsewhere -- see find_enclosing_method().
+unrelated startActivity calls elsewhere, see find_enclosing_method().
 """
 
 import re
@@ -21,6 +21,8 @@ import shutil
 import subprocess
 import zipfile
 from pathlib import Path
+
+from jre_env import java_subprocess_env
 
 SCRIPT_DIR = Path(__file__).parent
 SMALI_PATCH_DIR = SCRIPT_DIR / "smali_patch"
@@ -36,6 +38,11 @@ BRIDGE_PACKAGE_SMALI_DIR = "com/iisulauncher/pcbridge"
 
 
 def run(args: list[str], **kwargs) -> subprocess.CompletedProcess:
+    # Every command this wraps (java -jar apktool, zipalign, apksigner.bat)
+    # is console-subsystem; this runs from the GUI's Setup flow
+    # (pythonw.exe, no console of its own), so without CREATE_NO_WINDOW
+    # each one flashes its own window during patching.
+    kwargs.setdefault("creationflags", 0x08000000)
     result = subprocess.run(args, capture_output=True, text=True, **kwargs)
     if result.returncode != 0:
         raise RuntimeError(f"command failed ({' '.join(args)}):\n{result.stdout}\n{result.stderr}")
@@ -47,7 +54,7 @@ def validate_iisu_apk(apk_path: Path) -> None:
     rejected in under a second instead of after a multi-GB SDK download and
     a full apktool decompile (the point where find_main_activity_smali()
     would otherwise be the first thing to notice). Searches the raw dex
-    bytes for the same log-string anchor the real patch is anchored on --
+    bytes for the same log-string anchor the real patch is anchored on,
     an ASCII string constant lands in the dex's string pool as contiguous
     UTF-8 bytes, so a plain byte search finds it without decompiling
     anything."""
@@ -58,12 +65,12 @@ def validate_iisu_apk(apk_path: Path) -> None:
     with zipfile.ZipFile(apk_path) as z:
         dex_names = [n for n in z.namelist() if re.fullmatch(r"classes\d*\.dex", n)]
         if not dex_names:
-            raise RuntimeError(f"{apk_path.name} has no classes.dex -- it doesn't look like a valid Android APK.")
+            raise RuntimeError(f"{apk_path.name} has no classes.dex, it doesn't look like a valid Android APK.")
         found = any(anchor_bytes in z.read(name) for name in dex_names)
 
     if not found:
         raise RuntimeError(
-            f"{apk_path.name} doesn't look like iiSU -- couldn't find its ROM-launch code in it. "
+            f"{apk_path.name} doesn't look like iiSU, couldn't find its ROM-launch code in it. "
             "Double check this is the right APK (this tool only patches iiSU itself)."
         )
 
@@ -92,7 +99,7 @@ def find_main_activity_smali(decompiled_dir: Path) -> Path:
 def find_enclosing_method(lines: list[str], line_index: int) -> tuple[int, int]:
     """Returns (start, end) line indices of the .method ... .end method
     block containing line_index, so the patch only touches startActivity
-    calls within that one method -- not anywhere else in this very large
+    calls within that one method, not anywhere else in this very large
     file, which has many unrelated startActivity calls."""
     start = line_index
     while start >= 0 and not lines[start].lstrip().startswith(".method"):
@@ -112,7 +119,7 @@ def patch_main_activity(path: Path) -> int:
 
     anchor_index = next((i for i, line in enumerate(lines) if LOG_ANCHOR in line), None)
     if anchor_index is None:
-        raise RuntimeError(f"Anchor {LOG_ANCHOR!r} disappeared between the file-level check and patching -- this shouldn't happen.")
+        raise RuntimeError(f"Anchor {LOG_ANCHOR!r} disappeared between the file-level check and patching, this shouldn't happen.")
 
     method_start, method_end = find_enclosing_method(lines, anchor_index)
 
@@ -250,7 +257,7 @@ def patch_manifest_for_media_bridge(decompiled_dir: Path) -> None:
 
 def fix_extract_native_libs(decompiled_dir: Path) -> None:
     """extractNativeLibs="false" causes INSTALL_FAILED_INVALID_APK once the
-    APK is re-signed with a different key than the original -- flip it."""
+    APK is re-signed with a different key than the original, flip it."""
     manifest = decompiled_dir / "AndroidManifest.xml"
     text = manifest.read_text(encoding="utf-8")
     manifest.write_text(text.replace('android:extractNativeLibs="false"', 'android:extractNativeLibs="true"'), encoding="utf-8")
@@ -261,6 +268,9 @@ def zipalign(zipalign_exe: Path, unsigned_apk: Path, aligned_apk: Path) -> None:
 
 
 def sign(apksigner_exe: Path, keystore: Path, keystore_pass: str, key_alias: str, aligned_apk: Path, signed_apk: Path) -> None:
+    # apksigner.bat resolves its own `java` via JAVA_HOME/PATH internally,
+    # env= makes sure that resolves to a bundled JRE once one exists,
+    # without ever touching the user's real system PATH/JAVA_HOME.
     run([
         str(apksigner_exe), "sign",
         "--ks", str(keystore),
@@ -269,7 +279,7 @@ def sign(apksigner_exe: Path, keystore: Path, keystore_pass: str, key_alias: str
         "--key-pass", f"pass:{keystore_pass}",
         "--out", str(signed_apk),
         str(aligned_apk),
-    ])
+    ], env=java_subprocess_env())
 
 
 def patch_apk(

@@ -1,5 +1,5 @@
 @echo off
-cd /d "%~dp0bridge"
+cd /d "%~dp0"
 
 python --version >nul 2>nul
 if not errorlevel 1 (
@@ -19,4 +19,4 @@ if not errorlevel 1 (
     )
 )
 
-start "" %PYCMD% manager.py
+start "" %PYCMD% -m bridge.ui.app
