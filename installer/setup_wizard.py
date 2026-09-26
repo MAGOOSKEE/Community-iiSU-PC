@@ -415,6 +415,76 @@ def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_a
         process.terminate()
 
 
+def update_iisu(apk_path: Path, on_stage: Callable[[str, int, int], None] | None = None) -> None:
+    """Re-patches and reinstalls iiSU from a newer (or manually-chosen,
+    e.g. an official pre-release shared outside the normal release feed)
+    APK, against an install that's already been through run_setup() once.
+
+    Deliberately narrower than run_setup(): reuses its keystore/patch/
+    boot-and-install steps exactly (same functions, so a change to how
+    patching or installing works never has to be kept in sync in two
+    places), but skips SDK/AVD bootstrapping, redirector-stub installs,
+    and installer-SDK cleanup, none of which iiSU's own update touches,
+    those stubs are separate always-installed packages that redirect to
+    PC-side emulators regardless of which iiSU build is patched in.
+    write_bridge_config() is also skipped for the same reason: avd_name
+    and the rest of config.json are already exactly right for an existing
+    install, this only ever replaces the APK on it."""
+    total = 3
+
+    def stage(index: int, label: str) -> None:
+        print(f"\n=== Step {index + 1}/{total}: {label} ===")
+        if on_stage:
+            on_stage(label, index + 1, total)
+
+    print(f"[update] using {apk_path.name} as the source APK")
+    validate_iisu_apk(apk_path)
+
+    config_path = BRIDGE_DIR / "config.json"
+    if not config_path.is_file():
+        raise RuntimeError(f"{config_path} not found, run Setup first before updating iiSU.")
+    avd_name = json.loads(config_path.read_text(encoding="utf-8"))["avd_name"]
+
+    stage(0, "Patching the new APK")
+    import stub_apk
+
+    if not stub_apk.build_tools_available():
+        raise RuntimeError(
+            f"build-tools not found under {stub_apk.BUILD_TOOLS_DIR}. sdk_bootstrap.zipalign_exe()/"
+            "apksigner_bat() only exist during first-time setup, before cleanup_installer_sdk() "
+            "deletes them, updating iiSU afterward needs stub_apk's permanently-preserved copy "
+            "instead (see preserve_build_tools()), which is missing or was deleted. Re-run Setup "
+            "once to restore it."
+        )
+    keystore, keystore_password = ensure_keystore()
+    patched_apk = WORK_DIR / "iisu-updated.apk"
+    patch_apk(
+        source_apk=apk_path,
+        output_apk=patched_apk,
+        work_dir=WORK_DIR / "update_patch",
+        zipalign_exe=stub_apk.zipalign_exe(),
+        apksigner_exe=stub_apk.apksigner_bat(),
+        keystore=keystore,
+        keystore_pass=keystore_password,
+        key_alias=KEY_ALIAS,
+    )
+
+    stage(1, "Booting the AVD to install it")
+    sys.path.insert(0, str(BRIDGE_DIR))
+    import portable_sdk
+
+    env_overrides = portable_sdk.ensure_portable_sdk(avd_name, sdk_bootstrap.SDK_ROOT)
+    import os
+
+    env = os.environ.copy()
+    env.update(env_overrides)
+    emulator_exe = portable_sdk.PORTABLE_SDK / "emulator" / "emulator.exe"
+    boot_avd_and_install(emulator_exe, avd_name, env, patched_apk)
+
+    stage(2, "Done")
+    print(f"\n=== iiSU updated ({apk_path.name}) ===")
+
+
 def cleanup_installer_sdk() -> None:
     """Once bridge/portable_sdk.py has its own copy of the emulator,
     platform-tools, and system image, installer/android-sdk/ (~3.7GB) and
