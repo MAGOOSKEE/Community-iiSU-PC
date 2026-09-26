@@ -39,7 +39,7 @@ import subprocess
 import zipfile
 from pathlib import Path
 
-from jre_env import java_subprocess_env
+from jre_env import java_exe, java_subprocess_env
 
 SCRIPT_DIR = Path(__file__).parent
 SMALI_PATCH_DIR = SCRIPT_DIR / "smali_patch"
@@ -103,11 +103,11 @@ def validate_iisu_apk(apk_path: Path) -> None:
 def decompile(apk_path: Path, out_dir: Path) -> None:
     if out_dir.exists():
         shutil.rmtree(out_dir)
-    run(["java", "-jar", str(APKTOOL_JAR), "d", "-f", str(apk_path), "-o", str(out_dir)])
+    run([java_exe(), "-Xmx2g", "-jar", str(APKTOOL_JAR), "d", "-f", str(apk_path), "-o", str(out_dir)], env=java_subprocess_env())
 
 
 def build(decompiled_dir: Path, out_apk: Path) -> None:
-    run(["java", "-jar", str(APKTOOL_JAR), "b", str(decompiled_dir), "-o", str(out_apk)])
+    run([java_exe(), "-Xmx2g", "-jar", str(APKTOOL_JAR), "b", str(decompiled_dir), "-o", str(out_apk)], env=java_subprocess_env())
 
 
 def find_main_activity_smali(decompiled_dir: Path) -> Path:

@@ -29,7 +29,7 @@ import sys
 from pathlib import Path
 from xml.sax.saxutils import escape as xml_escape
 
-from jre_env import java_subprocess_env
+from jre_env import java_exe, java_subprocess_env, keytool_exe
 
 INSTALLER_DIR = Path(__file__).parent
 
@@ -90,7 +90,7 @@ def ensure_keystore() -> tuple[Path, str]:
     password = secrets.token_hex(16)
     result = subprocess.run(
         [
-            "keytool", "-genkeypair", "-v",
+            keytool_exe(), "-genkeypair", "-v",
             "-keystore", str(KEYSTORE_PATH),
             "-alias", KEY_ALIAS,
             "-keyalg", "RSA", "-keysize", "2048", "-validity", "10000",
@@ -171,7 +171,7 @@ def build_stub_apk(package_name: str, app_label: str, output_apk: Path) -> None:
 
     unsigned_apk = WORK_DIR / "unsigned.apk"
     aligned_apk = WORK_DIR / "aligned.apk"
-    _run(["java", "-jar", str(APKTOOL_JAR), "b", str(project_dir), "-o", str(unsigned_apk)], env=java_subprocess_env())
+    _run([java_exe(), "-Xmx2g", "-jar", str(APKTOOL_JAR), "b", str(project_dir), "-o", str(unsigned_apk)], env=java_subprocess_env())
     _run([str(zipalign_exe()), "-p", "-f", "4", str(unsigned_apk), str(aligned_apk)])
 
     keystore, keystore_pass = ensure_keystore()
