@@ -58,7 +58,13 @@ STANDALONE_DEFAULTS = [
         "package": "org.dolphinemu.dolphinemu",
         "app_label": "Dolphin",
         "exe_names": ["Dolphin.exe", "DolphinQt2.exe"],
-        "pre_args": ["-b"],
+        # Dolphin has no dedicated --fullscreen flag, confirmed live: -b alone
+        # leaves it in a normal titled window. -C lets a CLI launch override
+        # a config value for just this run without touching the user's saved
+        # Dolphin.ini, Display.Fullscreen=True is the one that actually
+        # covers the whole screen (verified via screenshot, no OS window
+        # border at all).
+        "pre_args": ["-b", "-C", "Dolphin.Display.Fullscreen=True"],
     },
     {
         "console": "wii",
@@ -66,7 +72,7 @@ STANDALONE_DEFAULTS = [
         "package": "org.dolphinemu.dolphinemu",
         "app_label": "Dolphin",
         "exe_names": ["Dolphin.exe", "DolphinQt2.exe"],
-        "pre_args": ["-b"],
+        "pre_args": ["-b", "-C", "Dolphin.Display.Fullscreen=True"],
     },
     {
         "console": "wiiu",
@@ -128,7 +134,9 @@ STANDALONE_DEFAULTS = [
         "package": "me.magnum.melonds",
         "app_label": "melonDS",
         "exe_names": ["melonDS.exe"],
-        "pre_args": [],
+        # Confirmed live via -f/--fullscreen (verified with a screenshot,
+        # covers the whole screen).
+        "pre_args": ["-f"],
     },
     {
         "console": "nds",
@@ -141,7 +149,7 @@ STANDALONE_DEFAULTS = [
         "package": "me.magnum.melondualds",
         "app_label": "melonDS",
         "exe_names": ["melonDS.exe"],
-        "pre_args": [],
+        "pre_args": ["-f"],
     },
     {
         "console": "dreamcast",
@@ -149,7 +157,11 @@ STANDALONE_DEFAULTS = [
         "package": "com.flycast.emulator",
         "app_label": "Flycast",
         "exe_names": ["flycast.exe"],
-        "pre_args": [],
+        # Flycast has no dedicated fullscreen CLI flag at all (its --help
+        # only lists -config section:key=value and -help), it's a transient
+        # override of the same emu.cfg key its own [window] fullscreen
+        # setting uses. Confirmed live via screenshot, no OS window border.
+        "pre_args": ["-config", "window:fullscreen=yes"],
     },
     {
         "console": "ps3",
@@ -212,7 +224,14 @@ STANDALONE_DEFAULTS = [
         "package": "com.izzy2lost.x1box",
         "app_label": "xemu",
         "exe_names": ["xemu.exe"],
-        "pre_args": [],
+        # xemu doesn't accept a bare trailing ROM path, unlike every other
+        # emulator here, it collides with the CD drive xemu.toml already
+        # persists from whatever was last loaded, producing "drive with
+        # bus=0, unit=0 (index=0) exists" and an immediate exit(1). Confirmed
+        # live: -dvd_path is the flag that actually sets the disc.
+        # -full-screen (QEMU's own generic display flag, not xemu-specific)
+        # confirmed live too: without it xemu opens a normal titled window.
+        "pre_args": ["-full-screen", "-dvd_path"],
     },
     {
         "console": "xbox360",
