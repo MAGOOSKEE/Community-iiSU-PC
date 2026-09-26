@@ -34,6 +34,13 @@ from jre_env import java_subprocess_env
 START_SCRIPT = BRIDGE_DIR / "start_iisu_pc.py"
 SHORTCUT_NAME = "Community-iiSU-PC.lnk"
 
+# The installer's own [Icons] entries (CommunityIisuPC.iss) create this one
+# at install time, before any APK has ever been processed, so it's always
+# hardcoded to FALLBACK_ICON_PATH. Nothing else ever revisits it afterward,
+# confirmed live: it stays generic forever even once a real icon has been
+# extracted. Re-pointed to match here whenever extraction succeeds.
+MANAGER_SHORTCUT_NAME = "Community-iiSU-PC Manager.lnk"
+
 FALLBACK_ICON_PATH = BRIDGE_DIR / "assets" / "iisu_launch.ico"
 EXTRACTED_ICON_PATH = BRIDGE_DIR / ".iisu_icon.ico"
 APKTOOL_JAR = PROJECT_ROOT / "installer" / "tools" / "apktool.jar"
@@ -96,6 +103,19 @@ def extract_iisu_icon(apk_path: Path | None = None) -> Path | None:
     if apk_path is None:
         apk_path = _find_input_apk()
     if apk_path is None or not apk_path.is_file():
+        # installer/input/ only ever holds the APK during the original
+        # Setup run, setup_wizard.py's own flow is what puts it there, and
+        # nothing re-supplies it afterward. So this branch is the normal
+        # case for every *later* extraction (e.g. the Home page's Recreate
+        # Desktop Shortcut button), not just a one-off failure, confirmed
+        # live: it was quietly falling back to the generic icon here even
+        # with a perfectly good icon already cached from Setup. Use that
+        # cache instead of the generic icon whenever it exists, only a
+        # genuine first-ever extraction with no APK at all has nothing to
+        # fall back to.
+        if EXTRACTED_ICON_PATH.is_file():
+            print("[shortcut] no APK found, reusing the icon already extracted during Setup")
+            return EXTRACTED_ICON_PATH
         print(f"[shortcut] no APK found under {INPUT_DIR}, using the generic icon")
         return None
 
@@ -159,6 +179,29 @@ def _refresh_shell_icon_cache() -> None:
     ctypes.windll.shell32.SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None)
 
 
+def _update_manager_shortcut_icon(icon_path: Path) -> None:
+    """Re-points the installer-created Manager shortcut's icon to match,
+    only if that shortcut actually exists (it's optional, tied to Inno's
+    desktopicon task) and only if it isn't already pointing at icon_path
+    (skips a pointless PowerShell call on every ordinary launch). Only
+    ever upgrades it away from the generic icon, never touches TargetPath/
+    Arguments/WorkingDirectory, those are Inno's to own."""
+    manager_path = desktop_dir() / MANAGER_SHORTCUT_NAME
+    if not manager_path.is_file():
+        return
+    script = (
+        "$shell = New-Object -ComObject WScript.Shell\n"
+        f"$shortcut = $shell.CreateShortcut('{manager_path}')\n"
+        f"if ($shortcut.IconLocation -ne '{icon_path},0') {{\n"
+        f"    $shortcut.IconLocation = '{icon_path}'\n"
+        "    $shortcut.Save()\n"
+        "}\n"
+    )
+    subprocess.run(
+        ["powershell", "-NoProfile", "-Command", script], capture_output=True, text=True, creationflags=0x08000000,  # CREATE_NO_WINDOW
+    )
+
+
 def create_desktop_shortcut(apk_path: Path | None = None) -> Path:
     extracted = extract_iisu_icon(apk_path)
     icon_path = extracted or FALLBACK_ICON_PATH
@@ -168,6 +211,8 @@ def create_desktop_shortcut(apk_path: Path | None = None) -> Path:
         # too, since that diagnostic line is easy to miss buried in a long
         # setup log, and the shortcut otherwise looks identical either way.
         print("[shortcut] using the generic fallback icon, not iiSU's own, see the line above for why")
+    else:
+        _update_manager_shortcut_icon(icon_path)
     shortcut_path = desktop_dir() / SHORTCUT_NAME
     script = (
         "$shell = New-Object -ComObject WScript.Shell\n"
