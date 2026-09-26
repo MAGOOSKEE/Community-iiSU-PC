@@ -30,7 +30,7 @@ PROJECT_ROOT = BRIDGE_DIR.parent
 # reached via setup_wizard.py (which already has installer/ on sys.path by
 # then) or run standalone from bridge/ directly.
 sys.path.insert(0, str(PROJECT_ROOT / "installer"))
-from jre_env import java_subprocess_env
+from jre_env import java_exe, java_subprocess_env
 START_SCRIPT = BRIDGE_DIR / "start_iisu_pc.py"
 SHORTCUT_NAME = "Community-iiSU-PC.lnk"
 
@@ -126,7 +126,7 @@ def extract_iisu_icon(apk_path: Path | None = None) -> Path | None:
     try:
         shutil.rmtree(decompile_dir, ignore_errors=True)
         result = subprocess.run(
-            ["java", "-jar", str(APKTOOL_JAR), "d", "-s", "-f", str(apk_path), "-o", str(decompile_dir)],
+            [java_exe(), "-jar", str(APKTOOL_JAR), "d", "-s", "-f", str(apk_path), "-o", str(decompile_dir)],
             capture_output=True, text=True, env=java_subprocess_env(), creationflags=0x08000000,  # CREATE_NO_WINDOW
         )
         if result.returncode != 0:

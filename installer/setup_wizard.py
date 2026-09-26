@@ -23,7 +23,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import sdk_bootstrap
-from jre_env import java_subprocess_env
+from jre_env import java_exe, java_subprocess_env, keytool_exe
 from patch_iisu import patch_apk, validate_iisu_apk
 
 INSTALLER_DIR = Path(__file__).parent
@@ -88,13 +88,17 @@ def check_disk_space() -> None:
 
 
 def require_java() -> None:
-    if shutil.which("java") is None:
+    # java_exe()/keytool_exe() return an absolute path once a bundled JRE
+    # is present (an installer build), which always satisfies this check
+    # without touching the system at all, only a source checkout with no
+    # bundled JRE falls back to needing a real system JDK on PATH.
+    if java_exe() == "java" and shutil.which("java") is None:
         raise RuntimeError(
             "Java was not found on PATH. This installer needs a JDK (for apktool and key "
             "generation), install one (e.g. Eclipse Temurin) and make sure `java` and "
             "`keytool` are on PATH, then run this again."
         )
-    if shutil.which("keytool") is None:
+    if keytool_exe() == "keytool" and shutil.which("keytool") is None:
         raise RuntimeError("`keytool` was not found on PATH (it ships with any JDK), check your Java install includes it.")
 
 
@@ -159,7 +163,7 @@ def ensure_keystore() -> tuple[Path, str]:
     print("[setup] generating a local signing key...")
     result = subprocess.run(
         [
-            "keytool", "-genkeypair", "-v",
+            keytool_exe(), "-genkeypair", "-v",
             "-keystore", str(KEYSTORE_PATH),
             "-alias", KEY_ALIAS,
             "-keyalg", "RSA", "-keysize", "2048", "-validity", "10000",
