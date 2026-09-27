@@ -142,3 +142,7 @@ Maintainer-only, not needed to run or develop the project day to day: `installer
 Both are shown with live GitHub avatars on the Manager's Credits page.
 
 **AI disclosure:** a large share of this project's code was written by Claude, an AI assistant, working under MAGOOSKEE's direction and review. If you're evaluating this project for safety or correctness before running it, keep that in mind and read the source.
+
+## License
+
+[PolyForm Noncommercial 1.0.0](LICENSE): free to use, fork, modify, and redistribute for any noncommercial purpose. Not licensed for commercial use, including selling it, bundling it into a paid product, or soliciting donations/payment tied to a distribution of it.
