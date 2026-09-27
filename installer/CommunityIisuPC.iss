@@ -59,6 +59,7 @@ WizardStyle=modern
 ; rights to the user's own iiSU APK, and a shared signing key across
 ; installs would be a real security bug, not just a packaging nicety).
 SetupIconFile=..\bridge\assets\iisu_launch.ico
+LicenseFile=..\LICENSE
 UninstallDisplayIcon={app}\bridge\assets\iisu_launch.ico
 
 [Languages]
@@ -86,6 +87,7 @@ Source: "..\shared\*"; DestDir: "{app}\shared"; Flags: recursesubdirs createalls
     Excludes: "__pycache__,*.pyc"
 
 Source: "..\VERSION"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#AppName} Manager"; Filename: "{app}\runtime\python\pythonw.exe"; \
