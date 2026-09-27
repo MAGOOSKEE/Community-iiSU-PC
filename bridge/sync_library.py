@@ -67,6 +67,16 @@ AVD_TAR_PUSH_PATH = "/data/local/tmp/sync_library.tar"
 
 IGNORE_TOP_LEVEL = {"folder.ico", "sync.ffs_lock"}
 
+# .sbi sidecars carry subchannel data some CD rips ship alongside a
+# .bin/.cue (anti-modchip protection on certain PS1 games), read by the
+# real PC emulator straight off disk next to the .bin/.cue, exactly like
+# an unlisted .cue FILE reference, but never named inside the .cue text
+# itself, so referenced_disc_filenames() has no way to catch it. Left
+# unexcluded, it shows up in iiSU as a bogus "game" of its own. Never
+# passed through to iiSU as a placeholder, but the real file on disk is
+# untouched, the emulator still finds it right where it always was.
+NEVER_PLACEHOLDER_EXTENSIONS = {".sbi"}
+
 CUE_FILE_LINE = re.compile(r'^\s*FILE\s+"([^"]+)"', re.IGNORECASE)
 
 
@@ -220,6 +230,8 @@ def scan_library(
             )
             for file_path in files:
                 if file_path.name in excluded:
+                    continue
+                if file_path.suffix.lower() in NEVER_PLACEHOLDER_EXTENSIONS:
                     continue
                 rel = file_path.relative_to(console_folder).as_posix()
                 st = file_path.stat()
