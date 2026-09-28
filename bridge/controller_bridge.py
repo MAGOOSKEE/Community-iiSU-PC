@@ -42,17 +42,24 @@ persistent choice covering every DualSense/DS4 from then on.
 """
 
 import ctypes
+import glob
+import os
+import struct
 import subprocess
+import sys
 import time
 from ctypes import wintypes
+
+from shared.platform_compat import subprocess_creationflags
 
 # adb.exe is a console-subsystem executable; spawned from pythonw.exe
 # (no console of its own), Windows would otherwise give it a brand new
 # console window every time _ensure_shell() below (re)creates it, and
 # since this runs continuously while the Manager is open, a dropped/
 # recreated shell here is exactly the "terminal keeps popping up" bug,
-# not a one-off.
-CREATE_NO_WINDOW = 0x08000000
+# not a one-off. Windows-only concern: subprocess_creationflags() is 0
+# on Linux.
+CREATE_NO_WINDOW = subprocess_creationflags()
 
 # XINPUT_GAMEPAD.wButtons bitmask
 XINPUT_GAMEPAD_DPAD_UP = 0x0001
@@ -186,10 +193,12 @@ class JoyCapsW(ctypes.Structure):
     ]
 
 
-_winmm = ctypes.windll.winmm
-_winmm.joyGetNumDevs.restype = wintypes.UINT
-_winmm.joyGetDevCapsW.argtypes = [ctypes.c_uint, ctypes.POINTER(JoyCapsW), ctypes.c_uint]
-_winmm.joyGetDevCapsW.restype = wintypes.UINT
+_winmm = None
+if hasattr(ctypes, "windll"):
+    _winmm = ctypes.windll.winmm
+    _winmm.joyGetNumDevs.restype = wintypes.UINT
+    _winmm.joyGetDevCapsW.argtypes = [ctypes.c_uint, ctypes.POINTER(JoyCapsW), ctypes.c_uint]
+    _winmm.joyGetDevCapsW.restype = wintypes.UINT
 
 
 def find_unmapped_sony_controllers() -> list[str]:
@@ -199,7 +208,12 @@ def find_unmapped_sony_controllers() -> list[str]:
     worth catching: if it already worked as an XInput device, Steam Input
     (or DS4Windows, etc.) is already doing that job and there's nothing to
     fix. Returns the product name of every Sony PlayStation controller
-    found this way (there can be more than one)."""
+    found this way (there can be more than one). Windows-only mechanism
+    (winmm); returns an empty list on Linux, there's no equivalent nudge
+    for Steam Input there, evdev device names already surface the real
+    controller identity to iiSU directly."""
+    if _winmm is None:
+        return []
     found = []
     caps = JoyCapsW()
     for joy_id in range(_winmm.joyGetNumDevs()):
@@ -211,15 +225,20 @@ def find_unmapped_sony_controllers() -> list[str]:
 
 
 def find_steam_exe() -> str | None:
-    """Steam's own install path, from the registry key it writes itself on
-    install, more reliable than guessing a Program Files location, since
-    Steam can be installed anywhere the person chose."""
-    import winreg
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam") as key:
-            return winreg.QueryValueEx(key, "SteamExe")[0]
-    except OSError:
-        return None
+    """Steam's own install path: the registry key it writes itself on
+    Windows install (more reliable than guessing a Program Files
+    location, since Steam can be installed anywhere the person chose),
+    or just `steam` on PATH on Linux (Flatpak/native Steam installs both
+    put a launcher there)."""
+    if sys.platform == "win32":
+        import winreg
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam") as key:
+                return winreg.QueryValueEx(key, "SteamExe")[0]
+        except OSError:
+            return None
+    import shutil
+    return shutil.which("steam") or shutil.which("steam-runtime")
 
 
 def open_steam_for_controller_setup(controller_name: str) -> None:
@@ -259,6 +278,8 @@ class XinputState(ctypes.Structure):
 
 
 def _load_xinput():
+    if not hasattr(ctypes, "windll"):
+        return None
     for name in ("xinput1_4.dll", "xinput1_3.dll", "xinput9_1_0.dll"):
         try:
             return ctypes.windll.LoadLibrary(name)
@@ -273,12 +294,272 @@ if _xinput is not None:
     _xinput.XInputGetState.restype = ctypes.c_uint32
 
 
-def get_gamepad_state(slot: int) -> XinputGamepad | None:
-    if _xinput is None:
+# --- Linux gamepad support (joydev API, /dev/input/js*) ---------------
+#
+# No XInput on Linux, so this reads the kernel's joystick device API
+# directly (older but far simpler than raw evdev for this purpose: it
+# already reports discrete button/axis-changed events, no scancode
+# tables to maintain) and reshapes each device's state into a
+# LinuxGamepadState exposing the exact same field names as XinputGamepad
+# (wButtons/bLeftTrigger/bRightTrigger/sThumbLX../sThumbRY), so
+# ControllerBridge below (all XINPUT_GAMEPAD_* bit checks and axis reads)
+# needs zero changes to work against either.
+
+
+class LinuxGamepadState:
+    __slots__ = ("wButtons", "bLeftTrigger", "bRightTrigger", "sThumbLX", "sThumbLY", "sThumbRX", "sThumbRY")
+
+    def __init__(self):
+        self.wButtons = 0
+        self.bLeftTrigger = 0
+        self.bRightTrigger = 0
+        self.sThumbLX = 0
+        self.sThumbLY = 0
+        self.sThumbRX = 0
+        self.sThumbRY = 0
+
+
+_JS_EVENT_FORMAT = "IhBB"
+_JS_EVENT_SIZE = struct.calcsize(_JS_EVENT_FORMAT)
+_JS_EVENT_BUTTON = 0x01
+_JS_EVENT_AXIS = 0x02
+_JS_EVENT_INIT = 0x80
+
+# A real gamepad reports at least this many buttons/axes (A/B/X/Y, four
+# shoulders, two thumb-clicks, and four analog axes); a touchpad, mouse,
+# or motion-sensor "joystick" device (some laptops/controllers expose
+# these as separate js* nodes) never does, this is enough to tell them
+# apart without a hardcoded device-name blocklist.
+_LINUX_GAMEPAD_MIN_BUTTONS = 10
+_LINUX_GAMEPAD_MIN_AXES = 4
+_LINUX_IGNORE_DEVICE_NAME_SUBSTRINGS = (
+    "motion sensor", "touchpad", "accelerometer", "gyro", "pointer", "mouse", "headset", "keyboard",
+)
+
+
+def _is_real_gamepad_device(path: str) -> bool:
+    try:
+        import fcntl
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        try:
+            buf = bytearray(1)
+            fcntl.ioctl(fd, 0x80016A11, buf)  # JSIOCGAXES
+            axes = buf[0]
+            fcntl.ioctl(fd, 0x80016A12, buf)  # JSIOCGBUTTONS
+            buttons = buf[0]
+            name_buf = bytearray(128)
+            fcntl.ioctl(fd, 0x80806A13, name_buf)  # JSIOCGNAME
+            name = name_buf.split(b"\0")[0].decode("utf-8", errors="replace").lower()
+        finally:
+            os.close(fd)
+    except OSError:
+        return False
+    if any(ignored in name for ignored in _LINUX_IGNORE_DEVICE_NAME_SUBSTRINGS):
+        return False
+    return buttons >= _LINUX_GAMEPAD_MIN_BUTTONS and axes >= _LINUX_GAMEPAD_MIN_AXES
+
+
+class _LinuxJoystickDevice:
+    def __init__(self, path: str):
+        self.path = path
+        self.fd: int | None = None
+        self.name = ""
+        self.state = LinuxGamepadState()
+        self.buttons: dict[int, bool] = {}
+        self.axes: dict[int, int] = {}
+        self.btn_map: dict[int, int] = {}
+        self.ax_map: dict[int, int] = {}
+        self.open()
+
+    def open(self) -> bool:
+        try:
+            self.fd = os.open(self.path, os.O_RDONLY | os.O_NONBLOCK)
+        except OSError:
+            self.fd = None
+            return False
+        self._load_maps()
+        return True
+
+    def _load_maps(self) -> None:
+        import array
+        import fcntl
+        try:
+            name_buf = bytearray(128)
+            fcntl.ioctl(self.fd, 0x80806A13, name_buf)  # JSIOCGNAME
+            self.name = name_buf.split(b"\0")[0].decode("utf-8", errors="replace")
+        except OSError:
+            self.name = ""
+        try:
+            buf = bytearray(1)
+            fcntl.ioctl(self.fd, 0x80016A12, buf)  # JSIOCGBUTTONS
+            n_buttons = buf[0]
+            btn_arr = array.array("H", [0] * 64)
+            fcntl.ioctl(self.fd, 0x80806A34, btn_arr)  # JSIOCGBTNMAP
+            self.btn_map = {i: btn_arr[i] for i in range(min(n_buttons, len(btn_arr)))}
+        except OSError:
+            self.btn_map = {}
+        try:
+            buf = bytearray(1)
+            fcntl.ioctl(self.fd, 0x80016A11, buf)  # JSIOCGAXES
+            n_axes = buf[0]
+            axis_arr = array.array("B", [0] * 64)
+            fcntl.ioctl(self.fd, 0x80406A32, axis_arr)  # JSIOCGAXMAP
+            self.ax_map = {i: axis_arr[i] for i in range(min(n_axes, len(axis_arr)))}
+        except OSError:
+            self.ax_map = {}
+
+    def close(self) -> None:
+        if self.fd is not None:
+            try:
+                os.close(self.fd)
+            except OSError:
+                pass
+            self.fd = None
+
+    # evdev key codes (linux/input-event-codes.h) this maps to the same
+    # XINPUT_GAMEPAD_* bits ControllerBridge below already checks.
+    _BTN_CODE_TO_XINPUT_BIT = {
+        0x130: XINPUT_GAMEPAD_A,             # BTN_SOUTH / Cross
+        0x131: XINPUT_GAMEPAD_B,             # BTN_EAST / Circle
+        0x133: XINPUT_GAMEPAD_X,             # BTN_NORTH / Square
+        0x134: XINPUT_GAMEPAD_Y,             # BTN_WEST / Triangle
+        0x136: XINPUT_GAMEPAD_LEFT_SHOULDER,
+        0x137: XINPUT_GAMEPAD_RIGHT_SHOULDER,
+        0x13A: XINPUT_GAMEPAD_BACK,          # BTN_SELECT / Share
+        0x13B: XINPUT_GAMEPAD_START,         # BTN_START / Options
+        0x13D: XINPUT_GAMEPAD_LEFT_THUMB,
+        0x13E: XINPUT_GAMEPAD_RIGHT_THUMB,
+        0x220: XINPUT_GAMEPAD_DPAD_UP,
+        0x221: XINPUT_GAMEPAD_DPAD_DOWN,
+        0x222: XINPUT_GAMEPAD_DPAD_LEFT,
+        0x223: XINPUT_GAMEPAD_DPAD_RIGHT,
+    }
+
+    def poll(self) -> LinuxGamepadState | None:
+        if self.fd is None and not self.open():
+            return None
+        try:
+            while True:
+                data = os.read(self.fd, _JS_EVENT_SIZE)
+                if not data or len(data) < _JS_EVENT_SIZE:
+                    break
+                _time_ms, value, ev_type, number = struct.unpack(_JS_EVENT_FORMAT, data)
+                ev_type &= ~_JS_EVENT_INIT
+                if ev_type == _JS_EVENT_BUTTON:
+                    self.buttons[number] = bool(value)
+                elif ev_type == _JS_EVENT_AXIS:
+                    self.axes[number] = value
+        except BlockingIOError:
+            pass
+        except OSError:
+            self.close()
+            return None
+
+        w_buttons = 0
+        if self.btn_map:
+            for number, pressed in self.buttons.items():
+                if not pressed:
+                    continue
+                bit = self._BTN_CODE_TO_XINPUT_BIT.get(self.btn_map.get(number))
+                if bit:
+                    w_buttons |= bit
+        else:
+            # No button map (some virtual/oddball devices): fall back to
+            # a fixed positional guess matching the most common js0..
+            # ordering, better than reporting nothing at all.
+            fallback = {
+                0: XINPUT_GAMEPAD_A, 1: XINPUT_GAMEPAD_B, 2: XINPUT_GAMEPAD_X, 3: XINPUT_GAMEPAD_Y,
+                4: XINPUT_GAMEPAD_LEFT_SHOULDER, 5: XINPUT_GAMEPAD_RIGHT_SHOULDER,
+                6: XINPUT_GAMEPAD_BACK, 8: XINPUT_GAMEPAD_BACK, 7: XINPUT_GAMEPAD_START, 9: XINPUT_GAMEPAD_START,
+                11: XINPUT_GAMEPAD_LEFT_THUMB, 10: XINPUT_GAMEPAD_RIGHT_THUMB, 12: XINPUT_GAMEPAD_RIGHT_THUMB,
+            }
+            for number, bit in fallback.items():
+                if self.buttons.get(number):
+                    w_buttons |= bit
+
+        if self.ax_map:
+            code_to_axis = {code: index for index, code in self.ax_map.items()}
+            lx_i, ly_i = code_to_axis.get(0x00, 0), code_to_axis.get(0x01, 1)   # ABS_X, ABS_Y
+            rx_i, ry_i = code_to_axis.get(0x03, 3), code_to_axis.get(0x04, 4)   # ABS_RX, ABS_RY
+            lt_i, rt_i = code_to_axis.get(0x02, 2), code_to_axis.get(0x05, 5)   # ABS_Z, ABS_RZ
+            hat_x_i, hat_y_i = code_to_axis.get(0x10, 6), code_to_axis.get(0x11, 7)  # ABS_HAT0X/Y
+        else:
+            lx_i, ly_i, lt_i, rx_i, ry_i, rt_i, hat_x_i, hat_y_i = 0, 1, 2, 3, 4, 5, 6, 7
+
+        hat_x, hat_y = self.axes.get(hat_x_i, 0), self.axes.get(hat_y_i, 0)
+        if hat_x < -16000:
+            w_buttons |= XINPUT_GAMEPAD_DPAD_LEFT
+        elif hat_x > 16000:
+            w_buttons |= XINPUT_GAMEPAD_DPAD_RIGHT
+        if hat_y < -16000:
+            w_buttons |= XINPUT_GAMEPAD_DPAD_UP
+        elif hat_y > 16000:
+            w_buttons |= XINPUT_GAMEPAD_DPAD_DOWN
+
+        # Linux joydev axes are signed 16-bit (-32767..32767, same range
+        # XInput thumbsticks already use); triggers report on that same
+        # signed range too (unlike XInput's own 0..255 byte), rescaled
+        # here so callers can keep treating bLeftTrigger/bRightTrigger
+        # identically on both platforms.
+        state = self.state
+        state.wButtons = w_buttons
+        state.sThumbLX = self.axes.get(lx_i, 0)
+        state.sThumbLY = -self.axes.get(ly_i, 0)
+        state.sThumbRX = self.axes.get(rx_i, 0)
+        state.sThumbRY = -self.axes.get(ry_i, 0)
+        state.bLeftTrigger = max(0, min(255, int((self.axes.get(lt_i, -32768) + 32768) / 65535 * 255)))
+        state.bRightTrigger = max(0, min(255, int((self.axes.get(rt_i, -32768) + 32768) / 65535 * 255)))
+        return state
+
+
+class _LinuxGamepadManager:
+    """Rescans /dev/input/js* for real gamepads every couple seconds
+    (cheap, and covers hot-plug without a dedicated udev watcher) rather
+    than once at startup, keeping each already-open device's fd stable
+    across rescans so poll() doesn't lose buffered state on a device
+    that's still there."""
+
+    _RESCAN_INTERVAL = 2.0
+
+    def __init__(self):
+        self.devices: dict[int, _LinuxJoystickDevice] = {}
+        self._last_scan = 0.0
+
+    def get_pad(self, slot: int) -> LinuxGamepadState | None:
+        now = time.time()
+        if now - self._last_scan > self._RESCAN_INTERVAL:
+            self._last_scan = now
+            self._scan()
+        device = self.devices.get(slot)
+        return device.poll() if device is not None else None
+
+    def _scan(self) -> None:
+        paths = [p for p in sorted(glob.glob("/dev/input/js*")) if _is_real_gamepad_device(p)]
+        for slot in range(4):
+            if slot < len(paths):
+                path = paths[slot]
+                if slot not in self.devices or self.devices[slot].path != path:
+                    if slot in self.devices:
+                        self.devices[slot].close()
+                    device = _LinuxJoystickDevice(path)
+                    self.devices[slot] = device
+                    print(f"[controller] slot {slot} connected: {device.name or path}")
+            elif slot in self.devices:
+                self.devices[slot].close()
+                del self.devices[slot]
+
+
+_linux_gamepad_manager = _LinuxGamepadManager() if _xinput is None and sys.platform != "win32" else None
+
+
+def get_gamepad_state(slot: int) -> XinputGamepad | LinuxGamepadState | None:
+    if _xinput is not None:
+        state = XinputState()
+        if _xinput.XInputGetState(slot, ctypes.byref(state)) == ERROR_SUCCESS:
+            return state.Gamepad
         return None
-    state = XinputState()
-    if _xinput.XInputGetState(slot, ctypes.byref(state)) == ERROR_SUCCESS:
-        return state.Gamepad
+    if _linux_gamepad_manager is not None:
+        return _linux_gamepad_manager.get_pad(slot)
     return None
 
 
