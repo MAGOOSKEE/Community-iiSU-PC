@@ -14,9 +14,10 @@ Usage: python -m bridge.ui.boot_overlay_app <context> [flavor]
 
 import math
 import sys
-import winreg
 
 import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
+
+from shared.platform_compat import IS_WINDOWS
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QGuiApplication, QLinearGradient, QPainter
@@ -47,11 +48,64 @@ _THEMES = {
 }
 
 
+def _detect_linux_theme() -> str:
+    """Best-effort light/dark detection via the freedesktop desktop
+    portal (org.freedesktop.appearance color-scheme), the modern,
+    desktop-environment-agnostic standard GNOME, KDE Plasma, and most
+    others implement, so this doesn't need a separate code path per
+    desktop environment. Falls back to gsettings (GNOME/Cinnamon
+    specifically, for older setups predating the portal) and finally to
+    "dark" (matching this project's own brand theme) if neither is
+    available or the query fails for any reason, same "cosmetic, never
+    worth failing over" reasoning as the Windows registry read."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            [
+                "gdbus", "call", "--session", "--dest", "org.freedesktop.portal.Desktop",
+                "--object-path", "/org/freedesktop/portal/desktop",
+                "--method", "org.freedesktop.portal.Settings.Read",
+                "org.freedesktop.appearance", "color-scheme",
+            ],
+            capture_output=True, text=True, timeout=2,
+        )
+        if result.returncode == 0:
+            # Response embeds a uint32: 0=no preference, 1=prefer-dark, 2=prefer-light.
+            if "uint32 1" in result.stdout:
+                return "dark"
+            if "uint32 2" in result.stdout:
+                return "light"
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    try:
+        result = subprocess.run(
+            ["gsettings", "get", "org.gnome.desktop.interface", "color-scheme"],
+            capture_output=True, text=True, timeout=2,
+        )
+        if result.returncode == 0:
+            value = result.stdout.strip().lower()
+            # "default"/"prefer-light" both mean "no explicit dark
+            # preference", only an explicit dark string counts, same
+            # reasoning as the portal case above: a false "light" read
+            # confidently claiming a preference nobody actually set is
+            # worse than just falling through to the safe default below.
+            if "dark" in value:
+                return "dark"
+            if "light" in value:
+                return "light"
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return "dark"
+
+
 def _detect_windows_theme() -> str:
     """Reads the same registry value Windows' own Settings > Colors page
     ("Choose your default app mode") writes, best-effort, since a
     loading screen guessing wrong about system theme is purely cosmetic,
     never worth failing the boot sequence over."""
+    if not IS_WINDOWS:
+        return _detect_linux_theme()
+    import winreg
     try:
         with winreg.OpenKey(
             winreg.HKEY_CURRENT_USER,
@@ -218,7 +272,18 @@ def main() -> None:
     flavor = sys.argv[2] if len(sys.argv) > 2 else ""
     app = QApplication(sys.argv)
     window = OverlayWindow(context, flavor)
-    window.show()
+    if IS_WINDOWS:
+        window.show()
+    else:
+        # Windows honors a plain frameless window's explicit setGeometry()
+        # covering the whole screen (what __init__ already sets up), but
+        # Wayland compositors flatly refuse to let a client position its
+        # own top-level window at all, by design/security model, not a
+        # missing feature, setGeometry() is silently ignored there. A real
+        # fullscreen *request* (xdg_toplevel.set_fullscreen on Wayland,
+        # _NET_WM_STATE_FULLSCREEN on X11) is the only portable way to get
+        # a true fullscreen window on Linux regardless of display server.
+        window.showFullScreen()
     window.activateWindow()
     sys.exit(app.exec())
 

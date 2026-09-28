@@ -1,43 +1,45 @@
 # Community-iiSU-PC Setup
 
-Runs iiSU (an Android emulation frontend) inside a Windows-hosted Android VM, patched so launching a game in iiSU hands off to a real PC emulator instead of an Android one.
+Runs iiSU (an Android emulation frontend) inside a hardware-accelerated Android VM on Windows or Linux, patched so launching a game in iiSU hands off to a real PC emulator instead of an Android one.
 
 **This does not include iiSU itself.** iiSU is closed-source, third-party software this project has no direct affiliation with. You will need your own copy of its APK. This tool patches *your* copy, the same way any APK-patching/modding tool works; it never bundles or redistributes iiSU's binary.
 
+**Linux support** (KDE Plasma) was contributed by [jacksterson](https://github.com/jacksterson). It's real and functional: SDK/AVD bootstrap, patching, the keyboard and controller quit hotkeys, KWin-based fullscreen/window management, `.desktop` shortcuts, and a Flatpak-based emulator downloader. The one gap: fullscreen/window management is KWin-specific, so it works on KDE Plasma but not GNOME/other desktop environments.
+
 ## Installing
 
-**Recommended:** download `Community-iiSU-PC-Setup-<version>.exe` from the [latest release](https://github.com/MAGOOSKEE/Community-iiSU-PC/releases/latest) and run it. It bundles its own Python and Java runtimes, so you don't need either installed first.
+**Windows, recommended:** download `Community-iiSU-PC-Setup-<version>.exe` from the [latest release](https://github.com/MAGOOSKEE/Community-iiSU-PC/releases/latest) and run it. It bundles its own Python and Java runtimes, so you don't need either installed first.
 
-**From source:** clone the repo instead if you want to track `dev` or make changes. This needs Python and a JDK on PATH yourself (see Requirements below).
+**Linux, or from source on either platform:** clone the repo (or download and extract a release zip). This needs Python and a JDK on PATH yourself (see Requirements below); there's no bundled-runtime installer for Linux yet.
 
 ## Requirements
 
-- Windows 10/11 (64-bit)
+- Windows 10/11 (64-bit), or a 64-bit Linux distribution (KDE Plasma recommended, for fullscreen/window management support)
 - Your own copy of the iiSU APK
-- Whichever PC emulators you want to use (DuckStation, Dolphin, PCSX2, etc.), install these yourself
+- Whichever PC emulators you want to use (DuckStation, Dolphin, PCSX2, etc.); install these yourself, or use the Manager's built-in downloader (winget on Windows, Flatpak on Linux)
 - A few GB of free disk space and a decent internet connection (first run downloads the Android SDK + a system image)
-- **CPU VIRTUALIZATION MUST BE TURNED ON!** Do this in your bios. Ensure that Hyper-V or the Windows Hypervisor Platform and Virtual Machine Platform are enabled also.
-- Running from source only: Python 3.11+ and a JDK on PATH (`java` and `keytool` need to work from a terminal), e.g. [Eclipse Temurin](https://adoptium.net/). The installer above bundles both, so these aren't needed if you used it.
+- **CPU virtualization must be turned on.** Windows: enable it in your BIOS, and ensure Hyper-V or the Windows Hypervisor Platform and Virtual Machine Platform are enabled. Linux: KVM enabled and `/dev/kvm` accessible (usually means being in the `kvm` group).
+- Python 3.11+ and a JDK on PATH (`java` and `keytool` need to work from a terminal), e.g. [Eclipse Temurin](https://adoptium.net/) or your distro's OpenJDK package. Windows users can skip this by using the installer above instead, which bundles both.
 
 ## First-time setup
 
 1. Drop your iiSU APK into `installer/input/`, or just point Setup at it with Browse.
-2. Run **`Community-iiSU-PC Manager.bat`** and click **Run Setup** on its Home page.
+2. Windows: run **`Community-iiSU-PC Manager.bat`**. Linux: run **`./Community-iiSU-PC\ Manager.sh`**. Click **Run Setup** on its Home page.
 
 Setup checks your APK is actually iiSU and that you have enough disk space, then downloads and sets up a self-contained Android SDK and virtual device, patches your APK, installs it, installs a redirector app for every console `shared/emulator_defaults.py` knows about, and creates a desktop shortcut. It shows which step it's on, since first run can take a while and several GB.
 
-Once it's done, a short onboarding wizard walks you through your ROM directory, emulator search folders, display resolution, and hotkeys. The Manager's settings pages are there afterward for anything the wizard doesn't cover, and its Home page switches from "Run Setup" to "Open" once setup finishes.
+Once it's done, a short onboarding wizard walks you through your ROM directory, emulator search folders (or downloading emulators directly), display resolution, and hotkeys. The Manager's settings pages are there afterward for anything the wizard doesn't cover, and its Home page switches from "Run Setup" to "Open" once setup finishes.
 
 ## Day to day use
 
-Double-click the **desktop shortcut**, or run **`Community-iiSU-PC Manager.bat`** for the full Manager: one window, navigated with the sidebar:
+Double-click the **desktop shortcut**, or run the Manager script for your platform (**`Community-iiSU-PC Manager.bat`** on Windows, **`./Community-iiSU-PC\ Manager.sh`** on Linux): one window, navigated with the sidebar:
 
 - **Home**: AVD/bridge status, Open/Stop, a running status line, and quick buttons to your ROMs folder and logs.
 - **Library**: ROM Directory (your host ROM folder), Media Library (check/restore saved media, and browse/install more through iiDB), Android Storage (browse and manage the VM's shared storage over ADB).
-- **Games**: Console (every detected ROM, grouped by multi-disc playlist) and PC (native Windows apps and URI launches, see below).
+- **Games**: Console (every detected ROM, grouped by multi-disc playlist) and PC (native apps and URI launches, see below).
 - **Emulators**: PC emulator mappings and search folders, test a mapping without starting the AVD, and reinstall iiSU's redirector apps.
 - **Settings**: Display (the Android VM's resolution and DPI) and Advanced (hotkeys and debugging options such as "Show console windows").
-- **Backup & Diagnostics**: Backup & Restore (back up configuration to a ZIP or restore an earlier one) and Diagnostics (non-destructive checks of the install, Android VM/ADB, bridge, Windows Apps, Steam integration, logs; also where you check for and apply Community-iiSU-PC and iiSU updates).
+- **Backup & Diagnostics**: Backup & Restore (back up configuration to a ZIP or restore an earlier one) and Diagnostics (non-destructive checks of the install, Android VM/ADB, bridge, PC apps, Steam integration, logs; also where you check for and apply Community-iiSU-PC and iiSU updates).
 - **Credits**: who built this and how (see below).
 - **Uninstall**: below a divider at the bottom of the sidebar.
 
@@ -45,15 +47,15 @@ On startup, Community-iiSU-PC re-syncs your ROM library into the VM automaticall
 
 A fullscreen overlay covers the AVD boot and the emulator hand-off, showing what's happening ("Booting Community-iiSU-PC...", "Waiting on DuckStation...") instead of raw desktop. It's off while the debug console checkbox is on.
 
-By default, **Escape** controls game quitting and shutdown: tap it while a game is running to force-quit the game and return to iiSU, or tap it while already in iiSU to shut down Community-iiSU-PC. The keyboard controls are rebindable in Settings > Advanced. Pressing **Select+Start** together on a controller does the same thing, and the chord is remappable to any combination of buttons.
+By default, **Escape** controls game quitting and shutdown: tap it while a game is running to force-quit the game and return to iiSU, or tap it while already in iiSU to shut down Community-iiSU-PC. On Linux, Alt+F4, Ctrl+Q, and Ctrl+Alt+X also force a full shutdown, and Ctrl+Shift+Esc mirrors an Escape tap; these four aren't currently rebindable (Escape itself is, in Settings > Advanced, on both platforms). Pressing **Select+Start** together on a controller does the same thing on either platform, and the chord is remappable to any combination of buttons.
 
-## Windows Apps
+## PC apps and games
 
-The Manager's **Games > PC** page lets iiSU launch native Windows applications in addition to emulated console games. An entry can launch either an executable (`.exe`) or a registered Windows URI/protocol such as `steam://rungameid/...`.
+The Manager's **Games > PC** page lets iiSU launch native applications in addition to emulated console games: an executable (`.exe` on Windows) or a registered URI/protocol such as `steam://rungameid/...` on either platform.
 
-Each entry is represented in iiSU by an empty `.pcgame` placeholder under `bridge/windows_stubs/`, kept out of your actual ROM directory so it never shows up when you're browsing your real ROM library. The real launch information stays in `bridge/windows_apps.json`; the launch bridge intercepts iiSU's request for the placeholder and starts the configured Windows target instead. Sync into the AVD merges these placeholders into iiSU's `windows` folder automatically.
+Each entry is represented in iiSU by an empty `.pcgame` placeholder under `bridge/windows_stubs/` (the name is historical, from before Linux support), kept out of your actual ROM directory so it never shows up when you're browsing your real ROM library. The real launch information stays in `bridge/windows_apps.json`; the launch bridge intercepts iiSU's request for the placeholder and starts the configured target instead. Sync into the AVD merges these placeholders into iiSU's `windows` folder automatically.
 
-Use **Add** for individual programs, or **Import Steam Library** to pick installed Steam games and create URI-based entries automatically. `windows_apps.json` is local runtime configuration and is intentionally ignored by Git. Executable paths are specific to the PC they were configured on, while URI-based entries are generally more portable. The page also includes import/export and a health check for missing executables, placeholders, and other library inconsistencies.
+Use **Add** for individual programs, or **Import Steam Library** to pick installed Steam games and create URI-based entries automatically (Steam's Linux install locations, including Flatpak, are detected too). `windows_apps.json` is local runtime configuration and is intentionally ignored by Git. Executable paths are specific to the PC they were configured on, while URI-based entries are generally more portable. The page also includes import/export and a health check for missing executables, placeholders, and other library inconsistencies.
 
 ## Console Games and multi-disc playlists
 
@@ -66,22 +68,24 @@ Both take effect on your next Start, not while Community-iiSU-PC is already runn
 
 ## Uninstalling
 
-Open the Manager's **Uninstall** page for a preview of exactly what will be removed and how much space it frees before you confirm. It removes the Android VM and its portable SDK copy, `bridge/config.json`, the signing keystore, and the desktop shortcut. It does not touch your ROM library, your PC emulators, or the iiSU APK you supplied. It also flags `%LOCALAPPDATA%\Android\Sdk`, which the SDK downloader can end up using; left alone by default since a real Android Studio install would keep its own SDK there too.
+Open the Manager's **Uninstall** page for a preview of exactly what will be removed and how much space it frees before you confirm. It removes the Android VM and its portable SDK copy, `bridge/config.json`, the signing keystore, and the desktop shortcuts (both the Desktop copy and, on Linux, the app-menu entry under `~/.local/share/applications`). It does not touch your ROM library, your PC emulators, or the iiSU APK you supplied. On Windows it also flags `%LOCALAPPDATA%\Android\Sdk`, which the SDK downloader can end up using; left alone by default since a real Android Studio install would keep its own SDK there too.
 
 ## How it works, briefly
 
-`installer/patch_iisu.py` decompiles your iiSU APK, redirects its ROM-launch code to a small injected class that sends the launch request to `bridge/launch_bridge.py` over a local socket, then rebuilds and signs it. The bridge matches normal ROM requests to a PC emulator (configured in `bridge/config.json`). Windows Apps requests are instead matched against `bridge/windows_apps.json` and launched directly as native executables or registered URI/protocol targets.
+`installer/patch_iisu.py` decompiles your iiSU APK, redirects its ROM-launch code to a small injected class that sends the launch request to `bridge/launch_bridge.py` over a local socket, then rebuilds and signs it. The bridge matches normal ROM requests to a PC emulator (configured in `bridge/config.json`). PC app/game requests are instead matched against `bridge/windows_apps.json` and launched directly as native executables or registered URI/protocol targets.
 
 iiSU also needs to think a real emulator is installed for each console before it'll treat it as playable. Setup installs a placeholder "redirector" app for each one (`installer/stub_apk.py`) that does nothing itself, since the patched launch never reaches it. The Manager's Emulators page has an "Install Redirector Apps..." button to re-run this any time.
 
 ## Project layout
 
 ```
-Setup.bat, Uninstall.bat   CLI-only entry points; use the Manager instead for normal use
+Setup.bat/.sh, Uninstall.bat/.sh   CLI-only entry points; use the Manager instead for normal use
+Community-iiSU-PC Manager.bat/.sh  launches the Manager directly
 VERSION                    this install's release tag, compared against GitHub Releases on a non-git install
 
 shared/qt_theme.py         the dark/gradient look and fonts shared by every window in this project
 shared/emulator_defaults.py  curated console -> PC emulator mappings, and which need a redirector
+shared/platform_compat.py  cross-platform subprocess/creationflags helpers (Windows vs Linux)
 shared/qt_avatars.py       fetches+circle-crops a GitHub avatar for the Credits page
 
 installer/
@@ -99,20 +103,22 @@ bridge/
   ui/                      the Manager GUI (PySide6/Qt): app.py is the entry point, pages/ and dialogs/
                             hold each screen, widgets/ shared building blocks like the display-resolution
                             preview and the sidebar's rounded Card
-  services/                non-GUI logic behind the GUI pages (diagnostics, backups, Windows Apps,
+  services/                non-GUI logic behind the GUI pages (diagnostics, backups, PC apps,
                             Android storage, media library/iiDB, iiSU update checks)
   bridge_config.py         shared config.json loader
   apply_display.py         applies config.json's display settings to the AVD
   start_iisu_pc.py         checks for updates, boots the AVD, starts launch_bridge.py
   updater.py               checks for (and, on a git checkout, applies) updates
   stop_iisu_pc.py          tears both back down
-  launch_bridge.py         handles iiSU launches for PC emulators and native Windows apps
-  controller_bridge.py     forwards controller input into the AVD
+  launch_bridge.py         handles iiSU launches for PC emulators and native PC apps
+  controller_bridge.py     forwards controller input into the AVD (XInput on Windows, joydev on Linux)
+  emulator_downloader.py   downloads PC emulators via winget (Windows) or Flatpak (Linux)
   portable_sdk.py          copies the SDK/AVD into a self-contained folder
   sync_library.py          mirrors your ROM library into the AVD as placeholders
   console_names.py         resolves a ROM folder name to one of iiSU's known consoles
-  create_shortcut.py       creates the desktop shortcut
-  winapi.py                shared Win32 window-management helpers
+  create_shortcut.py       creates the desktop shortcut (.lnk on Windows, .desktop on Linux)
+  winapi.py                window-management dispatch: winapi_windows.py (ctypes/Win32) or
+                            winapi_linux.py (KWin/xdotool), picked by shared/platform_compat.py
 
 tests/                    unit tests for the pure routing/mapping logic (no AVD needed)
 ```
@@ -123,11 +129,11 @@ Maintainer-only, not needed to run or develop the project day to day: `installer
 
 ## Running tests
 
-`python -m unittest discover -s tests` runs the unit tests covering the console/emulator routing logic (`shared/emulator_defaults.py`, `bridge/console_names.py`, `bridge/launch_bridge.py`'s `find_emulator_for_package`). Stdlib-only, no AVD or adb needed. These only check the pure mapping/decision logic, not an actual end-to-end launch.
+`python -m unittest discover -s tests` (or `python3` on Linux) runs the unit tests covering the console/emulator routing logic (`shared/emulator_defaults.py`, `bridge/console_names.py`, `bridge/launch_bridge.py`'s `find_emulator_for_package`, `bridge/controller_bridge.py`, `bridge/emulator_downloader.py`). Stdlib-only, no AVD or adb needed. These only check the pure mapping/decision logic, not an actual end-to-end launch.
 
 ## If something breaks
 
-- Run the Manager's **Backup & Diagnostics > Diagnostics** page first for a non-destructive check of the installation, configuration, Android VM/ADB, bridge, Windows Apps, Steam integration, and logs.
+- Run the Manager's **Backup & Diagnostics > Diagnostics** page first for a non-destructive check of the installation, configuration, Android VM/ADB, bridge, PC apps, Steam integration, and logs.
 - `bridge/manager_debug.log` and `bridge/bridge_debug.log` preserve Manager and launch-bridge diagnostics, including uncaught Python exceptions that might otherwise disappear when a console closes.
 - `installer/patch_iisu.py`'s patch is anchored on specific log strings in iiSU's code. If iiSU updates and changes them, the patch fails loudly instead of silently producing a broken build.
 - `bridge/emulator.log`, `bridge/bridge.log`, and `bridge/stop.log` cover the AVD, the launch bridge, and shutdown respectively. Open the Manager's Home page (Logs button) to check them.
@@ -137,9 +143,10 @@ Maintainer-only, not needed to run or develop the project day to day: `installer
 ## Credits
 
 - **[MAGOOSKEE](https://github.com/MAGOOSKEE)**: project owner, built and maintains Community-iiSU-PC.
+- **[jacksterson](https://github.com/jacksterson)**: contributed the original Linux port (KWin/xdotool window management, joydev controller support, cross-platform SDK/shortcut/process handling, the Flatpak emulator downloader), integrated here.
 - **[Claude](https://github.com/claude)** (Anthropic): AI coding assistant; wrote and refactored most of this codebase in collaboration with MAGOOSKEE.
 
-Both are shown with live GitHub avatars on the Manager's Credits page.
+Shown with live GitHub avatars on the Manager's Credits page.
 
 **AI disclosure:** a large share of this project's code was written by Claude, an AI assistant, working under MAGOOSKEE's direction and review. If you're evaluating this project for safety or correctness before running it, keep that in mind and read the source.
 

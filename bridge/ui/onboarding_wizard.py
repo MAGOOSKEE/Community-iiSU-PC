@@ -49,6 +49,7 @@ from launch_bridge import find_executable
 from shared.emulator_defaults import all_emulator_exe_names, describe_profile
 
 from bridge.ui.dialogs.emulator_dialog import EmulatorDialog
+from bridge.ui.dialogs.emulator_download_dialog import EmulatorDownloadDialog
 from bridge.ui.widgets.card import Card
 from bridge.ui.widgets.display_preview import DisplayPreview
 from bridge.ui.widgets.gradient_divider import GradientDivider
@@ -364,6 +365,10 @@ class EmulatorFoldersStep(QWidget):
         self.scan_button = QPushButton("Scan for installed emulators")
         self.scan_button.clicked.connect(self._start_scan)
         btn_row.addWidget(self.scan_button)
+        self.download_button = QPushButton("Download Emulators...")
+        self.download_button.setObjectName("accent")
+        self.download_button.clicked.connect(self._open_downloader)
+        btn_row.addWidget(self.download_button)
         btn_row.addStretch()
         layout.addLayout(btn_row)
 
@@ -372,6 +377,12 @@ class EmulatorFoldersStep(QWidget):
         self.status_label.setProperty("role", "dim")
         layout.addWidget(self.status_label)
         layout.addStretch()
+
+    def _open_downloader(self) -> None:
+        dialog = EmulatorDownloadDialog(self, search_roots=self.search_roots())
+        dialog.exec()
+        if dialog.installed_any:
+            self._start_scan()
 
     def search_roots(self) -> list[str]:
         return [self.roots_list.item(i).text() for i in range(self.roots_list.count())]

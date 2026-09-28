@@ -42,11 +42,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from portable_sdk import PORTABLE_AVD_HOME
+from shared.platform_compat import IS_WINDOWS, subprocess_creationflags
 
 # adb/taskkill/powershell are all console-subsystem executables; this
 # script itself always runs from the GUI (pythonw.exe), which has no
 # console for them to inherit, so each would otherwise pop up its own.
-CREATE_NO_WINDOW = 0x08000000
+# (Windows-only concern: subprocess_creationflags() is 0 on Linux.)
+CREATE_NO_WINDOW = subprocess_creationflags()
 
 STATE_PATH = Path(__file__).parent / ".runtime_state.json"
 CONFIG_PATH = Path(__file__).parent / "config.json"
@@ -78,7 +80,30 @@ def is_avd_running() -> bool:
 
 
 def kill_tree(pid: int) -> None:
-    subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
+    # Linux path relies on pid being its own process group leader
+    # (start_new_session=True at spawn time, see
+    # shared.platform_compat.detached_popen_kwargs(), used for both
+    # bridge_pid and emulator_pid), os.killpg() on a pid that shares a
+    # process group with this script would kill this script too. Verified
+    # live: correct (kills only the target) with start_new_session=True,
+    # kills the caller as well without it.
+    if IS_WINDOWS:
+        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
+        return
+    import os
+    import signal
+    try:
+        try:
+            pgid = os.getpgid(pid)
+            os.killpg(pgid, signal.SIGTERM)
+            time.sleep(0.2)
+            os.killpg(pgid, signal.SIGKILL)
+        except OSError:
+            os.kill(pid, signal.SIGTERM)
+            time.sleep(0.2)
+            os.kill(pid, signal.SIGKILL)
+    except OSError:
+        pass  # already gone
 
 
 def kill_by_cmdline_match(needle: str) -> None:
@@ -95,6 +120,9 @@ def kill_by_cmdline_match(needle: str) -> None:
     which would also take down unrelated Python processes on the same
     PC) makes this self-healing regardless of how state.json got out of
     sync with what's actually running."""
+    if not IS_WINDOWS:
+        subprocess.run(["pkill", "-f", needle], capture_output=True)
+        return
     script = (
         "Get-CimInstance Win32_Process "
         f"| Where-Object {{ $_.CommandLine -like '*{needle}*' }} "
@@ -156,6 +184,11 @@ def main() -> None:
         print(f"[stop] killing bridge_pid {bridge_pid}...")
         kill_tree(bridge_pid)
 
+    emulator_pid = state.get("emulator_pid")
+    if emulator_pid is not None and is_avd_running():
+        print(f"[stop] killing emulator_pid {emulator_pid}...")
+        kill_tree(emulator_pid)
+
     # Fallback sweep in case graceful shutdown didn't finish in time, the
     # state file is stale/missing, or a process got reparented away from
     # the PID we originally tracked (emulator.exe in particular tends to
@@ -172,6 +205,8 @@ def main() -> None:
     kill_by_cmdline_match("launch_bridge.py")
     print("[stop] sweeping for any remaining emulator/qemu process for this AVD...")
     kill_by_cmdline_match("android-sdk-portable")
+    if avd_name:
+        kill_by_cmdline_match(f"-avd {avd_name}")
 
     # adb.exe runs as a persistent background server (any `adb` command
     # spawns it if it isn't already running) and never exits on its own

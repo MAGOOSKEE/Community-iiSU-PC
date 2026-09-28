@@ -9,17 +9,21 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import socket
 import subprocess
 import urllib.request
 from pathlib import Path
+
+from services import windows_apps_service
 
 BRIDGE_DIR = Path(__file__).resolve().parent.parent
 MANAGER_LOG_PATH = BRIDGE_DIR / "manager_debug.log"
 
 
 def _adb_path() -> str:
-    bundled_adb = BRIDGE_DIR / "android-sdk-portable" / "sdk" / "platform-tools" / "adb.exe"
+    adb_name = "adb.exe" if os.name == "nt" else "adb"
+    bundled_adb = BRIDGE_DIR / "android-sdk-portable" / "sdk" / "platform-tools" / adb_name
     return str(bundled_adb) if bundled_adb.is_file() else "adb"
 
 
@@ -46,7 +50,7 @@ def run_diagnostics(config_data: dict) -> list[tuple[str, str, str]]:
 
     config_path = BRIDGE_DIR / "config.json"
     apps_path = BRIDGE_DIR / "windows_apps.json"
-    adb_path = BRIDGE_DIR / "android-sdk-portable" / "sdk" / "platform-tools" / "adb.exe"
+    adb_path = BRIDGE_DIR / "android-sdk-portable" / "sdk" / "platform-tools" / ("adb.exe" if os.name == "nt" else "adb")
 
     add("OK" if BRIDGE_DIR.is_dir() else "ERROR", "Bridge directory", str(BRIDGE_DIR) if BRIDGE_DIR.is_dir() else f"Missing: {BRIDGE_DIR}")
     add("OK" if config_path.is_file() else "ERROR", "Bridge config", str(config_path) if config_path.is_file() else "bridge/config.json is missing")
@@ -114,17 +118,28 @@ def run_diagnostics(config_data: dict) -> list[tuple[str, str, str]]:
     except Exception:
         add("WARNING", "Launch Bridge listener", f"Nothing accepted a connection on localhost:{bridge_port} (normal if the bridge is not running)")
 
-    steam_roots = [
-        Path(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)")) / "Steam",
-        Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Steam",
-    ]
-    found_steam = next((p for p in steam_roots if p.is_dir()), None)
+    steam_libraries = windows_apps_service.steam_library_paths()
+    found_steam = steam_libraries[0] if steam_libraries else None
     if found_steam:
         vdf = found_steam / "steamapps" / "libraryfolders.vdf"
         add("OK", "Steam installation", str(found_steam))
         add("OK" if vdf.is_file() else "WARNING", "Steam library config", str(vdf) if vdf.is_file() else f"Not found: {vdf}")
     else:
         add("WARNING", "Steam installation", "Default Steam installation was not detected")
+
+    if os.name != "nt":
+        if shutil.which("xdotool"):
+            add("OK", "xdotool", "Found, window management/fullscreen is fully available")
+        else:
+            add("WARNING", "xdotool", "Not found, fullscreen/window management will be limited (install it from your package manager)")
+        if shutil.which("flatpak"):
+            add("OK", "flatpak", "Found, the Manager's emulator downloader is available")
+        else:
+            add("WARNING", "flatpak", "Not found, the Manager's emulator downloader needs it (or install PC emulators yourself)")
+        if shutil.which("qdbus") or shutil.which("qdbus6"):
+            add("OK", "qdbus (KWin scripting)", "Found, KWin-based fullscreen is available on KDE Plasma")
+        else:
+            add("WARNING", "qdbus (KWin scripting)", "Not found, xdotool alone still covers most fullscreen/window handling off KDE Plasma")
 
     for label, path in (("Manager log", MANAGER_LOG_PATH), ("Bridge log", BRIDGE_DIR / "bridge_debug.log")):
         if path.is_file():

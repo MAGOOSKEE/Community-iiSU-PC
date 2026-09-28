@@ -30,7 +30,8 @@ HTTP_TIMEOUT = 15
 
 
 def _adb_path() -> str:
-    bundled_adb = BRIDGE_DIR / "android-sdk-portable" / "sdk" / "platform-tools" / "adb.exe"
+    adb_name = "adb.exe" if os.name == "nt" else "adb"
+    bundled_adb = BRIDGE_DIR / "android-sdk-portable" / "sdk" / "platform-tools" / adb_name
     return str(bundled_adb) if bundled_adb.is_file() else "adb"
 
 
