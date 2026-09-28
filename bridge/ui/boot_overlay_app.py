@@ -272,7 +272,18 @@ def main() -> None:
     flavor = sys.argv[2] if len(sys.argv) > 2 else ""
     app = QApplication(sys.argv)
     window = OverlayWindow(context, flavor)
-    window.show()
+    if IS_WINDOWS:
+        window.show()
+    else:
+        # Windows honors a plain frameless window's explicit setGeometry()
+        # covering the whole screen (what __init__ already sets up), but
+        # Wayland compositors flatly refuse to let a client position its
+        # own top-level window at all, by design/security model, not a
+        # missing feature, setGeometry() is silently ignored there. A real
+        # fullscreen *request* (xdg_toplevel.set_fullscreen on Wayland,
+        # _NET_WM_STATE_FULLSCREEN on X11) is the only portable way to get
+        # a true fullscreen window on Linux regardless of display server.
+        window.showFullScreen()
     window.activateWindow()
     sys.exit(app.exec())
 
