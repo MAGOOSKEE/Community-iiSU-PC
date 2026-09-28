@@ -230,33 +230,51 @@ class SetupWindow(QMainWindow):
         """VirtualizationError specifically (not every setup failure) means
         there's a concrete, one-click-away fix worth offering right in the
         dialog instead of leaving the person to go search for what
-        "Windows Hypervisor Platform" even is."""
-        if "Hypervisor Platform" not in message:
-            QMessageBox.critical(self, "Setup failed", f"{message}\n\nSee the log for details.")
-            return
-        answer = QMessageBox.question(
-            self,
-            "Enable Windows Hypervisor Platform?",
-            f"{message}\n\nEnable Windows Hypervisor Platform now? This asks Windows for admin "
-            "permission and won't take effect until you restart your PC, re-run Setup.bat "
-            "after restarting.",
-        )
-        if answer == QMessageBox.StandardButton.Yes:
-            try:
-                setup_wizard.enable_hypervisor_platform()
-                QMessageBox.information(
-                    self,
-                    "Enabling...",
+        "Windows Hypervisor Platform" (or, on Linux, the `kvm` group)
+        even is."""
+        if "Hypervisor Platform" in message:
+            self._offer_fix(
+                message, title="Enable Windows Hypervisor Platform?",
+                confirm=(
+                    "Enable Windows Hypervisor Platform now? This asks Windows for admin "
+                    "permission and won't take effect until you restart your PC, re-run Setup.bat "
+                    "after restarting."
+                ),
+                enable=setup_wizard.enable_hypervisor_platform,
+                enabling_message=(
                     "Windows is enabling Hypervisor Platform now (you may see a UAC prompt). "
-                    "Restart your PC once it's done, then re-run Setup.bat.",
-                )
-            except Exception as e:
-                QMessageBox.critical(
-                    self, "Couldn't enable it automatically",
-                    f"{e}\n\nTry enabling \"Windows Hypervisor Platform\" yourself via \"Turn Windows features on or off\".",
-                )
+                    "Restart your PC once it's done, then re-run Setup.bat."
+                ),
+                manual_hint='Try enabling "Windows Hypervisor Platform" yourself via "Turn Windows features on or off".',
+            )
+        elif "`kvm` group" in message:
+            self._offer_fix(
+                message, title="Add yourself to the kvm group?",
+                confirm=(
+                    "Add your account to the `kvm` group now? This asks for permission "
+                    "graphically and won't take effect until you log out and back in, re-run "
+                    "Setup.sh after that."
+                ),
+                enable=setup_wizard.enable_kvm_access,
+                enabling_message=(
+                    "You may see a permission prompt. Log out and back in once it's done, "
+                    "then re-run Setup.sh."
+                ),
+                manual_hint="Run this yourself in a terminal: sudo usermod -aG kvm $USER, then log out and back in.",
+            )
         else:
             QMessageBox.critical(self, "Setup failed", f"{message}\n\nSee the log for details.")
+
+    def _offer_fix(self, message: str, *, title: str, confirm: str, enable, enabling_message: str, manual_hint: str) -> None:
+        answer = QMessageBox.question(self, title, f"{message}\n\n{confirm}")
+        if answer != QMessageBox.StandardButton.Yes:
+            QMessageBox.critical(self, "Setup failed", f"{message}\n\nSee the log for details.")
+            return
+        try:
+            enable()
+            QMessageBox.information(self, "Enabling...", enabling_message)
+        except Exception as e:
+            QMessageBox.critical(self, "Couldn't enable it automatically", f"{e}\n\n{manual_hint}")
 
     def _open_onboarding(self) -> None:
         """Runs right after a successful setup, unprompted. Launched with

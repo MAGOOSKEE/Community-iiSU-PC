@@ -253,13 +253,19 @@ def virtualization_diagnostics() -> dict:
     values default to False rather than raising if the query itself fails
     for any reason (e.g. WMI unavailable), this is a diagnostic aid for
     a *different* failure already in progress, not something that should
-    itself become a second failure. On Linux, the equivalent question is
-    just whether /dev/kvm exists and this process can actually use it
-    (KVM group membership), there's no separate "firmware-enabled but no
-    hypervisor active" distinction to make there the way Windows has."""
+    itself become a second failure. On Linux this maps onto the same two
+    questions Windows asks, just via a different mechanism: does
+    /dev/kvm exist at all (BIOS/UEFI virtualization off, or the kvm
+    kernel module not loaded, the CPU-level question) versus can this
+    process actually open it (KVM group membership, the "hypervisor
+    available to use" question, fixable without a reboot unlike the
+    first one)."""
     if not IS_WINDOWS:
-        kvm_ok = Path("/dev/kvm").exists() and os.access("/dev/kvm", os.R_OK | os.W_OK)
-        return {"cpu_virtualization_enabled": kvm_ok, "hypervisor_present": kvm_ok}
+        kvm_exists = Path("/dev/kvm").exists()
+        return {
+            "cpu_virtualization_enabled": kvm_exists,
+            "hypervisor_present": kvm_exists and os.access("/dev/kvm", os.R_OK | os.W_OK),
+        }
 
     result = {"cpu_virtualization_enabled": False, "hypervisor_present": False}
     try:
@@ -301,6 +307,28 @@ def enable_hypervisor_platform() -> None:
         ],
         check=True,
     )
+
+
+def enable_kvm_access() -> None:
+    """Linux equivalent of enable_hypervisor_platform(): adds the current
+    user to the `kvm` group (what actually gates read/write access to
+    /dev/kvm on every mainstream distro), via pkexec so this shows the
+    same kind of graphical elevation prompt Windows' own UAC dialog
+    does, rather than requiring a terminal/sudo password. Takes effect
+    only after logging out and back in (group membership is read once
+    at login), this never does that itself, same reasoning as the
+    Windows version never rebooting the PC on its own."""
+    if not shutil.which("pkexec"):
+        raise RuntimeError(
+            "Couldn't find pkexec to ask for permission graphically. Run this yourself in a terminal: "
+            "sudo usermod -aG kvm $USER"
+        )
+    result = subprocess.run(
+        ["pkexec", "usermod", "-aG", "kvm", os.environ.get("USER") or os.environ.get("LOGNAME") or ""],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "usermod failed for an unknown reason.")
 
 
 class VirtualizationError(RuntimeError):
@@ -371,37 +399,51 @@ def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_a
             )
 
         diag = virtualization_diagnostics()
+        setup_script = "Setup.bat" if IS_WINDOWS else "Setup.sh"
         if crashed_early and not diag["cpu_virtualization_enabled"]:
+            if IS_WINDOWS:
+                raise VirtualizationError(
+                    "The emulator crashed immediately instead of booting, and this PC's CPU virtualization "
+                    "(VT-x/AMD-V, what Task Manager's Performance tab calls \"Virtualization\") is reported "
+                    "as disabled. This has to be turned on in your BIOS/UEFI first, Windows itself can't "
+                    f"enable it. Re-running {setup_script} resumes from here once it's on."
+                )
             raise VirtualizationError(
-                "The emulator crashed immediately instead of booting, and this PC's CPU virtualization "
-                "(VT-x/AMD-V, what Task Manager's Performance tab calls \"Virtualization\") is reported "
-                "as disabled. This has to be turned on in your BIOS/UEFI first, Windows itself can't "
-                "enable it. Re-running Setup.bat resumes from here once it's on."
+                "The emulator crashed immediately instead of booting: /dev/kvm doesn't exist on this "
+                "system at all. This has to be turned on in your BIOS/UEFI first (Intel VT-x/AMD-V), and "
+                "the kvm kernel module (kvm_intel or kvm_amd) needs to be loaded, this project can't do "
+                f"either of those for you. Re-running {setup_script} resumes from here once it's on."
             )
         if crashed_early and not diag["hypervisor_present"]:
+            if IS_WINDOWS:
+                raise VirtualizationError(
+                    "The emulator crashed immediately instead of booting. Your CPU has virtualization enabled, "
+                    "but no hypervisor is currently active on this PC, the Android Emulator needs one "
+                    "(Windows Hypervisor Platform, Hyper-V, or a WHPX-compatible equivalent) actually running "
+                    "on top of that. Enable Windows Hypervisor Platform below, or install Google's Android "
+                    "Emulator Hypervisor Driver instead if you'd rather not (search for it in Android Studio's "
+                    "SDK Manager, or google \"Android Emulator Hypervisor Driver\"), either one fixes this. "
+                    f"Re-running {setup_script} resumes from here."
+                )
             raise VirtualizationError(
-                "The emulator crashed immediately instead of booting. Your CPU has virtualization enabled, "
-                "but no hypervisor is currently active on this PC, the Android Emulator needs one "
-                "(Windows Hypervisor Platform, Hyper-V, or a WHPX-compatible equivalent) actually running "
-                "on top of that. Enable Windows Hypervisor Platform below, or install Google's Android "
-                "Emulator Hypervisor Driver instead if you'd rather not (search for it in Android Studio's "
-                "SDK Manager, or google \"Android Emulator Hypervisor Driver\"), either one fixes this. "
-                "Re-running Setup.bat resumes from here."
+                "The emulator crashed immediately instead of booting. Your CPU has virtualization enabled and "
+                "/dev/kvm exists, but this account isn't in the `kvm` group, so it can't actually be used. "
+                f"Add yourself to it below, then log out and back in and re-run {setup_script}."
             )
         if crashed_early:
             raise VirtualizationError(
                 f"The emulator crashed immediately (code {process.returncode}) instead of booting, even "
                 "though this PC reports both CPU virtualization enabled and a hypervisor already active, "
                 f"see {log_path.name} above for the actual error (a conflict with another virtualization "
-                "product, like an older VirtualBox/VMware version, is a common cause here). Re-running "
-                "Setup.bat resumes from here."
+                f"product, like an older VirtualBox/VMware version, is a common cause here). Re-running "
+                f"{setup_script} resumes from here."
             )
         raise RuntimeError(
             f"The AVD did not come up within {AVD_BOOT_TIMEOUT}s on its first boot. If your PC doesn't "
             "have hardware virtualization enabled (Hyper-V/Windows Hypervisor Platform on Windows, or "
-            "virtualization enabled in your BIOS/UEFI), the emulator falls back to pure software "
-            "rendering and can take several minutes instead of under a minute, re-running Setup.bat "
-            "resumes from here rather than starting over."
+            "KVM on Linux, either way needing it enabled in your BIOS/UEFI), the emulator falls back to "
+            f"pure software rendering and can take several minutes instead of under a minute, re-running "
+            f"{setup_script} resumes from here rather than starting over."
         )
 
     print("[setup] installing the patched iiSU...")
