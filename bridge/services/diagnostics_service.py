@@ -13,6 +13,7 @@ import shutil
 import socket
 import subprocess
 import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
 
 from services import windows_apps_service
@@ -171,32 +172,39 @@ def summarize(results: list[tuple[str, str, str]]) -> str:
     return f"{oks} OK \u2022 {warnings} Warning{'s' if warnings != 1 else ''} \u2022 {errors} Error{'s' if errors != 1 else ''}"
 
 
-def check_for_updates() -> str:
+@dataclass
+class UpdateCheckResult:
+    message: str
+    update_available: bool
+
+
+def check_for_updates_detailed() -> UpdateCheckResult:
     """Read-only: never downloads or installs anything, just reports
-    whether a newer commit/release is available."""
+    whether a newer commit/release is available, and whether Updates
+    page's Install Update action would actually do anything right now."""
     import updater
 
     if updater.is_git_checkout():
         branch = updater.current_branch()
         if branch is None:
-            return "Can't compare updates: this Git checkout is on a detached HEAD."
+            return UpdateCheckResult("Can't compare updates: this Git checkout is on a detached HEAD.", False)
         fetch = updater._run_git(["fetch", "origin", branch])
         if fetch is None or fetch.returncode != 0:
             reason = fetch.stderr.strip()[:200] if fetch else "git not found or fetch timed out"
-            return f"Couldn't check GitHub: {reason}"
+            return UpdateCheckResult(f"Couldn't check GitHub: {reason}", False)
         local = updater._run_git(["rev-parse", "HEAD"])
         remote = updater._run_git(["rev-parse", f"origin/{branch}"])
         local_sha = local.stdout.strip() if local and local.returncode == 0 else None
         remote_sha = remote.stdout.strip() if remote and remote.returncode == 0 else None
         if not local_sha or not remote_sha:
-            return "Couldn't compare local and remote commits."
+            return UpdateCheckResult("Couldn't compare local and remote commits.", False)
         if local_sha == remote_sha:
-            return f"Up to date on {branch}. Nothing was downloaded or installed."
+            return UpdateCheckResult(f"Up to date on {branch}. Nothing was downloaded or installed.", False)
         count = updater._run_git(["rev-list", "--count", f"HEAD..origin/{branch}"])
         behind = count.stdout.strip() if count and count.returncode == 0 else "one or more"
-        return f"Update available: {behind} new commit(s) on {branch}. Nothing was downloaded or installed."
+        return UpdateCheckResult(f"Update available: {behind} new commit(s) on {branch}.", True)
 
-    current = updater.VERSION_PATH.read_text(encoding="utf-8").strip() if updater.VERSION_PATH.is_file() else None
+    current = updater.get_installed_version()
     req = urllib.request.Request(
         f"https://api.github.com/repos/{updater.GITHUB_REPO}/releases",
         headers={"User-Agent": "Community-iiSU-PC", "Accept": "application/vnd.github+json"},
@@ -204,10 +212,21 @@ def check_for_updates() -> str:
     with urllib.request.urlopen(req, timeout=updater.HTTP_TIMEOUT) as resp:
         releases = json.loads(resp.read())
     if not releases:
-        return "No Community-iiSU-PC releases are published yet."
+        return UpdateCheckResult("No Community-iiSU-PC releases are published yet.", False)
     latest = releases[0]["tag_name"]
     if current == latest:
-        return f"Up to date ({current}). Nothing was downloaded or installed."
+        return UpdateCheckResult(f"Up to date ({current}). Nothing was downloaded or installed.", False)
     if current is None:
-        return f"Latest release: {latest}. This install has no VERSION file for comparison. Nothing was downloaded or installed."
-    return f"Update available: {latest} (installed: {current}). Nothing was downloaded or installed."
+        return UpdateCheckResult(
+            f"Latest release: {latest}. This install has no VERSION file for comparison. Nothing was downloaded or installed.",
+            False,
+        )
+    return UpdateCheckResult(f"Update available: {latest} (installed: {current}).", True)
+
+
+def check_for_updates() -> str:
+    """Read-only: never downloads or installs anything, just reports
+    whether a newer commit/release is available. Kept for the Diagnostics
+    page's existing read-only check; check_for_updates_detailed() is the
+    version the Updates page uses to also gate its Install button."""
+    return check_for_updates_detailed().message

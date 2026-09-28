@@ -6,12 +6,15 @@ three bind()s per button the Tk version needed.
 NAV_ITEMS/NAV_GROUPS/DANGER_NAV_ITEMS are the same pure data manager.py
 already had, only the widgets reading them changed toolkit."""
 
+import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
+
 from PySide6.QtCore import QSize, Signal
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
+import updater
 from bridge.ui.icon_font import icon
-from shared.qt_theme import FONT_FAMILY_UI, Fonts, PANEL_BG, PANEL_BG_HOVER, RED, TEXT
+from shared.qt_theme import FONT_FAMILY_UI, Fonts, PANEL_BG, PANEL_BG_HOVER, RED, TEXT, TEXT_DIM
 
 SIDEBAR_WIDTH_EXPANDED = 200
 SIDEBAR_WIDTH_COLLAPSED = 56
@@ -34,6 +37,7 @@ NAV_ITEMS = [
     ("emulators", "desktop_windows", "Emulators"),
     ("settings", "settings", "Settings"),
     ("backup_diagnostics", "build", "Backup & Diagnostics"),
+    ("updates", "system_update", "Updates"),
     ("credits", "emoji_events", "Credits"),
 ]
 DANGER_NAV_ITEMS = [
@@ -113,6 +117,12 @@ class Sidebar(QWidget):
         for key, glyph, label in DANGER_NAV_ITEMS:
             root.addWidget(self._make_nav_button(key, glyph, label, danger=True))
 
+        version = updater.get_installed_version() or "dev"
+        self.version_label = QLabel(f" {version}")
+        self.version_label.setStyleSheet(f"color: {TEXT_DIM}; padding: 8px 16px 0 16px;")
+        self.version_label.setFont(QFont(FONT_FAMILY_UI, 8))
+        root.addWidget(self.version_label)
+
     def _make_nav_button(self, key: str, glyph: str, label: str, danger: bool = False) -> QPushButton:
         btn = QPushButton(f" {_no_mnemonic(label)}")
         btn.setObjectName("DangerNavButton" if danger else "NavButton")
@@ -164,3 +174,4 @@ class Sidebar(QWidget):
         self._header_button.setText(" Community-iiSU-PC" if expanded else "")
         for key, _glyph, label in NAV_ITEMS + DANGER_NAV_ITEMS:
             self.nav_buttons[key].setText(f" {_no_mnemonic(label)}" if expanded else "")
+        self.version_label.setVisible(expanded)

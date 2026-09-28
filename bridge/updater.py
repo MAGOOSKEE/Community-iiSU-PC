@@ -87,29 +87,40 @@ def current_branch() -> str | None:
     return branch if branch and branch != "HEAD" else None
 
 
-def check_and_apply_git_update() -> None:
+def get_installed_version() -> str | None:
+    return VERSION_PATH.read_text(encoding="utf-8").strip() if VERSION_PATH.is_file() else None
+
+
+def check_and_apply_git_update() -> tuple[str, bool]:
+    """Returns (message, applied) - applied is True only when a pull
+    actually landed new commits, the caller's cue that a restart is
+    needed to run them."""
     branch = current_branch()
     if branch is None:
-        print("[updater] git checkout isn't on a branch (detached HEAD?), skipping the update check")
-        return
+        msg = "git checkout isn't on a branch (detached HEAD?), skipping the update check"
+        print(f"[updater] {msg}")
+        return msg, False
 
     print(f"[updater] checking for updates ({branch})...")
     fetch = _run_git(["fetch", "origin", branch])
     if fetch is None or fetch.returncode != 0:
         reason = fetch.stderr.strip()[:200] if fetch else "git not found or fetch timed out"
-        print(f"[updater] couldn't reach GitHub to check for updates, continuing with what's here ({reason})")
-        return
+        msg = f"couldn't reach GitHub to check for updates, continuing with what's here ({reason})"
+        print(f"[updater] {msg}")
+        return msg, False
 
     local = _run_git(["rev-parse", "HEAD"])
     remote = _run_git(["rev-parse", f"origin/{branch}"])
     local_sha = local.stdout.strip() if local and local.returncode == 0 else None
     remote_sha = remote.stdout.strip() if remote and remote.returncode == 0 else None
     if not local_sha or not remote_sha:
-        print("[updater] couldn't compare local/remote commits, skipping")
-        return
+        msg = "couldn't compare local/remote commits, skipping"
+        print(f"[updater] {msg}")
+        return msg, False
     if local_sha == remote_sha:
-        print(f"[updater] already up to date ({branch}).")
-        return
+        msg = f"already up to date ({branch})."
+        print(f"[updater] {msg}")
+        return msg, False
 
     count = _run_git(["rev-list", "--count", f"HEAD..origin/{branch}"])
     behind = count.stdout.strip() if count and count.returncode == 0 else "some"
@@ -117,13 +128,17 @@ def check_and_apply_git_update() -> None:
 
     pull = _run_git(["pull", "--ff-only", "origin", branch])
     if pull is not None and pull.returncode == 0:
-        print(f"[updater] updated to the latest {branch}. This run is still using the old code, restart Community-iiSU-PC to pick it up.")
+        msg = f"updated to the latest {branch}. Restart Community-iiSU-PC to pick it up."
+        print(f"[updater] {msg}")
+        return msg, True
     else:
         reason = pull.stderr.strip()[:300] if pull else "git not found or pull timed out"
-        print(
-            f"[updater] {behind} update(s) available on {branch}, but couldn't fast-forward automatically "
-            f"(likely local changes here), update manually with `git pull` when convenient:\n[updater]   {reason}"
+        msg = (
+            f"{behind} update(s) available on {branch}, but couldn't fast-forward automatically "
+            f"(likely local changes here), update manually with `git pull` when convenient: {reason}"
         )
+        print(f"[updater] {msg}")
+        return msg, False
 
 
 def _copy_release_tree(src: Path, dst: Path) -> list[str]:
@@ -147,8 +162,11 @@ def _copy_release_tree(src: Path, dst: Path) -> list[str]:
     return errors
 
 
-def check_release_update() -> None:
-    current = VERSION_PATH.read_text(encoding="utf-8").strip() if VERSION_PATH.is_file() else None
+def check_release_update() -> tuple[str, bool]:
+    """Returns (message, applied) - applied is True only when a newer
+    release's files actually landed on disk, the caller's cue that a
+    restart is needed to run them."""
+    current = get_installed_version()
     try:
         # Not /releases/latest: that endpoint only ever considers
         # non-prerelease releases, and this project's releases are all
@@ -163,25 +181,29 @@ def check_release_update() -> None:
         with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT) as resp:
             releases = json.loads(resp.read())
         if not releases:
-            print("[updater] no releases published yet, skipping")
-            return
+            msg = "no releases published yet, skipping"
+            print(f"[updater] {msg}")
+            return msg, False
         release = releases[0]
         latest = release["tag_name"]
         zip_url = release["zipball_url"]
     except Exception as e:
-        print(f"[updater] couldn't check for updates ({e}), continuing")
-        return
+        msg = f"couldn't check for updates ({e}), continuing"
+        print(f"[updater] {msg}")
+        return msg, False
 
     if current == latest:
-        print(f"[updater] already on the latest release ({current}).")
-        return
+        msg = f"already on the latest release ({current})."
+        print(f"[updater] {msg}")
+        return msg, False
     if current is None:
-        print(
-            f"[updater] latest release is {latest} (this install doesn't have a VERSION file to "
+        msg = (
+            f"latest release is {latest} (this install doesn't have a VERSION file to "
             f"compare against), skipping auto-update; grab it manually: "
             f"https://github.com/{GITHUB_REPO}/releases/latest"
         )
-        return
+        print(f"[updater] {msg}")
+        return msg, False
 
     print(f"[updater] a newer release is available: {latest} (this install is {current}), downloading...")
 
@@ -206,23 +228,39 @@ def check_release_update() -> None:
         # or should assume stays fixed.
         top_level = [p for p in extract_dir.iterdir() if p.is_dir()]
         if len(top_level) != 1:
-            print(f"[updater] unexpected archive layout ({len(top_level)} top-level folder(s)), aborting, nothing changed")
-            return
+            msg = f"unexpected archive layout ({len(top_level)} top-level folder(s)), aborting, nothing changed"
+            print(f"[updater] {msg}")
+            return msg, False
         release_root = top_level[0]
 
         errors = _copy_release_tree(release_root, PROJECT_ROOT)
         if errors:
-            print(f"[updater] update incomplete, {len(errors)} file(s) couldn't be written, will retry next launch:")
+            msg = f"update incomplete, {len(errors)} file(s) couldn't be written, will retry next launch"
+            print(f"[updater] {msg}:")
             for line in errors[:10]:
                 print(f"[updater]   {line}")
-            return
+            return msg, False
 
         VERSION_PATH.write_text(latest + "\n", encoding="utf-8")
-        print(f"[updater] updated to {latest}. This run is still using the old code, restart Community-iiSU-PC to pick it up.")
+        msg = f"updated to {latest}. Restart Community-iiSU-PC to pick it up."
+        print(f"[updater] {msg}")
+        return msg, True
     except Exception as e:
-        print(f"[updater] update download/apply failed ({e}), this install is unchanged, still on {current}")
+        msg = f"update download/apply failed ({e}), this install is unchanged, still on {current}"
+        print(f"[updater] {msg}")
+        return msg, False
     finally:
         shutil.rmtree(staging_dir, ignore_errors=True)
+
+
+def install_update() -> tuple[str, bool]:
+    """Applies whichever update path fits this install - a git checkout
+    fast-forwards, a plain extracted install downloads the latest
+    release's zip - and reports (message, applied) so a caller (e.g. the
+    Manager's Updates page) knows whether a restart is actually needed."""
+    if is_git_checkout():
+        return check_and_apply_git_update()
+    return check_release_update()
 
 
 def check_for_updates() -> None:
@@ -230,9 +268,6 @@ def check_for_updates() -> None:
     start_iisu_pc.py run, and a broken update check is never a good
     reason to fail an otherwise-normal start."""
     try:
-        if is_git_checkout():
-            check_and_apply_git_update()
-        else:
-            check_release_update()
+        install_update()
     except Exception as e:
         print(f"[updater] update check failed ({e}), continuing")

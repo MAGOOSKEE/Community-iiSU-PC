@@ -12,11 +12,15 @@ just implements the method it needs, nothing here has to know its name in
 advance.
 """
 
+import sys
+from pathlib import Path
+
 import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
+    QApplication,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -41,9 +45,12 @@ from bridge.ui.pages.library.roms import RomsPage
 from bridge.ui.pages.settings.advanced import AdvancedPage
 from bridge.ui.pages.settings.display import DisplayPage
 from bridge.ui.pages.uninstall import UninstallPage
+from bridge.ui.pages.updates import UpdatesPage
 from bridge.ui.widgets.transitions import fade_in
+from bridge.ui.workers.task_runner import run_in_background
 from bridge.ui.sidebar import DANGER_NAV_ITEMS, LOCKED_NAV, NAV_GROUPS, NAV_ITEMS, Sidebar
 from bridge_config import CONFIG_PATH, load_config, save_config
+from shared.platform_compat import detached_popen_kwargs
 from shared.qt_theme import Fonts, GREEN, PANEL_BG_HOVER, RED, TEXT_DIM
 
 # Sub-page keys (or top-level keys with no group) that use the shared
@@ -142,6 +149,9 @@ class ManagerWindow(QMainWindow):
                 self._register_page(key, self._build_group_shell(key, label))
             elif key == "credits":
                 self._register_page(key, CreditsPage(self))
+            elif key == "updates":
+                self.updates_page = UpdatesPage(self)
+                self._register_page(key, self.updates_page)
             elif key == "uninstall":
                 self._register_page(key, UninstallPage(self))
             else:
@@ -191,6 +201,9 @@ class ManagerWindow(QMainWindow):
         self._dirty_timer = QTimer(self)
         self._dirty_timer.timeout.connect(self._poll_settings_dirty)
         self._dirty_timer.start(500)
+
+        self._startup_update_signals = None
+        QTimer.singleShot(500, self._run_startup_update_check)
 
     # == Style / icon ==
 
@@ -500,6 +513,49 @@ class ManagerWindow(QMainWindow):
         elif self.save_status_label.text() == "Stop Community-iiSU-PC to change settings":
             self.save_status_label.setText("")
             self.save_status_label.setStyleSheet(f"color: {GREEN};")
+
+    # == Startup update check ==
+
+    def _run_startup_update_check(self) -> None:
+        # Never applies while iiSU/the bridge is running, an update landing
+        # mid-session and restarting the Manager out from under a running
+        # VM would be surprising; the Updates page's own manual Install
+        # button carries the same guard for the same reason.
+        auto_apply = bool(self.config_data.get("auto_updates", False)) and not (self.last_avd_up or self.last_bridge_up)
+        self._startup_update_signals = run_in_background(
+            self._startup_update_worker, self._on_startup_update_checked, None, auto_apply
+        )
+
+    @staticmethod
+    def _startup_update_worker(auto_apply: bool) -> tuple[str, bool]:
+        import updater
+
+        if auto_apply:
+            return updater.install_update()
+        from bridge.services import diagnostics_service
+
+        result = diagnostics_service.check_for_updates_detailed()
+        return result.message, False
+
+    def _on_startup_update_checked(self, result: tuple[str, bool]) -> None:
+        message, applied = result
+        if hasattr(self, "updates_page"):
+            self.updates_page.set_startup_status(message, applied)
+        if applied:
+            self.restart_after_update()
+
+    def restart_after_update(self) -> None:
+        """Relaunches the Manager the same way its shortcut does (see
+        create_shortcut.py) and quits this process, since Python already
+        has the old code loaded into memory and can't run the new files
+        without a fresh interpreter."""
+        import subprocess
+
+        project_root = Path(__file__).resolve().parent.parent.parent
+        subprocess.Popen(
+            [sys.executable, "-m", "bridge.ui.app"], cwd=str(project_root), **detached_popen_kwargs()
+        )
+        QApplication.quit()
 
     # == Close ==
 
