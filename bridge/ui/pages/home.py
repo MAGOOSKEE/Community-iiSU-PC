@@ -32,6 +32,7 @@ from bridge.ui.pages.base import PageBase
 from bridge.ui.widgets.card import Card
 from bridge.ui.widgets.gradient_background import GradientBlobBackground
 from bridge.ui.widgets.status_dot import StatusDot
+from shared.platform_compat import open_uri
 from bridge.ui.workers.log_stream import LogStreamRedirector
 from bridge.ui.workers.task_runner import run_in_background
 from bridge_config import CONFIG_PATH
@@ -348,11 +349,11 @@ class HomePage(PageBase):
         if not roms_dir.is_dir():
             QMessageBox.critical(self, "Can't open ROMs folder", f"{roms_dir} doesn't exist yet. Set it up in ROM Directory first.")
             return
-        os.startfile(roms_dir)
+        open_uri(str(roms_dir))
 
     def _open_logs(self) -> None:
         bridge_dir = Path(__file__).resolve().parent.parent.parent.parent / "bridge"
-        os.startfile(bridge_dir)
+        open_uri(str(bridge_dir))
 
     def _recreate_desktop_shortcut(self) -> None:
         # A one-shot menu action now rather than its own always-visible

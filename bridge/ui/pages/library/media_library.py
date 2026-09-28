@@ -40,6 +40,7 @@ from bridge.ui.pages.base import PageBase
 from bridge.ui.widgets.card import Card
 from bridge.ui.widgets.status_dot import StatusDot
 from bridge.ui.workers.task_runner import run_in_background
+from shared.platform_compat import open_uri
 from shared.qt_theme import Fonts, INPUT_BG, TEXT_DIM
 
 _ASSET_ROLE = Qt.ItemDataRole.UserRole
@@ -290,10 +291,8 @@ class MediaLibraryPage(PageBase):
         if not local.is_file():
             QMessageBox.warning(self, "Media Library", f"Local file not found:\n{local}")
             return
-        import os
-
         try:
-            os.startfile(str(local))
+            open_uri(str(local))
         except Exception as exc:
             QMessageBox.critical(self, "Media Library", f"Couldn't open:\n{local}\n\n{exc}")
 
@@ -393,10 +392,8 @@ class MediaLibraryPage(PageBase):
     # == Actions ==
 
     def _open_local_library(self) -> None:
-        import os
-
         svc.IIDB_LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
-        os.startfile(str(svc.IIDB_LIBRARY_DIR))
+        open_uri(str(svc.IIDB_LIBRARY_DIR))
 
     def _check_media(self) -> None:
         ready, detail = android_storage_service.adb_device_ready()
