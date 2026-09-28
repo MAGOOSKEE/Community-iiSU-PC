@@ -4,7 +4,7 @@ Runs iiSU (an Android emulation frontend) inside a hardware-accelerated Android 
 
 **This does not include iiSU itself.** iiSU is closed-source, third-party software this project has no direct affiliation with. You will need your own copy of its APK. This tool patches *your* copy, the same way any APK-patching/modding tool works; it never bundles or redistributes iiSU's binary.
 
-**Linux support** (KDE Plasma) was contributed by [jacksterson](https://github.com/jacksterson). It's real and functional (SDK/AVD bootstrap, patching, the controller quit chord, KWin-based fullscreen/window management, `.desktop` shortcuts, a Flatpak-based emulator downloader), but two things are still Windows-only for now: the **keyboard** quit hotkey (the controller chord works fine on both), and fullscreen/window management outside KDE Plasma (GNOME/other desktop environments aren't covered).
+**Linux support** (KDE Plasma) was contributed by [jacksterson](https://github.com/jacksterson). It's real and functional: SDK/AVD bootstrap, patching, the keyboard and controller quit hotkeys, KWin-based fullscreen/window management, `.desktop` shortcuts, and a Flatpak-based emulator downloader. The one gap: fullscreen/window management is KWin-specific, so it works on KDE Plasma but not GNOME/other desktop environments.
 
 ## Installing
 
@@ -47,7 +47,7 @@ On startup, Community-iiSU-PC re-syncs your ROM library into the VM automaticall
 
 A fullscreen overlay covers the AVD boot and the emulator hand-off, showing what's happening ("Booting Community-iiSU-PC...", "Waiting on DuckStation...") instead of raw desktop. It's off while the debug console checkbox is on.
 
-By default, **Escape** controls game quitting and shutdown: tap it while a game is running to force-quit the game and return to iiSU, or tap it while already in iiSU to shut down Community-iiSU-PC. The keyboard controls are rebindable in Settings > Advanced (Windows only for now, see the Linux support note above). Pressing **Select+Start** together on a controller does the same thing on either platform, and the chord is remappable to any combination of buttons.
+By default, **Escape** controls game quitting and shutdown: tap it while a game is running to force-quit the game and return to iiSU, or tap it while already in iiSU to shut down Community-iiSU-PC. On Linux, Alt+F4, Ctrl+Q, and Ctrl+Alt+X also force a full shutdown, and Ctrl+Shift+Esc mirrors an Escape tap; these four aren't currently rebindable (Escape itself is, in Settings > Advanced, on both platforms). Pressing **Select+Start** together on a controller does the same thing on either platform, and the chord is remappable to any combination of buttons.
 
 ## PC apps and games
 
