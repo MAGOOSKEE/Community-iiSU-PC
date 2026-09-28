@@ -14,6 +14,7 @@ Usage:
 """
 
 import json
+import os
 import secrets
 import shutil
 import subprocess
@@ -23,8 +24,11 @@ from collections.abc import Callable
 from pathlib import Path
 
 import sdk_bootstrap
-from jre_env import java_subprocess_env
+from jre_env import java_exe, java_subprocess_env, keytool_exe
 from patch_iisu import patch_apk, validate_iisu_apk
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from shared.platform_compat import IS_WINDOWS, detached_popen_kwargs, subprocess_creationflags
 
 INSTALLER_DIR = Path(__file__).parent
 PROJECT_ROOT = INSTALLER_DIR.parent
@@ -56,12 +60,9 @@ SETUP_STAGES = [
     "Finishing up",
 ]
 
-DETACHED_PROCESS = 0x00000008
-CREATE_NEW_PROCESS_GROUP = 0x00000200
-# See the matching constant in start_iisu_pc.py: DETACHED_PROCESS alone
-# doesn't reliably stop emulator.exe from popping up its own console
-# window; CREATE_NO_WINDOW is what actually guarantees it never does.
-CREATE_NO_WINDOW = 0x08000000
+# See shared/platform_compat.py. Windows-only concerns: both are no-ops
+# (0 / a start_new_session=True kwarg swap) on Linux.
+CREATE_NO_WINDOW = subprocess_creationflags()
 
 
 def find_input_apk() -> Path | None:
@@ -88,14 +89,70 @@ def check_disk_space() -> None:
 
 
 def require_java() -> None:
-    if shutil.which("java") is None:
+    # java_exe()/keytool_exe() return an absolute path once a bundled JRE
+    # is present (an installer build), which always satisfies this check
+    # without touching the system at all, only a source checkout with no
+    # bundled JRE falls back to needing a real system JDK on PATH.
+    if java_exe() == "java" and shutil.which("java") is None:
         raise RuntimeError(
             "Java was not found on PATH. This installer needs a JDK (for apktool and key "
             "generation), install one (e.g. Eclipse Temurin) and make sure `java` and "
             "`keytool` are on PATH, then run this again."
         )
-    if shutil.which("keytool") is None:
+    if keytool_exe() == "keytool" and shutil.which("keytool") is None:
         raise RuntimeError("`keytool` was not found on PATH (it ships with any JDK), check your Java install includes it.")
+
+
+def warn_missing_linux_extras() -> None:
+    """Non-fatal: unlike java/keytool, nothing actually stops Setup or day-
+    to-day use without xdotool/flatpak, each just quietly degrades one
+    specific feature (see README's Linux support note) rather than
+    failing outright, so this only prints a heads-up rather than raising,
+    the same "best effort, log it, keep going" pattern
+    virtualization_diagnostics() already uses for a non-fatal check."""
+    if IS_WINDOWS:
+        return
+    if shutil.which("xdotool") is None:
+        print(
+            "[setup] xdotool isn't installed: fullscreen/window management (hiding the emulator's "
+            "own window, making it fullscreen) will be limited. Install it from your distro's package "
+            "manager (e.g. `apt install xdotool`, `dnf install xdotool`, `pacman -S xdotool`)."
+        )
+    if shutil.which("flatpak") is None:
+        print(
+            "[setup] flatpak isn't installed: the Manager's built-in emulator downloader needs it. "
+            "Install it from your distro's package manager (e.g. `apt install flatpak`), or just "
+            "install PC emulators yourself and point the Manager at them instead."
+        )
+    if shutil.which("qdbus") is None and shutil.which("qdbus6") is None:
+        print(
+            "[setup] qdbus isn't installed: KWin-based fullscreen/window management needs it (KDE "
+            "Plasma desktops normally already have it). xdotool alone still covers most of the same "
+            "ground if you're not on KDE Plasma."
+        )
+
+
+def _pip_install(package: str) -> subprocess.CompletedProcess:
+    """Runs `pip install --quiet <package>`, retrying with
+    --break-system-packages if the first attempt fails specifically
+    because of PEP 668 (Debian/Ubuntu/Fedora and most current distros
+    mark their system Python as "externally managed" and refuse a bare
+    pip install outside a venv). --break-system-packages is pip's own
+    documented escape hatch for exactly this case; safe here since
+    PySide6/Pillow are self-contained wheels, not something that
+    conflicts with apt-managed system packages. Not attempted on the
+    first try since it'd be a silent no-op (and an unnecessary flag) on
+    any system where it isn't needed at all, e.g. Windows or a venv."""
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "--quiet", package], capture_output=True, text=True,
+        creationflags=CREATE_NO_WINDOW,
+    )
+    if result.returncode != 0 and "externally-managed-environment" in result.stderr:
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--quiet", "--break-system-packages", package],
+            capture_output=True, text=True, creationflags=CREATE_NO_WINDOW,
+        )
+    return result
 
 
 def ensure_pillow() -> None:
@@ -114,10 +171,7 @@ def ensure_pillow() -> None:
         pass
     print("[setup] Pillow isn't installed (used for the desktop shortcut's real icon and the")
     print("[setup] Manager's Credits page avatars), installing it now...")
-    result = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "--quiet", "pillow"], capture_output=True, text=True,
-        creationflags=CREATE_NO_WINDOW,
-    )
+    result = _pip_install("pillow")
     if result.returncode == 0:
         print("[setup] Pillow installed.")
     else:
@@ -136,10 +190,7 @@ def ensure_pyside6() -> None:
     except ImportError:
         pass
     print("[setup] PySide6 isn't installed (this project's GUI toolkit), installing it now...")
-    result = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "--quiet", "PySide6"], capture_output=True, text=True,
-        creationflags=CREATE_NO_WINDOW,
-    )
+    result = _pip_install("PySide6")
     if result.returncode == 0:
         print("[setup] PySide6 installed.")
     else:
@@ -159,7 +210,7 @@ def ensure_keystore() -> tuple[Path, str]:
     print("[setup] generating a local signing key...")
     result = subprocess.run(
         [
-            "keytool", "-genkeypair", "-v",
+            keytool_exe(), "-genkeypair", "-v",
             "-keystore", str(KEYSTORE_PATH),
             "-alias", KEY_ALIAS,
             "-keyalg", "RSA", "-keysize", "2048", "-validity", "10000",
@@ -231,7 +282,20 @@ def virtualization_diagnostics() -> dict:
     values default to False rather than raising if the query itself fails
     for any reason (e.g. WMI unavailable), this is a diagnostic aid for
     a *different* failure already in progress, not something that should
-    itself become a second failure."""
+    itself become a second failure. On Linux this maps onto the same two
+    questions Windows asks, just via a different mechanism: does
+    /dev/kvm exist at all (BIOS/UEFI virtualization off, or the kvm
+    kernel module not loaded, the CPU-level question) versus can this
+    process actually open it (KVM group membership, the "hypervisor
+    available to use" question, fixable without a reboot unlike the
+    first one)."""
+    if not IS_WINDOWS:
+        kvm_exists = Path("/dev/kvm").exists()
+        return {
+            "cpu_virtualization_enabled": kvm_exists,
+            "hypervisor_present": kvm_exists and os.access("/dev/kvm", os.R_OK | os.W_OK),
+        }
+
     result = {"cpu_virtualization_enabled": False, "hypervisor_present": False}
     try:
         cpu_check = subprocess.run(
@@ -274,6 +338,28 @@ def enable_hypervisor_platform() -> None:
     )
 
 
+def enable_kvm_access() -> None:
+    """Linux equivalent of enable_hypervisor_platform(): adds the current
+    user to the `kvm` group (what actually gates read/write access to
+    /dev/kvm on every mainstream distro), via pkexec so this shows the
+    same kind of graphical elevation prompt Windows' own UAC dialog
+    does, rather than requiring a terminal/sudo password. Takes effect
+    only after logging out and back in (group membership is read once
+    at login), this never does that itself, same reasoning as the
+    Windows version never rebooting the PC on its own."""
+    if not shutil.which("pkexec"):
+        raise RuntimeError(
+            "Couldn't find pkexec to ask for permission graphically. Run this yourself in a terminal: "
+            "sudo usermod -aG kvm $USER"
+        )
+    result = subprocess.run(
+        ["pkexec", "usermod", "-aG", "kvm", os.environ.get("USER") or os.environ.get("LOGNAME") or ""],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "usermod failed for an unknown reason.")
+
+
 class VirtualizationError(RuntimeError):
     """Raised instead of a plain RuntimeError specifically when the AVD
     boot failure looks like a virtualization problem (the emulator
@@ -312,8 +398,9 @@ def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_a
                 # redirector stubs over adb, then shuts back down. The
                 # emulator still runs and responds to adb identically
                 # headless; only the visible window is skipped.
-                [str(emulator_exe), "-avd", avd_name, "-no-snapshot", "-no-window"],
-                creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
+                [str(emulator_exe), "-avd", avd_name, "-no-snapshot", "-no-window"]
+                + (["-accel", "on"] if not IS_WINDOWS and Path("/dev/kvm").exists() else []),
+                **detached_popen_kwargs(),
                 stdin=subprocess.DEVNULL,
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
@@ -341,37 +428,51 @@ def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_a
             )
 
         diag = virtualization_diagnostics()
+        setup_script = "Setup.bat" if IS_WINDOWS else "Setup.sh"
         if crashed_early and not diag["cpu_virtualization_enabled"]:
+            if IS_WINDOWS:
+                raise VirtualizationError(
+                    "The emulator crashed immediately instead of booting, and this PC's CPU virtualization "
+                    "(VT-x/AMD-V, what Task Manager's Performance tab calls \"Virtualization\") is reported "
+                    "as disabled. This has to be turned on in your BIOS/UEFI first, Windows itself can't "
+                    f"enable it. Re-running {setup_script} resumes from here once it's on."
+                )
             raise VirtualizationError(
-                "The emulator crashed immediately instead of booting, and this PC's CPU virtualization "
-                "(VT-x/AMD-V, what Task Manager's Performance tab calls \"Virtualization\") is reported "
-                "as disabled. This has to be turned on in your BIOS/UEFI first, Windows itself can't "
-                "enable it. Re-running Setup.bat resumes from here once it's on."
+                "The emulator crashed immediately instead of booting: /dev/kvm doesn't exist on this "
+                "system at all. This has to be turned on in your BIOS/UEFI first (Intel VT-x/AMD-V), and "
+                "the kvm kernel module (kvm_intel or kvm_amd) needs to be loaded, this project can't do "
+                f"either of those for you. Re-running {setup_script} resumes from here once it's on."
             )
         if crashed_early and not diag["hypervisor_present"]:
+            if IS_WINDOWS:
+                raise VirtualizationError(
+                    "The emulator crashed immediately instead of booting. Your CPU has virtualization enabled, "
+                    "but no hypervisor is currently active on this PC, the Android Emulator needs one "
+                    "(Windows Hypervisor Platform, Hyper-V, or a WHPX-compatible equivalent) actually running "
+                    "on top of that. Enable Windows Hypervisor Platform below, or install Google's Android "
+                    "Emulator Hypervisor Driver instead if you'd rather not (search for it in Android Studio's "
+                    "SDK Manager, or google \"Android Emulator Hypervisor Driver\"), either one fixes this. "
+                    f"Re-running {setup_script} resumes from here."
+                )
             raise VirtualizationError(
-                "The emulator crashed immediately instead of booting. Your CPU has virtualization enabled, "
-                "but no hypervisor is currently active on this PC, the Android Emulator needs one "
-                "(Windows Hypervisor Platform, Hyper-V, or a WHPX-compatible equivalent) actually running "
-                "on top of that. Enable Windows Hypervisor Platform below, or install Google's Android "
-                "Emulator Hypervisor Driver instead if you'd rather not (search for it in Android Studio's "
-                "SDK Manager, or google \"Android Emulator Hypervisor Driver\"), either one fixes this. "
-                "Re-running Setup.bat resumes from here."
+                "The emulator crashed immediately instead of booting. Your CPU has virtualization enabled and "
+                "/dev/kvm exists, but this account isn't in the `kvm` group, so it can't actually be used. "
+                f"Add yourself to it below, then log out and back in and re-run {setup_script}."
             )
         if crashed_early:
             raise VirtualizationError(
                 f"The emulator crashed immediately (code {process.returncode}) instead of booting, even "
                 "though this PC reports both CPU virtualization enabled and a hypervisor already active, "
                 f"see {log_path.name} above for the actual error (a conflict with another virtualization "
-                "product, like an older VirtualBox/VMware version, is a common cause here). Re-running "
-                "Setup.bat resumes from here."
+                f"product, like an older VirtualBox/VMware version, is a common cause here). Re-running "
+                f"{setup_script} resumes from here."
             )
         raise RuntimeError(
             f"The AVD did not come up within {AVD_BOOT_TIMEOUT}s on its first boot. If your PC doesn't "
             "have hardware virtualization enabled (Hyper-V/Windows Hypervisor Platform on Windows, or "
-            "virtualization enabled in your BIOS/UEFI), the emulator falls back to pure software "
-            "rendering and can take several minutes instead of under a minute, re-running Setup.bat "
-            "resumes from here rather than starting over."
+            "KVM on Linux, either way needing it enabled in your BIOS/UEFI), the emulator falls back to "
+            f"pure software rendering and can take several minutes instead of under a minute, re-running "
+            f"{setup_script} resumes from here rather than starting over."
         )
 
     print("[setup] installing the patched iiSU...")
@@ -403,6 +504,18 @@ def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_a
         )
     if result.returncode != 0 or "Success" not in result.stdout:
         raise RuntimeError(f"adb install failed:\n{result.stdout}\n{result.stderr}")
+
+    # Sets iiSU's safe-mode launcher activity as the actual Home app and
+    # disables the stock Nexus launcher, so booting the AVD goes straight
+    # to iiSU instead of Android's own launcher/setup wizard.
+    subprocess.run(
+        ["adb", "shell", "cmd", "package", "set-home-activity", "com.iisulauncher/.launcher.StartupSafeModeActivity"],
+        capture_output=True, text=True, creationflags=CREATE_NO_WINDOW,
+    )
+    subprocess.run(
+        ["adb", "shell", "pm", "disable-user", "com.google.android.apps.nexuslauncher"],
+        capture_output=True, text=True, creationflags=CREATE_NO_WINDOW,
+    )
 
     install_default_redirectors()
 
@@ -478,7 +591,7 @@ def update_iisu(apk_path: Path, on_stage: Callable[[str, int, int], None] | None
 
     env = os.environ.copy()
     env.update(env_overrides)
-    emulator_exe = portable_sdk.PORTABLE_SDK / "emulator" / "emulator.exe"
+    emulator_exe = portable_sdk.PORTABLE_SDK / "emulator" / portable_sdk.EMULATOR_BIN
     boot_avd_and_install(emulator_exe, avd_name, env, patched_apk)
 
     stage(2, "Done")
@@ -526,6 +639,25 @@ def write_bridge_config(avd_name: str) -> None:
         config = json.loads(config_path.read_text(encoding="utf-8"))
     else:
         config = json.loads((INSTALLER_DIR / "config.template.json").read_text(encoding="utf-8"))
+        if not IS_WINDOWS:
+            # Best-guess Linux ROM/emulator locations: a couple of common
+            # conventions for roms_dir, and search_roots covering PATH-
+            # installed, user-local, and Flatpak-installed emulators
+            # (Flatpak is the primary install path the emulator downloader
+            # uses on Linux). All of this is still editable afterward from
+            # the Manager's ROM Directory / Emulators pages.
+            home = Path.home()
+            if (home / "roms").is_dir():
+                config["roms_dir"] = str(home / "roms")
+            elif (home / "Emulation" / "roms").is_dir():
+                config["roms_dir"] = str(home / "Emulation" / "roms")
+            config["search_roots"] = [
+                "/usr/bin",
+                str(home / ".local" / "bin"),
+                str(home / ".local" / "share" / "flatpak" / "exports" / "bin"),
+                "/var/lib/flatpak/exports/bin",
+                str(home / "Emulation" / "emulators"),
+            ]
     config["avd_name"] = avd_name
     config.setdefault("display", DEFAULT_DISPLAY)
     config.setdefault("emulators", build_emulators_map())
@@ -617,6 +749,7 @@ def run_setup(apk_path: Path, on_stage: Callable[[str, int, int], None] | None =
     print("=== Community-iiSU-PC first-time setup ===\n")
     stage(0)
     require_java()
+    warn_missing_linux_extras()
     ensure_pillow()
     print(f"[setup] using {apk_path.name} as the source APK")
     validate_iisu_apk(apk_path)
@@ -653,7 +786,7 @@ def run_setup(apk_path: Path, on_stage: Callable[[str, int, int], None] | None =
     import os
     env = os.environ.copy()
     env.update(env_overrides)
-    emulator_exe = portable_sdk.PORTABLE_SDK / "emulator" / "emulator.exe"
+    emulator_exe = portable_sdk.PORTABLE_SDK / "emulator" / portable_sdk.EMULATOR_BIN
 
     stage(5)
     boot_avd_and_install(emulator_exe, DEFAULT_AVD_NAME, env, patched_apk)

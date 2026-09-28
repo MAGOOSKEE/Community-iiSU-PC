@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 
 from bridge.services import diagnostics_service as svc
 from bridge.services import iisu_update_service as iisu_svc
+from shared.platform_compat import open_uri
 from bridge.ui.dialogs.iisu_update_dialog import IisuUpdateDialog
 from bridge.ui.pages.base import PageBase
 from bridge.ui.widgets.card import Card
@@ -153,7 +154,7 @@ class DiagnosticsPage(PageBase):
             if not path.exists():
                 QMessageBox.warning(self, "Diagnostics", f"Not found:\n{path}")
                 return
-            os.startfile(str(path))
+            open_uri(str(path))
         except Exception as exc:
             QMessageBox.critical(self, "Diagnostics", f"Couldn't open:\n{path}\n\n{exc}")
 

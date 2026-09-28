@@ -38,6 +38,7 @@ only when something has actually changed, rather than on every start.
 import hashlib
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -55,9 +56,18 @@ if str(_PROJECT_ROOT) not in sys.path:
 from bridge.ui import boot_overlay_qt as boot_overlay
 import sync_library
 import updater
+import winapi
 from bridge_config import ConfigMissingError, load_config
 from launch_bridge import launch_iisu, show_iisu_window
-from portable_sdk import PORTABLE_AVD_HOME, PORTABLE_SDK, ensure_portable_sdk, patch_config_ini, set_quickboot_autosave
+from portable_sdk import (
+    EMULATOR_BIN,
+    PORTABLE_AVD_HOME,
+    PORTABLE_SDK,
+    ensure_portable_sdk,
+    patch_config_ini,
+    set_quickboot_autosave,
+)
+from shared.platform_compat import IS_WINDOWS, detached_popen_kwargs, new_console_creationflags, subprocess_creationflags
 
 BRIDGE_SCRIPT = Path(__file__).parent / "launch_bridge.py"
 STATE_PATH = Path(__file__).parent / ".runtime_state.json"
@@ -73,15 +83,13 @@ AVD_BOOT_TIMEOUT = 300  # seconds
 MAX_LAUNCH_ATTEMPTS = 3
 RETRY_DELAY = 5  # seconds
 
-DETACHED_PROCESS = 0x00000008
-CREATE_NEW_PROCESS_GROUP = 0x00000200
-# DETACHED_PROCESS alone stops the child inheriting *our* console, but
-# doesn't reliably stop a console-subsystem executable (emulator.exe, or
-# python.exe running launch_bridge.py) from popping up one of its own,
-# CREATE_NO_WINDOW is what actually guarantees no window ever appears,
-# already proven for the exact same purpose by boot_overlay.py and
-# launch_bridge.py's own emulator launches.
-CREATE_NO_WINDOW = 0x08000000
+# See shared/platform_compat.py: detached_popen_kwargs() covers Windows's
+# DETACHED_PROCESS|CREATE_NEW_PROCESS_GROUP|CREATE_NO_WINDOW combo (a
+# console-subsystem child like emulator.exe or python.exe running
+# launch_bridge.py otherwise pops up its own window) and Linux's
+# start_new_session=True, an entirely different kwarg, not just a
+# different flag value.
+CREATE_NO_WINDOW = subprocess_creationflags()
 
 
 def save_state(state: dict) -> None:
@@ -202,10 +210,16 @@ def find_system_emulator_exe() -> Path | None:
     one-time copy source for bootstrapping the portable copy, actual
     launches always use the portable copy, never this."""
     candidates = [
-        Path(os.environ.get("ANDROID_SDK_ROOT", "")) / "emulator" / "emulator.exe",
-        Path(os.environ.get("ANDROID_HOME", "")) / "emulator" / "emulator.exe",
-        Path(os.environ.get("LOCALAPPDATA", "")) / "Android" / "Sdk" / "emulator" / "emulator.exe",
+        Path(os.environ.get("ANDROID_SDK_ROOT", "")) / "emulator" / EMULATOR_BIN,
+        Path(os.environ.get("ANDROID_HOME", "")) / "emulator" / EMULATOR_BIN,
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Android" / "Sdk" / "emulator" / EMULATOR_BIN,
+        Path.home() / "Android" / "Sdk" / "emulator" / EMULATOR_BIN,
+        Path.home() / ".android" / "sdk" / "emulator" / EMULATOR_BIN,
+        _PROJECT_ROOT / "installer" / "android-sdk" / "emulator" / EMULATOR_BIN,
     ]
+    which_emulator = shutil.which(EMULATOR_BIN)
+    if which_emulator:
+        candidates.append(Path(which_emulator))
     for candidate in candidates:
         if candidate.is_file():
             return candidate
@@ -314,12 +328,20 @@ def _launch_once(
     compute_boot_fingerprint() in start_avd()'s caller. When it's False,
     the AVD attempts a quickboot resume instead of a full cold boot."""
     args = [str(emulator_exe), "-avd", avd_name, "-gpu", gpu_mode, *build_usb_passthrough_args(usb_passthrough)]
+    if not IS_WINDOWS:
+        # -accel on: use KVM when available, same reasoning as Setup's own
+        # first boot. -no-boot-anim/-fixed-scale: kept Linux-only rather
+        # than changed for existing Windows installs too, since neither
+        # was something Windows behavior needed fixing.
+        if Path("/dev/kvm").exists():
+            args += ["-accel", "on"]
+        args += ["-no-boot-anim", "-fixed-scale"]
     if force_cold_boot:
         args.append("-no-snapshot")
     if debug_console:
         process = subprocess.Popen(
             args,
-            creationflags=subprocess.CREATE_NEW_CONSOLE,
+            creationflags=new_console_creationflags(),
             env=env,
         )
     else:
@@ -327,7 +349,7 @@ def _launch_once(
         try:
             process = subprocess.Popen(
                 args,
-                creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
+                **detached_popen_kwargs(),
                 stdin=subprocess.DEVNULL,
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
@@ -385,7 +407,7 @@ def start_avd(
     a bad/corrupt snapshot shouldn't be able to permanently block
     starting at all."""
     system_emulator_exe = find_system_emulator_exe()
-    if system_emulator_exe is None and not (PORTABLE_SDK / "emulator" / "emulator.exe").is_file():
+    if system_emulator_exe is None and not (PORTABLE_SDK / "emulator" / EMULATOR_BIN).is_file():
         print("[start] Could not find an existing Android Studio emulator install to bootstrap the portable copy from.")
         return None
 
@@ -397,10 +419,21 @@ def start_avd(
         print(f"[start] Failed to set up the portable SDK/AVD copy: {e}")
         return None
 
-    emulator_exe = PORTABLE_SDK / "emulator" / "emulator.exe"
+    emulator_exe = PORTABLE_SDK / "emulator" / EMULATOR_BIN
     avd_dir = PORTABLE_AVD_HOME / f"{avd_name}.avd"
     env = os.environ.copy()
     env.update(env_overrides)
+    if not IS_WINDOWS:
+        # Qt (the boot overlay, and any Qt-based emulator UI) can pick up
+        # a wrong HiDPI scale factor from some Linux desktop environments,
+        # pinning these keeps it at 1:1 regardless.
+        env.update({
+            "QT_SCALE_FACTOR": "1",
+            "QT_AUTO_SCREEN_SCALE_FACTOR": "0",
+            "QT_ENABLE_HIGHDPI_SCALING": "0",
+            "QT_SCREEN_SCALE_FACTORS": "1",
+            "QT_FONT_DPI": "96",
+        })
 
     effective_cold_boot = force_cold_boot
     for attempt in range(1, MAX_LAUNCH_ATTEMPTS + 1):
@@ -443,6 +476,7 @@ def sync_rom_library() -> None:
 
 
 def main() -> None:
+    winapi.ensure_linux_kwin_rules()
     try:
         config = load_config()
     except ConfigMissingError as e:
@@ -526,7 +560,7 @@ def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: b
             print("[start] Starting the launch bridge in a visible console (debug_show_console_windows is on)...")
             bridge_process = subprocess.Popen(
                 [sys.executable, str(BRIDGE_SCRIPT)],
-                creationflags=subprocess.CREATE_NEW_CONSOLE,
+                creationflags=new_console_creationflags(),
                 cwd=str(BRIDGE_SCRIPT.parent),
             )
         else:
@@ -534,8 +568,8 @@ def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: b
             bridge_log_file = open(BRIDGE_LOG_PATH, "wb")
             try:
                 bridge_process = subprocess.Popen(
-                    [sys.executable, str(BRIDGE_SCRIPT)],
-                    creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
+                    [sys.executable, "-u", str(BRIDGE_SCRIPT)],
+                    **detached_popen_kwargs(),
                     stdin=subprocess.DEVNULL,
                     stdout=bridge_log_file,
                     stderr=subprocess.STDOUT,
@@ -562,6 +596,15 @@ def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: b
             print(f"[start] Bridge didn't come up in time, check {BRIDGE_LOG_PATH.name} for errors.")
 
     save_state(state)
+    if not IS_WINDOWS and config.get("iisu_fullscreen"):
+        # The freshly-spawned bridge process above already re-applies
+        # fullscreen as part of its own startup (launch_bridge.main()) on
+        # both platforms, this is belt-and-suspenders for Linux
+        # specifically: KWin-script-based fullscreen (see winapi_linux.py)
+        # is more timing-sensitive than the Windows ctypes path, an extra
+        # call here costs nothing (show_iisu_window() is idempotent) and
+        # closes a real "launched but not fullscreen" gap seen there.
+        show_iisu_window(config)
     print("[start] Ready. Launching a game in iiSU will now hand off to the real PC emulator.")
 
 

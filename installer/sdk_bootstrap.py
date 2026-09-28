@@ -20,21 +20,33 @@ search_roots already assumes).
 
 import shutil
 import subprocess
+import sys
 import threading
 import urllib.request
 import zipfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from shared.platform_compat import IS_WINDOWS, subprocess_creationflags
+
 SCRIPT_DIR = Path(__file__).parent
 SDK_ROOT = SCRIPT_DIR / "android-sdk"
 
-# The bundled "android" CLI (a .bat wrapper) is console-subsystem; this
-# runs from the GUI's Setup flow (pythonw.exe, no console of its own), so
-# without CREATE_NO_WINDOW each multi-minute SDK/AVD command below would
-# pop up its own window.
-CREATE_NO_WINDOW = 0x08000000
+# The bundled "android" CLI (a .bat wrapper on Windows) is console-
+# subsystem; this runs from the GUI's Setup flow (pythonw.exe, no console
+# of its own), so without CREATE_NO_WINDOW each multi-minute SDK/AVD
+# command below would pop up its own window. Windows-only concern:
+# subprocess_creationflags() is 0 on Linux.
+CREATE_NO_WINDOW = subprocess_creationflags()
 
-COMMANDLINETOOLS_URL = "https://dl.google.com/android/repository/commandlinetools-win-15859902_latest.zip"
+# The commandlinetools zip's filename is versioned by Google and isn't a
+# stable "latest" link, if this ever 404s, grab the current one from
+# https://developer.android.com/studio#command-tools and update both.
+COMMANDLINETOOLS_URL = (
+    "https://dl.google.com/android/repository/commandlinetools-win-15859902_latest.zip"
+    if IS_WINDOWS else
+    "https://dl.google.com/android/repository/commandlinetools-linux-15859902_latest.zip"
+)
 SYSTEM_IMAGE = "system-images;android-36;google_apis_playstore;x86_64"
 BUILD_TOOLS_VERSION = "34.0.0"
 BUILD_TOOLS = f"build-tools;{BUILD_TOOLS_VERSION}"
@@ -43,21 +55,23 @@ DEVICE_PROFILE = "medium_phone"
 
 
 def zipalign_exe() -> Path:
-    return SDK_ROOT / "build-tools" / BUILD_TOOLS_VERSION / "zipalign.exe"
+    return SDK_ROOT / "build-tools" / BUILD_TOOLS_VERSION / ("zipalign.exe" if IS_WINDOWS else "zipalign")
 
 
 def apksigner_bat() -> Path:
-    return SDK_ROOT / "build-tools" / BUILD_TOOLS_VERSION / "apksigner.bat"
+    return SDK_ROOT / "build-tools" / BUILD_TOOLS_VERSION / ("apksigner.bat" if IS_WINDOWS else "apksigner")
 
 
 def android_exe() -> Path:
-    return SDK_ROOT / "cmdline-tools" / "latest" / "bin" / "android.exe"
+    return SDK_ROOT / "cmdline-tools" / "latest" / "bin" / ("android.exe" if IS_WINDOWS else "android")
 
 
 def is_sdk_ready() -> bool:
+    adb_name = "adb.exe" if IS_WINDOWS else "adb"
+    emulator_name = "emulator.exe" if IS_WINDOWS else "emulator"
     return (
-        (SDK_ROOT / "platform-tools" / "adb.exe").is_file()
-        and (SDK_ROOT / "emulator" / "emulator.exe").is_file()
+        (SDK_ROOT / "platform-tools" / adb_name).is_file()
+        and (SDK_ROOT / "emulator" / emulator_name).is_file()
         and (SDK_ROOT / SYSTEM_IMAGE.replace(";", "/") / "system.img").is_file()
         and zipalign_exe().is_file()
         and apksigner_bat().is_file()
@@ -110,6 +124,12 @@ def install_commandline_tools() -> None:
     shutil.move(str(extract_dir / "cmdline-tools"), str(latest_dir))
     shutil.rmtree(extract_dir)
 
+    if not IS_WINDOWS:
+        # The zip doesn't preserve the executable bit on Linux.
+        for bin_file in (latest_dir / "bin").glob("*"):
+            if bin_file.is_file():
+                bin_file.chmod(bin_file.stat().st_mode | 0o755)
+
 
 def _package_already_installed(package: str) -> bool:
     if package == SYSTEM_IMAGE:
@@ -153,6 +173,17 @@ def install_packages() -> None:
         # success is checked below by looking for the resulting files
         # rather than trusting the return code.
         _run_with_heartbeat([str(android_exe()), f"--sdk={SDK_ROOT}", "sdk", "install", package], what=package)
+
+    if not IS_WINDOWS:
+        # Same as install_commandline_tools(): the zip/package extraction
+        # doesn't preserve the executable bit on Linux.
+        for tool_dir in ("platform-tools", "emulator"):
+            for path in (SDK_ROOT / tool_dir).glob("*"):
+                if path.is_file():
+                    path.chmod(path.stat().st_mode | 0o755)
+        for exe in (zipalign_exe(), apksigner_bat()):
+            if exe.is_file():
+                exe.chmod(exe.stat().st_mode | 0o755)
 
     if not is_sdk_ready():
         raise RuntimeError(

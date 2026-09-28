@@ -52,6 +52,7 @@ from pathlib import Path, PurePosixPath
 
 import portable_sdk  # noqa: F401; imported for its import-time PATH fix (adb), not used directly here
 from console_names import load_console_lookup, resolve_console_shortname
+from shared.platform_compat import subprocess_creationflags
 
 CONFIG_PATH = Path(__file__).parent / "config.json"
 WINDOWS_STUBS_DIR = Path(__file__).parent / "windows_stubs"
@@ -66,6 +67,16 @@ PLACEHOLDER_SIZE_KB = 4
 AVD_TAR_PUSH_PATH = "/data/local/tmp/sync_library.tar"
 
 IGNORE_TOP_LEVEL = {"folder.ico", "sync.ffs_lock"}
+
+# .sbi sidecars carry subchannel data some CD rips ship alongside a
+# .bin/.cue (anti-modchip protection on certain PS1 games), read by the
+# real PC emulator straight off disk next to the .bin/.cue, exactly like
+# an unlisted .cue FILE reference, but never named inside the .cue text
+# itself, so referenced_disc_filenames() has no way to catch it. Left
+# unexcluded, it shows up in iiSU as a bogus "game" of its own. Never
+# passed through to iiSU as a placeholder, but the real file on disk is
+# untouched, the emulator still finds it right where it always was.
+NEVER_PLACEHOLDER_EXTENSIONS = {".sbi"}
 
 CUE_FILE_LINE = re.compile(r'^\s*FILE\s+"([^"]+)"', re.IGNORECASE)
 
@@ -183,7 +194,7 @@ def adb(*args: str, check: bool = True) -> subprocess.CompletedProcess:
     # (pythonw.exe, no console of its own), so without CREATE_NO_WINDOW
     # each call here would flash its own console window.
     return subprocess.run(
-        ["adb", *args], capture_output=True, text=True, check=check, creationflags=0x08000000
+        ["adb", *args], capture_output=True, text=True, check=check, creationflags=subprocess_creationflags()
     )
 
 
@@ -220,6 +231,8 @@ def scan_library(
             )
             for file_path in files:
                 if file_path.name in excluded:
+                    continue
+                if file_path.suffix.lower() in NEVER_PLACEHOLDER_EXTENSIONS:
                     continue
                 rel = file_path.relative_to(console_folder).as_posix()
                 st = file_path.stat()

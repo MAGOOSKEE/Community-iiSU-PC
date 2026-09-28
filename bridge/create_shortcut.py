@@ -23,6 +23,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from shared.platform_compat import IS_WINDOWS
+
 BRIDGE_DIR = Path(__file__).parent
 PROJECT_ROOT = BRIDGE_DIR.parent
 
@@ -30,19 +32,23 @@ PROJECT_ROOT = BRIDGE_DIR.parent
 # reached via setup_wizard.py (which already has installer/ on sys.path by
 # then) or run standalone from bridge/ directly.
 sys.path.insert(0, str(PROJECT_ROOT / "installer"))
-from jre_env import java_subprocess_env
+from jre_env import java_exe, java_subprocess_env
 START_SCRIPT = BRIDGE_DIR / "start_iisu_pc.py"
-SHORTCUT_NAME = "Community-iiSU-PC.lnk"
+SHORTCUT_NAME = "Community-iiSU-PC.lnk" if IS_WINDOWS else "Community-iiSU-PC.desktop"
 
 # The installer's own [Icons] entries (CommunityIisuPC.iss) create this one
 # at install time, before any APK has ever been processed, so it's always
 # hardcoded to FALLBACK_ICON_PATH. Nothing else ever revisits it afterward,
 # confirmed live: it stays generic forever even once a real icon has been
 # extracted. Re-pointed to match here whenever extraction succeeds.
-MANAGER_SHORTCUT_NAME = "Community-iiSU-PC Manager.lnk"
+MANAGER_SHORTCUT_NAME = "Community-iiSU-PC Manager.lnk" if IS_WINDOWS else "Community-iiSU-PC-Manager.desktop"
 
-FALLBACK_ICON_PATH = BRIDGE_DIR / "assets" / "iisu_launch.ico"
-EXTRACTED_ICON_PATH = BRIDGE_DIR / ".iisu_icon.ico"
+# .ico only really renders correctly in a Windows shell context; Linux
+# desktop environments expect a .png (or svg) for a .desktop file's Icon=.
+FALLBACK_ICON_PATH = BRIDGE_DIR / "assets" / ("iisu_launch.ico" if IS_WINDOWS else "iisu_launch.png")
+EXTRACTED_ICON_PATH = BRIDGE_DIR / (".iisu_icon.ico" if IS_WINDOWS else ".iisu_icon.png")
+EXTRACTED_ICO_PATH = BRIDGE_DIR / ".iisu_icon.ico"
+EXTRACTED_PNG_PATH = BRIDGE_DIR / ".iisu_icon.png"
 APKTOOL_JAR = PROJECT_ROOT / "installer" / "tools" / "apktool.jar"
 INPUT_DIR = PROJECT_ROOT / "installer" / "input"
 
@@ -126,7 +132,7 @@ def extract_iisu_icon(apk_path: Path | None = None) -> Path | None:
     try:
         shutil.rmtree(decompile_dir, ignore_errors=True)
         result = subprocess.run(
-            ["java", "-jar", str(APKTOOL_JAR), "d", "-s", "-f", str(apk_path), "-o", str(decompile_dir)],
+            [java_exe(), "-jar", str(APKTOOL_JAR), "d", "-s", "-f", str(apk_path), "-o", str(decompile_dir)],
             capture_output=True, text=True, env=java_subprocess_env(), creationflags=0x08000000,  # CREATE_NO_WINDOW
         )
         if result.returncode != 0:
@@ -149,7 +155,8 @@ def extract_iisu_icon(apk_path: Path | None = None) -> Path | None:
         # largest available frame and silently drops any requested size
         # bigger than it, so this must be the biggest, not the smallest.
         frames = sorted((image.resize((s, s), Image.LANCZOS) for s in ICON_SIZES), key=lambda f: f.size, reverse=True)
-        frames[0].save(EXTRACTED_ICON_PATH, format="ICO", sizes=[(s, s) for s in ICON_SIZES], append_images=frames[1:])
+        frames[0].save(EXTRACTED_ICO_PATH, format="ICO", sizes=[(s, s) for s in ICON_SIZES], append_images=frames[1:])
+        image.save(EXTRACTED_PNG_PATH, format="PNG")
         print(f"[shortcut] extracted iiSU's own icon from {apk_path.name}")
         return EXTRACTED_ICON_PATH
     except Exception as e:
@@ -160,6 +167,18 @@ def extract_iisu_icon(apk_path: Path | None = None) -> Path | None:
 
 
 def desktop_dir() -> Path:
+    if not IS_WINDOWS:
+        try:
+            result = subprocess.run(["xdg-user-dir", "DESKTOP"], capture_output=True, text=True)
+            if result.returncode == 0 and result.stdout.strip():
+                path = Path(result.stdout.strip())
+                if path.is_dir():
+                    return path
+        except OSError:
+            pass
+        path = Path.home() / "Desktop"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
     result = subprocess.run(
         ["powershell", "-NoProfile", "-Command", "[Environment]::GetFolderPath('Desktop')"],
         capture_output=True, text=True, check=True, creationflags=0x08000000,  # CREATE_NO_WINDOW
@@ -173,10 +192,57 @@ def _refresh_shell_icon_cache() -> None:
     same path (e.g. re-running setup against a different/updated APK),
     Explorer can keep showing the old icon indefinitely otherwise. This is
     the standard, documented way to tell it to flush and re-render icon
-    associations, short of restarting explorer.exe entirely."""
+    associations, short of restarting explorer.exe entirely. Linux's
+    equivalent is telling the desktop database to re-index .desktop files,
+    a no-op if update-desktop-database isn't installed."""
+    if not IS_WINDOWS:
+        if shutil.which("update-desktop-database"):
+            apps_dir = Path.home() / ".local" / "share" / "applications"
+            subprocess.run(["update-desktop-database", str(apps_dir)], capture_output=True)
+        return
     SHCNE_ASSOCCHANGED = 0x08000000
     SHCNF_IDLIST = 0x0000
     ctypes.windll.shell32.SHChangeNotify(SHCNE_ASSOCCHANGED, SHCNF_IDLIST, None, None)
+
+
+def _write_desktop_file(name: str, target_dirs: list[Path], content: str) -> Path:
+    """Writes the same .desktop file to every directory in target_dirs
+    (the app menu under ~/.local/share/applications, and the Desktop
+    folder for a double-clickable icon there too), marking each
+    executable (required for a .desktop file to actually run rather than
+    just open as text) and, where available, trusted via `gio` so a
+    freshly-created one on the Desktop doesn't need an "Allow Launching"
+    right-click first. Returns the Desktop copy's path."""
+    primary_path = target_dirs[0] / name
+    for directory in target_dirs:
+        directory.mkdir(parents=True, exist_ok=True)
+        file_path = directory / name
+        file_path.write_text(content, encoding="utf-8")
+        file_path.chmod(0o755)
+    if shutil.which("gio"):
+        try:
+            subprocess.run(["gio", "set", str(primary_path), "metadata::trusted", "true"], capture_output=True)
+        except OSError:
+            pass
+    return primary_path
+
+
+def _create_manager_desktop_file(icon_path: Path) -> Path:
+    content = (
+        "[Desktop Entry]\n"
+        "Version=1.0\n"
+        "Type=Application\n"
+        "Name=Community-iiSU-PC Manager\n"
+        "GenericName=Emulator Frontend Manager\n"
+        "Comment=Manage Community-iiSU-PC configuration and library\n"
+        f"Exec=\"{sys.executable}\" -m bridge.ui.app\n"
+        f"Path={PROJECT_ROOT}\n"
+        f"Icon={icon_path.resolve()}\n"
+        "Terminal=false\n"
+        "Categories=Game;Emulator;Settings;Utility;\n"
+    )
+    apps_dir = Path.home() / ".local" / "share" / "applications"
+    return _write_desktop_file(MANAGER_SHORTCUT_NAME, [desktop_dir(), apps_dir], content)
 
 
 def _update_manager_shortcut_icon(icon_path: Path) -> None:
@@ -185,7 +251,12 @@ def _update_manager_shortcut_icon(icon_path: Path) -> None:
     desktopicon task) and only if it isn't already pointing at icon_path
     (skips a pointless PowerShell call on every ordinary launch). Only
     ever upgrades it away from the generic icon, never touches TargetPath/
-    Arguments/WorkingDirectory, those are Inno's to own."""
+    Arguments/WorkingDirectory, those are Inno's to own. On Linux there's
+    no separate installer-created shortcut to re-point, so this just
+    (re)writes the Manager's own .desktop file directly."""
+    if not IS_WINDOWS:
+        _create_manager_desktop_file(icon_path)
+        return
     manager_path = desktop_dir() / MANAGER_SHORTCUT_NAME
     if not manager_path.is_file():
         return
@@ -213,6 +284,27 @@ def create_desktop_shortcut(apk_path: Path | None = None) -> Path:
         print("[shortcut] using the generic fallback icon, not iiSU's own, see the line above for why")
     else:
         _update_manager_shortcut_icon(icon_path)
+
+    if not IS_WINDOWS:
+        content = (
+            "[Desktop Entry]\n"
+            "Version=1.0\n"
+            "Type=Application\n"
+            "Name=Community-iiSU-PC\n"
+            "GenericName=Wii U Frontend\n"
+            "Comment=Launch Community-iiSU-PC\n"
+            f"Exec=\"{sys.executable}\" \"{START_SCRIPT}\"\n"
+            f"Path={BRIDGE_DIR}\n"
+            f"Icon={icon_path.resolve()}\n"
+            "Terminal=false\n"
+            "StartupWMClass=Emulator\n"
+            "Categories=Game;Emulator;\n"
+        )
+        apps_dir = Path.home() / ".local" / "share" / "applications"
+        shortcut_path = _write_desktop_file(SHORTCUT_NAME, [desktop_dir(), apps_dir], content)
+        _refresh_shell_icon_cache()
+        return shortcut_path
+
     shortcut_path = desktop_dir() / SHORTCUT_NAME
     script = (
         "$shell = New-Object -ComObject WScript.Shell\n"

@@ -87,6 +87,19 @@ class ScanLibraryDedupTests(unittest.TestCase):
             names = [rel for rel, _size, _mtime in consoles["psx"]]
             self.assertEqual(names, ["Solo Game.cue"])
 
+    def test_sbi_sidecar_is_never_its_own_entry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            roms_dir = Path(tmp)
+            psx = roms_dir / "Playstation 1"
+            psx.mkdir()
+            (psx / "Solo Game.cue").write_text('FILE "Solo Game.bin" BINARY\n', encoding="utf-8")
+            (psx / "Solo Game.bin").write_bytes(b"x")
+            (psx / "Solo Game.sbi").write_bytes(b"x")
+
+            consoles, _skipped = scan_library(roms_dir, self.exact, self.by_compact)
+            names = [rel for rel, _size, _mtime in consoles["psx"]]
+            self.assertEqual(names, ["Solo Game.cue"])
+
     def test_dedup_is_scoped_per_directory(self):
         # Two different game folders, each with their own disc.bin, the
         # first folder's .m3u must not swallow the second folder's file of
