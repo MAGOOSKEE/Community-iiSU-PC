@@ -89,7 +89,7 @@ def _run_kwin_script(code: str, name: str = "iisu_kwin") -> bool:
             pass
 
 
-def ensure_kwin_rules() -> bool:
+def ensure_linux_kwin_rules() -> bool:
     """Configures KDE KWin window rules so the Android emulator window
     maps directly into borderless fullscreen and its auxiliary toolbar
     window is suppressed from creation, avoiding a border/toolbar flicker
@@ -358,7 +358,7 @@ def force_foreground(hwnd: int = 0, show_state: int = SW_RESTORE) -> None:
 
 
 def make_fullscreen(hwnd: int = 0) -> None:
-    ensure_kwin_rules()
+    ensure_linux_kwin_rules()
     _run_kwin_script(_FULLSCREEN_KWIN_SCRIPT, "iisu_make_fullscreen")
     if shutil.which("xdotool"):
         try:
