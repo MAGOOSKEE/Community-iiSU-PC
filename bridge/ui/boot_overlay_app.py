@@ -14,9 +14,10 @@ Usage: python -m bridge.ui.boot_overlay_app <context> [flavor]
 
 import math
 import sys
-import winreg
 
 import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
+
+from shared.platform_compat import IS_WINDOWS
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QGuiApplication, QLinearGradient, QPainter
@@ -51,7 +52,13 @@ def _detect_windows_theme() -> str:
     """Reads the same registry value Windows' own Settings > Colors page
     ("Choose your default app mode") writes, best-effort, since a
     loading screen guessing wrong about system theme is purely cosmetic,
-    never worth failing the boot sequence over."""
+    never worth failing the boot sequence over. No equivalent registry
+    to read on Linux (desktop-environment-specific, not worth chasing
+    for a cosmetic default), always dark there, matching this project's
+    own brand theme anyway."""
+    if not IS_WINDOWS:
+        return "dark"
+    import winreg
     try:
         with winreg.OpenKey(
             winreg.HKEY_CURRENT_USER,
