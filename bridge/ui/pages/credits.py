@@ -21,6 +21,11 @@ _CONTRIBUTORS = [
         "display_name": "Jacko1234wdd",
         "blurb": "Native Windows app/Steam launching, the Android Storage browser, and the Media Library/MediaBridge artwork pipeline.",
     },
+    {
+        "username": "jacksterson",
+        "display_name": "jacksterson",
+        "blurb": "Original Linux port: KWin/xdotool window management, joydev controller support, cross-platform SDK/shortcut/process handling, and the Flatpak emulator downloader.",
+    },
 ]
 
 # Every third-party component this project actually ships or bundles, plus

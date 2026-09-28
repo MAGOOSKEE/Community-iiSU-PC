@@ -188,6 +188,13 @@ def steam_library_paths() -> list[Path]:
     for base in env_candidates:
         if base:
             candidates.extend([Path(base) / "Steam", Path(base) / "steam"])
+    linux_candidates = [
+        Path.home() / ".local" / "share" / "Steam",
+        Path.home() / ".steam" / "steam",
+        Path.home() / ".steam" / "root",
+        Path.home() / ".var" / "app" / "com.valvesoftware.Steam" / ".local" / "share" / "Steam",
+    ]
+    candidates.extend(path for path in linux_candidates if path.is_dir())
     try:
         import winreg
 
