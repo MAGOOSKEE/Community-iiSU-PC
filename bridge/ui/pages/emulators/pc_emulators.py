@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 
 from launch_bridge import find_emulator_for_package, find_executable, find_rom
 from bridge.ui.dialogs.emulator_dialog import EmulatorDialog
+from bridge.ui.dialogs.emulator_download_dialog import EmulatorDownloadDialog
 from bridge.ui.dialogs.redirector_install_dialog import RedirectorInstallDialog
 from bridge.ui.pages.base import PageBase
 from shared.emulator_defaults import build_emulators_map, describe_profile
@@ -68,6 +69,10 @@ class EmulatorsPage(PageBase):
         btn_row2 = QWidget()
         btn_row2_layout = QHBoxLayout(btn_row2)
         btn_row2_layout.setContentsMargins(0, 0, 0, 0)
+        download_button = QPushButton("Download Emulators...")
+        download_button.setObjectName("accent")
+        download_button.clicked.connect(self._open_downloader)
+        btn_row2_layout.addWidget(download_button)
         redirector_button = QPushButton("Install Redirector Apps...")
         redirector_button.setObjectName("ghost")
         redirector_button.clicked.connect(lambda: RedirectorInstallDialog(self.window).exec())
@@ -81,6 +86,10 @@ class EmulatorsPage(PageBase):
 
         self.reload_from_config()
         self._update_selection_hint()
+
+    def _open_downloader(self) -> None:
+        search_roots = self.window.roms_page.get_search_roots() if hasattr(self.window, "roms_page") else []
+        EmulatorDownloadDialog(self.window, search_roots=search_roots).exec()
 
     def reload_from_config(self) -> None:
         self.tree.clear()
