@@ -58,6 +58,7 @@ import updater
 from bridge_config import ConfigMissingError, load_config
 from launch_bridge import launch_iisu, show_iisu_window
 from portable_sdk import PORTABLE_AVD_HOME, PORTABLE_SDK, ensure_portable_sdk, patch_config_ini, set_quickboot_autosave
+from shared.platform_compat import detached_popen_kwargs, new_console_creationflags, subprocess_creationflags
 
 BRIDGE_SCRIPT = Path(__file__).parent / "launch_bridge.py"
 STATE_PATH = Path(__file__).parent / ".runtime_state.json"
@@ -73,15 +74,13 @@ AVD_BOOT_TIMEOUT = 300  # seconds
 MAX_LAUNCH_ATTEMPTS = 3
 RETRY_DELAY = 5  # seconds
 
-DETACHED_PROCESS = 0x00000008
-CREATE_NEW_PROCESS_GROUP = 0x00000200
-# DETACHED_PROCESS alone stops the child inheriting *our* console, but
-# doesn't reliably stop a console-subsystem executable (emulator.exe, or
-# python.exe running launch_bridge.py) from popping up one of its own,
-# CREATE_NO_WINDOW is what actually guarantees no window ever appears,
-# already proven for the exact same purpose by boot_overlay.py and
-# launch_bridge.py's own emulator launches.
-CREATE_NO_WINDOW = 0x08000000
+# See shared/platform_compat.py: detached_popen_kwargs() covers Windows's
+# DETACHED_PROCESS|CREATE_NEW_PROCESS_GROUP|CREATE_NO_WINDOW combo (a
+# console-subsystem child like emulator.exe or python.exe running
+# launch_bridge.py otherwise pops up its own window) and Linux's
+# start_new_session=True, an entirely different kwarg, not just a
+# different flag value.
+CREATE_NO_WINDOW = subprocess_creationflags()
 
 
 def save_state(state: dict) -> None:
@@ -319,7 +318,7 @@ def _launch_once(
     if debug_console:
         process = subprocess.Popen(
             args,
-            creationflags=subprocess.CREATE_NEW_CONSOLE,
+            creationflags=new_console_creationflags(),
             env=env,
         )
     else:
@@ -327,7 +326,7 @@ def _launch_once(
         try:
             process = subprocess.Popen(
                 args,
-                creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
+                **detached_popen_kwargs(),
                 stdin=subprocess.DEVNULL,
                 stdout=log_file,
                 stderr=subprocess.STDOUT,
@@ -526,7 +525,7 @@ def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: b
             print("[start] Starting the launch bridge in a visible console (debug_show_console_windows is on)...")
             bridge_process = subprocess.Popen(
                 [sys.executable, str(BRIDGE_SCRIPT)],
-                creationflags=subprocess.CREATE_NEW_CONSOLE,
+                creationflags=new_console_creationflags(),
                 cwd=str(BRIDGE_SCRIPT.parent),
             )
         else:
@@ -535,7 +534,7 @@ def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: b
             try:
                 bridge_process = subprocess.Popen(
                     [sys.executable, str(BRIDGE_SCRIPT)],
-                    creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
+                    **detached_popen_kwargs(),
                     stdin=subprocess.DEVNULL,
                     stdout=bridge_log_file,
                     stderr=subprocess.STDOUT,

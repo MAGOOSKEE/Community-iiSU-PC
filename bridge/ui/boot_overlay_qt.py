@@ -19,6 +19,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from shared.platform_compat import subprocess_creationflags
+
 # Explicit, not inherited from whatever the caller's own cwd happens to be:
 # "-m bridge.ui.boot_overlay_app" resolves that module against the CHILD
 # process's working directory, not the parent's sys.path. Without this,
@@ -102,7 +104,7 @@ def show(context: str) -> subprocess.Popen | None:
         return subprocess.Popen(
             [sys.executable, "-m", "bridge.ui.boot_overlay_app", context, flavor],
             cwd=str(_PROJECT_ROOT),
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=subprocess_creationflags(),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
@@ -124,7 +126,7 @@ def notify_error(title: str, message: str) -> None:
         subprocess.Popen(
             [sys.executable, "-m", "bridge.ui.tray_notify_app", title, message],
             cwd=str(_PROJECT_ROOT),
-            creationflags=subprocess.CREATE_NO_WINDOW,
+            creationflags=subprocess_creationflags(),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,

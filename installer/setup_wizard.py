@@ -26,6 +26,9 @@ import sdk_bootstrap
 from jre_env import java_exe, java_subprocess_env, keytool_exe
 from patch_iisu import patch_apk, validate_iisu_apk
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from shared.platform_compat import detached_popen_kwargs, subprocess_creationflags
+
 INSTALLER_DIR = Path(__file__).parent
 PROJECT_ROOT = INSTALLER_DIR.parent
 BRIDGE_DIR = PROJECT_ROOT / "bridge"
@@ -56,12 +59,9 @@ SETUP_STAGES = [
     "Finishing up",
 ]
 
-DETACHED_PROCESS = 0x00000008
-CREATE_NEW_PROCESS_GROUP = 0x00000200
-# See the matching constant in start_iisu_pc.py: DETACHED_PROCESS alone
-# doesn't reliably stop emulator.exe from popping up its own console
-# window; CREATE_NO_WINDOW is what actually guarantees it never does.
-CREATE_NO_WINDOW = 0x08000000
+# See shared/platform_compat.py. Windows-only concerns: both are no-ops
+# (0 / a start_new_session=True kwarg swap) on Linux.
+CREATE_NO_WINDOW = subprocess_creationflags()
 
 
 def find_input_apk() -> Path | None:
@@ -317,7 +317,7 @@ def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_a
                 # emulator still runs and responds to adb identically
                 # headless; only the visible window is skipped.
                 [str(emulator_exe), "-avd", avd_name, "-no-snapshot", "-no-window"],
-                creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
+                **detached_popen_kwargs(),
                 stdin=subprocess.DEVNULL,
                 stdout=log_file,
                 stderr=subprocess.STDOUT,

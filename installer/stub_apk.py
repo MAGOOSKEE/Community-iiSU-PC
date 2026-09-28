@@ -33,6 +33,9 @@ from jre_env import java_exe, java_subprocess_env, keytool_exe
 
 INSTALLER_DIR = Path(__file__).parent
 
+sys.path.insert(0, str(INSTALLER_DIR.parent))
+from shared.platform_compat import subprocess_creationflags
+
 sys.path.insert(0, str(INSTALLER_DIR.parent / "bridge"))
 import portable_sdk  # noqa: E402,F401, imported for its import-time PATH fix (adb), not used directly here
 
@@ -97,7 +100,7 @@ def ensure_keystore() -> tuple[Path, str]:
             "-storepass", password, "-keypass", password,
             "-dname", "CN=iiSU-PC Redirector, OU=iiSU-PC, O=iiSU-PC, L=Local, S=Local, C=US",
         ],
-        capture_output=True, text=True, env=java_subprocess_env(), creationflags=0x08000000,  # CREATE_NO_WINDOW
+        capture_output=True, text=True, env=java_subprocess_env(), creationflags=subprocess_creationflags(),
     )
     if result.returncode != 0:
         raise RuntimeError(f"keytool failed:\n{result.stdout}\n{result.stderr}")
@@ -110,7 +113,7 @@ def _run(args: list[str], **kwargs) -> subprocess.CompletedProcess:
     # apktool/zipalign/apksigner.bat are all console-subsystem; this runs
     # from the GUI (pythonw.exe, no console of its own), so without
     # CREATE_NO_WINDOW each would flash its own window.
-    kwargs.setdefault("creationflags", 0x08000000)
+    kwargs.setdefault("creationflags", subprocess_creationflags())
     result = subprocess.run(args, capture_output=True, text=True, **kwargs)
     if result.returncode != 0:
         raise RuntimeError(f"command failed ({' '.join(args)}):\n{result.stdout}\n{result.stderr}")
@@ -204,14 +207,14 @@ def install_stub_apk(apk_path: Path, package_name: str, replace_existing: bool =
     know better (the person explicitly confirming a replace from the
     configurator) can pass replace_existing=True."""
     result = subprocess.run(
-        ["adb", "install", "-r", str(apk_path)], capture_output=True, text=True, creationflags=0x08000000
+        ["adb", "install", "-r", str(apk_path)], capture_output=True, text=True, creationflags=subprocess_creationflags()
     )
     if "INSTALL_FAILED_UPDATE_INCOMPATIBLE" in result.stdout or "INSTALL_FAILED_UPDATE_INCOMPATIBLE" in result.stderr:
         if not replace_existing:
             return "conflict"
-        subprocess.run(["adb", "uninstall", package_name], capture_output=True, text=True, creationflags=0x08000000)
+        subprocess.run(["adb", "uninstall", package_name], capture_output=True, text=True, creationflags=subprocess_creationflags())
         result = subprocess.run(
-            ["adb", "install", str(apk_path)], capture_output=True, text=True, creationflags=0x08000000
+            ["adb", "install", str(apk_path)], capture_output=True, text=True, creationflags=subprocess_creationflags()
         )
         if result.returncode != 0 or "Success" not in result.stdout:
             raise RuntimeError(f"adb install failed:\n{result.stdout}\n{result.stderr}")

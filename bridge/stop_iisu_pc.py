@@ -42,11 +42,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from portable_sdk import PORTABLE_AVD_HOME
+from shared.platform_compat import subprocess_creationflags
 
 # adb/taskkill/powershell are all console-subsystem executables; this
 # script itself always runs from the GUI (pythonw.exe), which has no
 # console for them to inherit, so each would otherwise pop up its own.
-CREATE_NO_WINDOW = 0x08000000
+# (Windows-only concern: subprocess_creationflags() is 0 on Linux.)
+CREATE_NO_WINDOW = subprocess_creationflags()
 
 STATE_PATH = Path(__file__).parent / ".runtime_state.json"
 CONFIG_PATH = Path(__file__).parent / "config.json"

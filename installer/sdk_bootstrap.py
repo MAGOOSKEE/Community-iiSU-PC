@@ -20,19 +20,24 @@ search_roots already assumes).
 
 import shutil
 import subprocess
+import sys
 import threading
 import urllib.request
 import zipfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from shared.platform_compat import subprocess_creationflags
+
 SCRIPT_DIR = Path(__file__).parent
 SDK_ROOT = SCRIPT_DIR / "android-sdk"
 
-# The bundled "android" CLI (a .bat wrapper) is console-subsystem; this
-# runs from the GUI's Setup flow (pythonw.exe, no console of its own), so
-# without CREATE_NO_WINDOW each multi-minute SDK/AVD command below would
-# pop up its own window.
-CREATE_NO_WINDOW = 0x08000000
+# The bundled "android" CLI (a .bat wrapper on Windows) is console-
+# subsystem; this runs from the GUI's Setup flow (pythonw.exe, no console
+# of its own), so without CREATE_NO_WINDOW each multi-minute SDK/AVD
+# command below would pop up its own window. Windows-only concern:
+# subprocess_creationflags() is 0 on Linux.
+CREATE_NO_WINDOW = subprocess_creationflags()
 
 COMMANDLINETOOLS_URL = "https://dl.google.com/android/repository/commandlinetools-win-15859902_latest.zip"
 SYSTEM_IMAGE = "system-images;android-36;google_apis_playstore;x86_64"

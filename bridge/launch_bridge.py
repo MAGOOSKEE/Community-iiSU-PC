@@ -78,6 +78,7 @@ from shared.emulator_defaults import (
     retroarch_core_dll_for_android_core,
     standalone_profile_for_core_dll,
 )
+from shared.platform_compat import detached_popen_kwargs, new_console_creationflags, subprocess_creationflags
 from winapi import (
     SW_MINIMIZE,
     SW_RESTORE,
@@ -102,9 +103,6 @@ PATH_CACHE_PATH = Path(__file__).parent / ".path_cache.json"
 LAUNCH_LOG_PATH = Path(__file__).parent / "launch_history.log"
 WINDOWS_APPS_PATH = Path(__file__).parent / "windows_apps.json"
 LIBRETRO_CORE_URL = "https://buildbot.libretro.com/nightly/windows/x86_64/latest/{core_dll}.zip"
-
-DETACHED_PROCESS = 0x00000008
-CREATE_NEW_PROCESS_GROUP = 0x00000200
 
 DEFAULT_IISU_COMPONENT = "com.iisulauncher/com.iisulauncher.launcher.StartupSafeModeActivity"
 
@@ -250,7 +248,7 @@ def _pid_is_running(pid: int | None) -> bool:
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             text=True,
-            creationflags=0x08000000,  # CREATE_NO_WINDOW
+            creationflags=subprocess_creationflags(),
             timeout=2,
         )
         return result.returncode == 0 and f'"{pid}"' in result.stdout
@@ -264,7 +262,7 @@ def _terminate_native_pid(pid: int) -> bool:
             ["taskkill", "/F", "/PID", str(pid), "/T"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            creationflags=0x08000000,  # CREATE_NO_WINDOW
+            creationflags=subprocess_creationflags(),
             timeout=5,
         )
         return result.returncode == 0
@@ -280,7 +278,7 @@ def _adb_media_volume_get() -> int | None:
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,
             text=True,
-            creationflags=0x08000000,  # CREATE_NO_WINDOW
+            creationflags=subprocess_creationflags(),
             timeout=3,
         )
     except (OSError, subprocess.SubprocessError):
@@ -296,7 +294,7 @@ def _adb_media_volume_set(volume: int) -> bool:
             ["adb", "shell", "media", "volume", "--stream", "3", "--set", str(max(0, volume))],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
-            creationflags=0x08000000,  # CREATE_NO_WINDOW
+            creationflags=subprocess_creationflags(),
             timeout=3,
         )
         return result.returncode == 0
@@ -632,7 +630,7 @@ def launch_iisu(config: dict) -> None:
     while time.monotonic() < deadline:
         result = subprocess.run(
             ["adb", "shell", "getprop", "init.svc.bootanim"], capture_output=True, text=True,
-            creationflags=0x08000000,  # CREATE_NO_WINDOW
+            creationflags=subprocess_creationflags(),
         )
         if result.stdout.strip() == "stopped":
             break
@@ -643,7 +641,7 @@ def launch_iisu(config: dict) -> None:
     for _ in range(60):
         result = subprocess.run(
             ["adb", "shell", "am", "start", "-n", component], capture_output=True, text=True,
-            creationflags=0x08000000,  # CREATE_NO_WINDOW
+            creationflags=subprocess_creationflags(),
         )
         if result.returncode == 0 and "Error" not in result.stdout:
             set_volume_max()
@@ -665,7 +663,7 @@ def set_volume_max() -> None:
     keycode repeated is enough, no need for 20 separate subprocess calls."""
     subprocess.run(
         ["adb", "shell", "input", "keyevent"] + ["24"] * 20, capture_output=True, text=True,
-        creationflags=0x08000000,  # CREATE_NO_WINDOW
+        creationflags=subprocess_creationflags(),
     )
 
 
@@ -780,7 +778,7 @@ def shutdown_everything() -> None:
     if debug_console:
         subprocess.Popen(
             [sys.executable, str(STOP_SCRIPT)],
-            creationflags=subprocess.CREATE_NEW_CONSOLE,
+            creationflags=new_console_creationflags(),
             cwd=str(STOP_SCRIPT.parent),
         )
     else:
@@ -788,7 +786,7 @@ def shutdown_everything() -> None:
         try:
             subprocess.Popen(
                 [sys.executable, str(STOP_SCRIPT)],
-                creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                **detached_popen_kwargs(),
                 stdin=subprocess.DEVNULL,
                 stdout=stop_log_file,
                 stderr=subprocess.STDOUT,

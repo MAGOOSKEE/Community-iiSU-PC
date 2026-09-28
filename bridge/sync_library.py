@@ -52,6 +52,7 @@ from pathlib import Path, PurePosixPath
 
 import portable_sdk  # noqa: F401; imported for its import-time PATH fix (adb), not used directly here
 from console_names import load_console_lookup, resolve_console_shortname
+from shared.platform_compat import subprocess_creationflags
 
 CONFIG_PATH = Path(__file__).parent / "config.json"
 WINDOWS_STUBS_DIR = Path(__file__).parent / "windows_stubs"
@@ -193,7 +194,7 @@ def adb(*args: str, check: bool = True) -> subprocess.CompletedProcess:
     # (pythonw.exe, no console of its own), so without CREATE_NO_WINDOW
     # each call here would flash its own console window.
     return subprocess.run(
-        ["adb", *args], capture_output=True, text=True, check=check, creationflags=0x08000000
+        ["adb", *args], capture_output=True, text=True, check=check, creationflags=subprocess_creationflags()
     )
 
 
