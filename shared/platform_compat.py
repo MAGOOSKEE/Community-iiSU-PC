@@ -11,10 +11,26 @@ subprocess call at a time, the same explicit style jre_env.py already
 uses for choosing a Java runtime.
 """
 
+import os
 import sys
 
 IS_WINDOWS = sys.platform == "win32"
 IS_LINUX = sys.platform.startswith("linux")
+
+
+def open_uri(uri: str) -> None:
+    """Opens a URI (a registered protocol like steam://..., or a plain
+    file/folder path) with whatever the OS has associated with it.
+    os.startfile() doesn't exist on Linux at all (AttributeError, not a
+    no-op), the equivalent there is xdg-open, which reads the same kind
+    of registered-handler association (a .desktop file declaring
+    MimeType=x-scheme-handler/steam;, for the steam:// case) via
+    xdg-mime/mimeapps.list."""
+    if IS_WINDOWS:
+        os.startfile(uri)
+        return
+    import subprocess
+    subprocess.Popen(["xdg-open", uri], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 # CREATE_NO_WINDOW: only meaningful on Windows (suppresses a console-
 # subsystem child's own window when launched from a GUI app with no

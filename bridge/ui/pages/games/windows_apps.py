@@ -38,6 +38,7 @@ from bridge.ui.dialogs.steam_library_dialog import SteamLibraryDialog
 from bridge.ui.dialogs.windows_app_dialog import WindowsAppDialog
 from bridge.ui.dialogs.windows_apps_health_dialog import WindowsAppsHealthDialog
 from bridge.ui.pages.base import PageBase
+from shared.platform_compat import open_uri
 from bridge.ui.widgets.card import Card
 from bridge.ui.workers.task_runner import run_in_background
 from shared.qt_theme import Fonts, TEXT_DIM
@@ -352,7 +353,7 @@ class WindowsAppsPage(PageBase):
         try:
             if launch_type == "uri":
                 uri = svc.resolve_uri_launch(entry)
-                os.startfile(uri)
+                open_uri(uri)
             elif launch_type == "executable":
                 executable, args, working_dir = svc.resolve_executable_launch(entry)
                 subprocess.Popen([str(executable), *args], cwd=str(working_dir))
@@ -602,7 +603,7 @@ class WindowsAppsPage(PageBase):
         windows_dir = self._windows_dir()
         try:
             windows_dir.mkdir(parents=True, exist_ok=True)
-            os.startfile(windows_dir)
+            open_uri(str(windows_dir))
         except OSError as e:
             QMessageBox.critical(self, "Windows Apps", str(e))
 

@@ -79,7 +79,7 @@ from shared.emulator_defaults import (
     retroarch_core_dll_for_android_core,
     standalone_profile_for_core_dll,
 )
-from shared.platform_compat import IS_WINDOWS, detached_popen_kwargs, new_console_creationflags, subprocess_creationflags
+from shared.platform_compat import IS_WINDOWS, detached_popen_kwargs, new_console_creationflags, open_uri, subprocess_creationflags
 from winapi import (
     SW_MINIMIZE,
     SW_RESTORE,
@@ -1246,7 +1246,7 @@ def launch_windows_app(app_name: str, config: dict) -> bool:
         if launch_type == "uri":
             print(f"[bridge] launching Windows URI: {uri}")
             log_launch(f"LAUNCHED: Windows app {app_name}, URI {uri}")
-            os.startfile(uri)
+            open_uri(uri)
         else:
             args = [str(executable), *configured_args]
             print(f"[bridge] launching Windows app: {args}")
@@ -1370,7 +1370,7 @@ def launch_steam_game(app_id: str, config: dict) -> None:
             print("[bridge] could not locate iiSU window to hide")
 
         print(f"[bridge] launching Steam app {app_id}...")
-        os.startfile(f"steam://rungameid/{app_id}")
+        open_uri(f"steam://rungameid/{app_id}")
 
         # Steam itself may create transient launcher windows before the game's
         # real top-level window. Ignore Steam-owned UI and adopt the persistent
