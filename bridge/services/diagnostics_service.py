@@ -14,6 +14,8 @@ import subprocess
 import urllib.request
 from pathlib import Path
 
+from services import windows_apps_service
+
 BRIDGE_DIR = Path(__file__).resolve().parent.parent
 MANAGER_LOG_PATH = BRIDGE_DIR / "manager_debug.log"
 
@@ -115,11 +117,8 @@ def run_diagnostics(config_data: dict) -> list[tuple[str, str, str]]:
     except Exception:
         add("WARNING", "Launch Bridge listener", f"Nothing accepted a connection on localhost:{bridge_port} (normal if the bridge is not running)")
 
-    steam_roots = [
-        Path(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)")) / "Steam",
-        Path(os.environ.get("PROGRAMFILES", r"C:\Program Files")) / "Steam",
-    ]
-    found_steam = next((p for p in steam_roots if p.is_dir()), None)
+    steam_libraries = windows_apps_service.steam_library_paths()
+    found_steam = steam_libraries[0] if steam_libraries else None
     if found_steam:
         vdf = found_steam / "steamapps" / "libraryfolders.vdf"
         add("OK", "Steam installation", str(found_steam))
