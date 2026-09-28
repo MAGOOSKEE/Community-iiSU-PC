@@ -37,6 +37,7 @@ class RemoveTreeBestEffortTests(unittest.TestCase):
         self.assertEqual(locked, [])
         self.assertFalse(self.root.exists())
 
+    @unittest.skipUnless(sys.platform == "win32", "Tests Windows-specific file locking semantics")
     def test_locked_file_is_reported_and_siblings_still_removed(self):
         (self.root / "removable.txt").write_text("x")
         locked_file = self.root / "locked.txt"
@@ -57,6 +58,7 @@ class RemoveTreeBestEffortTests(unittest.TestCase):
         self.assertFalse((self.root / "removable.txt").exists())
         self.assertTrue(locked_file.exists())
 
+    @unittest.skipUnless(sys.platform == "win32", "Tests Windows-specific file locking semantics")
     def test_locked_file_also_keeps_its_parent_directory(self):
         nested = self.root / "sub"
         nested.mkdir()
@@ -90,6 +92,7 @@ class RemovePathTests(unittest.TestCase):
         self.assertEqual(reclaimed, 100)
         self.assertFalse(self.root.exists())
 
+    @unittest.skipUnless(sys.platform == "win32", "Tests Windows-specific file locking semantics")
     def test_partially_locked_tree_reclaims_only_what_it_could(self):
         (self.root / "removable.txt").write_bytes(b"x" * 100)
         locked_file = self.root / "locked.txt"
