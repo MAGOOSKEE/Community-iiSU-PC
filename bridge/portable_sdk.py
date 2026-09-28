@@ -34,7 +34,10 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from shared.platform_compat import subprocess_creationflags
+from shared.platform_compat import IS_WINDOWS, subprocess_creationflags
+
+EMULATOR_BIN = "emulator.exe" if IS_WINDOWS else "emulator"
+ADB_BIN = "adb.exe" if IS_WINDOWS else "adb"
 
 PORTABLE_ROOT = Path(__file__).parent / "android-sdk-portable"
 PORTABLE_SDK = PORTABLE_ROOT / "sdk"
@@ -60,20 +63,37 @@ _prepend_platform_tools_to_path()
 
 
 def _robocopy(src: Path, dst: Path, exclude_dirs: list[str] | None = None) -> None:
-    # TODO(linux-support): robocopy is Windows-only; this whole function
-    # needs a shutil.copytree/rsync-based path for Linux, not just a
-    # creationflags fix, see the Linux-support integration plan.
+    """Despite the name, copies src into dst on any platform: robocopy on
+    Windows, rsync if available on Linux (faster/more robust for the
+    ~1GB emulator/platform-tools trees this copies), else a plain
+    shutil.copytree fallback."""
     dst.mkdir(parents=True, exist_ok=True)
-    args = ["robocopy", str(src), str(dst), "/E", "/R:2", "/W:2", "/NFL", "/NDL", "/NJH", "/NJS"]
-    if exclude_dirs:
-        args += ["/XD", *exclude_dirs]
-    result = subprocess.run(args, capture_output=True, text=True, creationflags=subprocess_creationflags())
-    # robocopy's exit codes 0-7 all mean some degree of success (a bitmask
-    # of what it did); 8+ means a real failure.
-    if result.returncode >= 8:
-        raise RuntimeError(
-            f"robocopy {src} -> {dst} failed (code {result.returncode}):\n{result.stdout}\n{result.stderr}"
-        )
+    if IS_WINDOWS:
+        args = ["robocopy", str(src), str(dst), "/E", "/R:2", "/W:2", "/NFL", "/NDL", "/NJH", "/NJS"]
+        if exclude_dirs:
+            args += ["/XD", *exclude_dirs]
+        result = subprocess.run(args, capture_output=True, text=True, creationflags=subprocess_creationflags())
+        # robocopy's exit codes 0-7 all mean some degree of success (a
+        # bitmask of what it did); 8+ means a real failure.
+        if result.returncode >= 8:
+            raise RuntimeError(
+                f"robocopy {src} -> {dst} failed (code {result.returncode}):\n{result.stdout}\n{result.stderr}"
+            )
+        return
+
+    if shutil.which("rsync"):
+        args = ["rsync", "-a", "--inplace"]
+        for excluded in exclude_dirs or []:
+            args.append(f"--exclude={excluded}")
+        args += [f"{src}/", f"{dst}/"]
+        result = subprocess.run(args, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"rsync {src} -> {dst} failed (code {result.returncode}):\n{result.stdout}\n{result.stderr}"
+            )
+        return
+
+    shutil.copytree(src, dst, dirs_exist_ok=True, ignore=shutil.ignore_patterns(*(exclude_dirs or [])))
 
 
 def _find_real_avd_dir(avd_name: str) -> Path | None:
@@ -153,8 +173,8 @@ def _read_image_sysdir(avd_dir: Path) -> str | None:
 
 def is_bootstrapped(avd_name: str) -> bool:
     return (
-        (PORTABLE_SDK / "emulator" / "emulator.exe").is_file()
-        and (PORTABLE_SDK / "platform-tools" / "adb.exe").is_file()
+        (PORTABLE_SDK / "emulator" / EMULATOR_BIN).is_file()
+        and (PORTABLE_SDK / "platform-tools" / ADB_BIN).is_file()
         and (PORTABLE_AVD_HOME / f"{avd_name}.avd" / "config.ini").is_file()
     )
 
@@ -163,23 +183,32 @@ def ensure_portable_sdk(avd_name: str, source_sdk_root: Path) -> dict:
     """Copies the emulator binaries, the AVD's system image, and the AVD's
     own config/userdata into android-sdk-portable/ (skipping anything
     already copied), and returns the environment overrides
-    (ANDROID_SDK_ROOT, ANDROID_HOME, ANDROID_AVD_HOME) to launch emulator.exe
-    with, so it uses this portable copy instead of the system-wide install."""
-    # emulator.exe's own SDK-root validity check requires a platform-tools
+    (ANDROID_SDK_ROOT, ANDROID_HOME, ANDROID_AVD_HOME) to launch the
+    emulator with, so it uses this portable copy instead of the
+    system-wide install."""
+    # The emulator's own SDK-root validity check requires a platform-tools
     # subdirectory to exist alongside emulator/ and system-images/, without
     # it, the root is rejected as invalid regardless of whether the
     # requested AVD's system image is actually there.
-    portable_emulator = PORTABLE_SDK / "emulator" / "emulator.exe"
+    portable_emulator = PORTABLE_SDK / "emulator" / EMULATOR_BIN
     if not portable_emulator.is_file():
         source_emulator_dir = source_sdk_root / "emulator"
         print(f"[bootstrap] copying emulator ({source_emulator_dir} -> {PORTABLE_SDK / 'emulator'}), one-time, ~1GB...")
         _robocopy(source_emulator_dir, PORTABLE_SDK / "emulator")
+        if not IS_WINDOWS:
+            for path in (PORTABLE_SDK / "emulator").glob("*"):
+                if path.is_file():
+                    path.chmod(path.stat().st_mode | 0o755)
 
-    portable_adb = PORTABLE_SDK / "platform-tools" / "adb.exe"
+    portable_adb = PORTABLE_SDK / "platform-tools" / ADB_BIN
     if not portable_adb.is_file():
         source_platform_tools_dir = source_sdk_root / "platform-tools"
         print(f"[bootstrap] copying platform-tools ({source_platform_tools_dir} -> {PORTABLE_SDK / 'platform-tools'}), one-time...")
         _robocopy(source_platform_tools_dir, PORTABLE_SDK / "platform-tools")
+        if not IS_WINDOWS:
+            for path in (PORTABLE_SDK / "platform-tools").glob("*"):
+                if path.is_file():
+                    path.chmod(path.stat().st_mode | 0o755)
 
     real_avd_dir = _find_real_avd_dir(avd_name)
     sysdir = _read_image_sysdir(real_avd_dir) if real_avd_dir else None

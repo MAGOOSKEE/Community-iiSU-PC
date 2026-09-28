@@ -17,6 +17,15 @@ from ctypes import wintypes
 user32 = ctypes.windll.user32
 kernel32 = ctypes.windll.kernel32
 
+
+def ensure_linux_kwin_rules() -> bool:
+    """No such concept on Windows; exists here purely so callers (e.g.
+    start_iisu_pc.py's main()) can call winapi.ensure_linux_kwin_rules()
+    unconditionally on either platform, matching this module's whole
+    "branch once at the dispatch, not per call site" design."""
+    return False
+
+
 WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, wintypes.HWND, wintypes.LPARAM)
 
 user32.EnumWindows.argtypes = [WNDENUMPROC, wintypes.LPARAM]

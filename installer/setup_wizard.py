@@ -14,6 +14,7 @@ Usage:
 """
 
 import json
+import os
 import secrets
 import shutil
 import subprocess
@@ -27,7 +28,7 @@ from jre_env import java_exe, java_subprocess_env, keytool_exe
 from patch_iisu import patch_apk, validate_iisu_apk
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from shared.platform_compat import detached_popen_kwargs, subprocess_creationflags
+from shared.platform_compat import IS_WINDOWS, detached_popen_kwargs, subprocess_creationflags
 
 INSTALLER_DIR = Path(__file__).parent
 PROJECT_ROOT = INSTALLER_DIR.parent
@@ -235,7 +236,14 @@ def virtualization_diagnostics() -> dict:
     values default to False rather than raising if the query itself fails
     for any reason (e.g. WMI unavailable), this is a diagnostic aid for
     a *different* failure already in progress, not something that should
-    itself become a second failure."""
+    itself become a second failure. On Linux, the equivalent question is
+    just whether /dev/kvm exists and this process can actually use it
+    (KVM group membership), there's no separate "firmware-enabled but no
+    hypervisor active" distinction to make there the way Windows has."""
+    if not IS_WINDOWS:
+        kvm_ok = Path("/dev/kvm").exists() and os.access("/dev/kvm", os.R_OK | os.W_OK)
+        return {"cpu_virtualization_enabled": kvm_ok, "hypervisor_present": kvm_ok}
+
     result = {"cpu_virtualization_enabled": False, "hypervisor_present": False}
     try:
         cpu_check = subprocess.run(
@@ -316,7 +324,8 @@ def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_a
                 # redirector stubs over adb, then shuts back down. The
                 # emulator still runs and responds to adb identically
                 # headless; only the visible window is skipped.
-                [str(emulator_exe), "-avd", avd_name, "-no-snapshot", "-no-window"],
+                [str(emulator_exe), "-avd", avd_name, "-no-snapshot", "-no-window"]
+                + (["-accel", "on"] if not IS_WINDOWS and Path("/dev/kvm").exists() else []),
                 **detached_popen_kwargs(),
                 stdin=subprocess.DEVNULL,
                 stdout=log_file,
@@ -408,6 +417,18 @@ def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_a
     if result.returncode != 0 or "Success" not in result.stdout:
         raise RuntimeError(f"adb install failed:\n{result.stdout}\n{result.stderr}")
 
+    # Sets iiSU's safe-mode launcher activity as the actual Home app and
+    # disables the stock Nexus launcher, so booting the AVD goes straight
+    # to iiSU instead of Android's own launcher/setup wizard.
+    subprocess.run(
+        ["adb", "shell", "cmd", "package", "set-home-activity", "com.iisulauncher/.launcher.StartupSafeModeActivity"],
+        capture_output=True, text=True, creationflags=CREATE_NO_WINDOW,
+    )
+    subprocess.run(
+        ["adb", "shell", "pm", "disable-user", "com.google.android.apps.nexuslauncher"],
+        capture_output=True, text=True, creationflags=CREATE_NO_WINDOW,
+    )
+
     install_default_redirectors()
 
     print("[setup] shutting the AVD back down (Community-iiSU-PC Manager.bat will bring it up properly from here on)...")
@@ -482,7 +503,7 @@ def update_iisu(apk_path: Path, on_stage: Callable[[str, int, int], None] | None
 
     env = os.environ.copy()
     env.update(env_overrides)
-    emulator_exe = portable_sdk.PORTABLE_SDK / "emulator" / "emulator.exe"
+    emulator_exe = portable_sdk.PORTABLE_SDK / "emulator" / portable_sdk.EMULATOR_BIN
     boot_avd_and_install(emulator_exe, avd_name, env, patched_apk)
 
     stage(2, "Done")
@@ -530,6 +551,25 @@ def write_bridge_config(avd_name: str) -> None:
         config = json.loads(config_path.read_text(encoding="utf-8"))
     else:
         config = json.loads((INSTALLER_DIR / "config.template.json").read_text(encoding="utf-8"))
+        if not IS_WINDOWS:
+            # Best-guess Linux ROM/emulator locations: a couple of common
+            # conventions for roms_dir, and search_roots covering PATH-
+            # installed, user-local, and Flatpak-installed emulators
+            # (Flatpak is the primary install path the emulator downloader
+            # uses on Linux). All of this is still editable afterward from
+            # the Manager's ROM Directory / Emulators pages.
+            home = Path.home()
+            if (home / "roms").is_dir():
+                config["roms_dir"] = str(home / "roms")
+            elif (home / "Emulation" / "roms").is_dir():
+                config["roms_dir"] = str(home / "Emulation" / "roms")
+            config["search_roots"] = [
+                "/usr/bin",
+                str(home / ".local" / "bin"),
+                str(home / ".local" / "share" / "flatpak" / "exports" / "bin"),
+                "/var/lib/flatpak/exports/bin",
+                str(home / "Emulation" / "emulators"),
+            ]
     config["avd_name"] = avd_name
     config.setdefault("display", DEFAULT_DISPLAY)
     config.setdefault("emulators", build_emulators_map())
@@ -657,7 +697,7 @@ def run_setup(apk_path: Path, on_stage: Callable[[str, int, int], None] | None =
     import os
     env = os.environ.copy()
     env.update(env_overrides)
-    emulator_exe = portable_sdk.PORTABLE_SDK / "emulator" / "emulator.exe"
+    emulator_exe = portable_sdk.PORTABLE_SDK / "emulator" / portable_sdk.EMULATOR_BIN
 
     stage(5)
     boot_avd_and_install(emulator_exe, DEFAULT_AVD_NAME, env, patched_apk)
