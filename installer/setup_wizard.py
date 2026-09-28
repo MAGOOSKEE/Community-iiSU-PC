@@ -103,6 +103,35 @@ def require_java() -> None:
         raise RuntimeError("`keytool` was not found on PATH (it ships with any JDK), check your Java install includes it.")
 
 
+def warn_missing_linux_extras() -> None:
+    """Non-fatal: unlike java/keytool, nothing actually stops Setup or day-
+    to-day use without xdotool/flatpak, each just quietly degrades one
+    specific feature (see README's Linux support note) rather than
+    failing outright, so this only prints a heads-up rather than raising,
+    the same "best effort, log it, keep going" pattern
+    virtualization_diagnostics() already uses for a non-fatal check."""
+    if IS_WINDOWS:
+        return
+    if shutil.which("xdotool") is None:
+        print(
+            "[setup] xdotool isn't installed: fullscreen/window management (hiding the emulator's "
+            "own window, making it fullscreen) will be limited. Install it from your distro's package "
+            "manager (e.g. `apt install xdotool`, `dnf install xdotool`, `pacman -S xdotool`)."
+        )
+    if shutil.which("flatpak") is None:
+        print(
+            "[setup] flatpak isn't installed: the Manager's built-in emulator downloader needs it. "
+            "Install it from your distro's package manager (e.g. `apt install flatpak`), or just "
+            "install PC emulators yourself and point the Manager at them instead."
+        )
+    if shutil.which("qdbus") is None and shutil.which("qdbus6") is None:
+        print(
+            "[setup] qdbus isn't installed: KWin-based fullscreen/window management needs it (KDE "
+            "Plasma desktops normally already have it). xdotool alone still covers most of the same "
+            "ground if you're not on KDE Plasma."
+        )
+
+
 def _pip_install(package: str) -> subprocess.CompletedProcess:
     """Runs `pip install --quiet <package>`, retrying with
     --break-system-packages if the first attempt fails specifically
@@ -720,6 +749,7 @@ def run_setup(apk_path: Path, on_stage: Callable[[str, int, int], None] | None =
     print("=== Community-iiSU-PC first-time setup ===\n")
     stage(0)
     require_java()
+    warn_missing_linux_extras()
     ensure_pillow()
     print(f"[setup] using {apk_path.name} as the source APK")
     validate_iisu_apk(apk_path)

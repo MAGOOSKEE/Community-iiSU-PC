@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import socket
 import subprocess
 import urllib.request
@@ -125,6 +126,20 @@ def run_diagnostics(config_data: dict) -> list[tuple[str, str, str]]:
         add("OK" if vdf.is_file() else "WARNING", "Steam library config", str(vdf) if vdf.is_file() else f"Not found: {vdf}")
     else:
         add("WARNING", "Steam installation", "Default Steam installation was not detected")
+
+    if os.name != "nt":
+        if shutil.which("xdotool"):
+            add("OK", "xdotool", "Found, window management/fullscreen is fully available")
+        else:
+            add("WARNING", "xdotool", "Not found, fullscreen/window management will be limited (install it from your package manager)")
+        if shutil.which("flatpak"):
+            add("OK", "flatpak", "Found, the Manager's emulator downloader is available")
+        else:
+            add("WARNING", "flatpak", "Not found, the Manager's emulator downloader needs it (or install PC emulators yourself)")
+        if shutil.which("qdbus") or shutil.which("qdbus6"):
+            add("OK", "qdbus (KWin scripting)", "Found, KWin-based fullscreen is available on KDE Plasma")
+        else:
+            add("WARNING", "qdbus (KWin scripting)", "Not found, xdotool alone still covers most fullscreen/window handling off KDE Plasma")
 
     for label, path in (("Manager log", MANAGER_LOG_PATH), ("Bridge log", BRIDGE_DIR / "bridge_debug.log")):
         if path.is_file():
