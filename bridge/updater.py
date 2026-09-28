@@ -54,6 +54,8 @@ import urllib.request
 import zipfile
 from pathlib import Path
 
+from shared.platform_compat import subprocess_creationflags
+
 PROJECT_ROOT = Path(__file__).parent.parent
 GIT_DIR = PROJECT_ROOT / ".git"
 VERSION_PATH = PROJECT_ROOT / "VERSION"
@@ -67,7 +69,7 @@ def _run_git(args: list[str]) -> subprocess.CompletedProcess | None:
     try:
         return subprocess.run(
             ["git", *args], cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=GIT_TIMEOUT,
-            creationflags=0x08000000,  # CREATE_NO_WINDOW, git.exe is console-subsystem
+            creationflags=subprocess_creationflags(),  # git.exe is console-subsystem on Windows
         )
     except (OSError, subprocess.TimeoutExpired):
         return None

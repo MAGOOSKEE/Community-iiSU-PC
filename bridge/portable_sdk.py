@@ -34,6 +34,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from shared.platform_compat import subprocess_creationflags
+
 PORTABLE_ROOT = Path(__file__).parent / "android-sdk-portable"
 PORTABLE_SDK = PORTABLE_ROOT / "sdk"
 PORTABLE_AVD_HOME = PORTABLE_ROOT / "avd-home"
@@ -58,11 +60,14 @@ _prepend_platform_tools_to_path()
 
 
 def _robocopy(src: Path, dst: Path, exclude_dirs: list[str] | None = None) -> None:
+    # TODO(linux-support): robocopy is Windows-only; this whole function
+    # needs a shutil.copytree/rsync-based path for Linux, not just a
+    # creationflags fix, see the Linux-support integration plan.
     dst.mkdir(parents=True, exist_ok=True)
     args = ["robocopy", str(src), str(dst), "/E", "/R:2", "/W:2", "/NFL", "/NDL", "/NJH", "/NJS"]
     if exclude_dirs:
         args += ["/XD", *exclude_dirs]
-    result = subprocess.run(args, capture_output=True, text=True, creationflags=0x08000000)  # CREATE_NO_WINDOW
+    result = subprocess.run(args, capture_output=True, text=True, creationflags=subprocess_creationflags())
     # robocopy's exit codes 0-7 all mean some degree of success (a bitmask
     # of what it did); 8+ means a real failure.
     if result.returncode >= 8:
