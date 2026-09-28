@@ -1,21 +1,38 @@
 """Updates page: shows the installed Community-iiSU-PC version, lets the
-user check GitHub for a newer one, and install it on demand. Backed by
-updater.py (the same module start_iisu_pc.py's opt-in auto-update uses)
-and diagnostics_service.check_for_updates_detailed() for the read-only
-check. Installing restarts the Manager itself (see main_window.py's
-_restart_after_update) since Python can't hot-swap the code it already
-loaded into this process."""
+user check GitHub for a newer one and install it on demand, controls the
+opt-in "apply on startup" setting, and (separately) checks/installs
+updates to iiSU itself. All of this used to be split across this page
+and the Diagnostics page; it lives here now so Diagnostics stays purely
+read-only checks. Backed by updater.py (the same module start_iisu_pc.py's
+opt-in auto-update uses), diagnostics_service.check_for_updates_detailed()
+for the read-only Community-iiSU-PC check, and iisu_update_service for
+iiSU's own. Installing a Community-iiSU-PC update restarts the Manager
+itself (see main_window.py's restart_after_update) since Python can't
+hot-swap the code it already loaded into this process."""
+
+from pathlib import Path
 
 import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QMessageBox, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QVBoxLayout,
+)
 
 import updater
 from bridge.services import diagnostics_service as svc
+from bridge.services import iisu_update_service as iisu_svc
+from bridge.ui.dialogs.iisu_update_dialog import IisuUpdateDialog
 from bridge.ui.pages.base import PageBase
 from bridge.ui.widgets.card import Card
 from bridge.ui.workers.task_runner import run_in_background
 from shared.qt_theme import Fonts, TEXT_DIM
+from bridge_config import save_config
 
 
 class UpdatesPage(PageBase):
@@ -45,6 +62,23 @@ class UpdatesPage(PageBase):
 
         actions_card = Card()
         actions_layout = QVBoxLayout(actions_card)
+        actions_top = QHBoxLayout()
+        actions_top.addWidget(QLabel("Community-iiSU-PC Updates"))
+        actions_top.addStretch(1)
+        self.auto_updates_check = QCheckBox("Automatically apply updates on startup")
+        self.auto_updates_check.setChecked(bool(window.config_data.get("auto_updates", False)))
+        self.auto_updates_check.toggled.connect(self._set_auto_updates)
+        actions_top.addWidget(self.auto_updates_check)
+        actions_layout.addLayout(actions_top)
+
+        auto_updates_note = QLabel(
+            "Off is recommended for customized installations. When enabled, startup checks apply "
+            "an available update automatically (fast-forwarding a Git checkout, or downloading a "
+            "newer release) and restart Community-iiSU-PC Manager to run it."
+        )
+        auto_updates_note.setWordWrap(True)
+        auto_updates_note.setStyleSheet(f"color: {TEXT_DIM};")
+        actions_layout.addWidget(auto_updates_note)
 
         button_row = QHBoxLayout()
         self.check_button = QPushButton("Check for Updates")
@@ -73,6 +107,54 @@ class UpdatesPage(PageBase):
         note.setWordWrap(True)
         note.setStyleSheet(f"color: {TEXT_DIM};")
         self.body_layout.addWidget(note)
+
+        iisu_card = Card()
+        iisu_layout = QVBoxLayout(iisu_card)
+        iisu_top = QHBoxLayout()
+        iisu_top.addWidget(QLabel("iiSU App Updates"))
+        iisu_top.addStretch(1)
+        iisu_layout.addLayout(iisu_top)
+
+        iisu_note = QLabel(
+            "iiSU itself is a separate, third-party app with no auto-update channel here: checking "
+            "only compares versions against its official GitHub releases, nothing downloads on its own. "
+            "Updating re-patches and reinstalls it on the AVD, this stops iiSU (and any running game) "
+            "if it's currently open."
+        )
+        iisu_note.setWordWrap(True)
+        iisu_note.setStyleSheet(f"color: {TEXT_DIM};")
+        iisu_layout.addWidget(iisu_note)
+
+        iisu_actions = QHBoxLayout()
+        iisu_check_button = QPushButton("Check for iiSU Updates")
+        iisu_check_button.setObjectName("ghost")
+        iisu_check_button.clicked.connect(self._check_for_iisu_update)
+        iisu_actions.addWidget(iisu_check_button)
+        self.iisu_update_now_button = QPushButton("Update iiSU Now")
+        self.iisu_update_now_button.setObjectName("accent")
+        self.iisu_update_now_button.setEnabled(False)
+        self.iisu_update_now_button.clicked.connect(self._update_iisu_now)
+        iisu_actions.addWidget(self.iisu_update_now_button)
+        iisu_manual_button = QPushButton("Use a Different APK...")
+        iisu_manual_button.setObjectName("ghost")
+        iisu_manual_button.setToolTip(
+            "Patch and install any APK you point at directly, bypassing the version check above. "
+            "For an official pre-release shared before it's on the releases page, for example."
+        )
+        iisu_manual_button.clicked.connect(self._pick_manual_iisu_apk)
+        iisu_actions.addWidget(iisu_manual_button)
+        iisu_layout.addLayout(iisu_actions)
+
+        self.iisu_update_status_label = QLabel("Check for iiSU updates hasn't been run yet.")
+        self.iisu_update_status_label.setWordWrap(True)
+        self.iisu_update_status_label.setStyleSheet(f"color: {TEXT_DIM};")
+        iisu_layout.addWidget(self.iisu_update_status_label)
+        self.body_layout.addWidget(iisu_card)
+
+        self._iisu_check_inflight = False
+        self._iisu_check_signals = None
+        self._pending_iisu_download_url = None
+
         self.body_layout.addStretch(1)
 
     def on_shown(self) -> None:
@@ -84,6 +166,22 @@ class UpdatesPage(PageBase):
         so this page reflects it even if the user never opens the tab."""
         self._checked_once = True
         self._apply_check_result(svc.UpdateCheckResult(message, update_available))
+
+    # == Community-iiSU-PC updates ==
+
+    def _set_auto_updates(self, enabled: bool) -> None:
+        self.window.config_data["auto_updates"] = enabled
+        try:
+            save_config(self.window.config_data)
+        except Exception as exc:
+            self.auto_updates_check.blockSignals(True)
+            self.auto_updates_check.setChecked(not enabled)
+            self.auto_updates_check.blockSignals(False)
+            self.window.config_data["auto_updates"] = not enabled
+            QMessageBox.critical(self, "Community-iiSU-PC Updates", f"Couldn't save the update setting:\n\n{exc}")
+            return
+        state = "enabled" if enabled else "disabled"
+        self.status_label.setText(f"Automatic startup updates are {state}.")
 
     def check_now(self) -> None:
         if self._check_inflight:
@@ -149,3 +247,67 @@ class UpdatesPage(PageBase):
         self.check_button.setEnabled(True)
         self.install_button.setEnabled(self._update_available)
         self.status_label.setText(f"Install failed: {message}")
+
+    # == iiSU app updates ==
+
+    def _check_for_iisu_update(self) -> None:
+        if self._iisu_check_inflight:
+            return
+        self._iisu_check_inflight = True
+        self._pending_iisu_download_url = None
+        self.iisu_update_now_button.setEnabled(False)
+        self.iisu_update_status_label.setText("Checking iiSU's releases (read-only)...")
+        self._iisu_check_signals = run_in_background(iisu_svc.check_for_iisu_update, self._apply_iisu_check, self._iisu_check_error)
+
+    def _apply_iisu_check(self, result) -> None:
+        self._iisu_check_inflight = False
+        self.iisu_update_status_label.setText(result.message)
+        if result.update_available and result.latest is not None:
+            self._pending_iisu_download_url = result.latest.download_url
+            self.iisu_update_now_button.setEnabled(True)
+
+    def _iisu_check_error(self, message: str) -> None:
+        self._iisu_check_inflight = False
+        self.iisu_update_status_label.setText(f"iiSU update check failed: {message}")
+
+    def _confirm_iisu_update(self) -> bool:
+        reply = QMessageBox.question(
+            self,
+            "Update iiSU",
+            "This re-patches and reinstalls iiSU on the AVD. It stops iiSU (and any running game) if "
+            "it's currently open, and can take a few minutes. Continue?",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No,
+        )
+        return reply == QMessageBox.Yes
+
+    def _update_iisu_now(self) -> None:
+        if self._pending_iisu_download_url is None:
+            return
+        if not self._confirm_iisu_update():
+            return
+        self._run_iisu_update(self._pending_iisu_download_url)
+
+    def _pick_manual_iisu_apk(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Select an iiSU APK", "", "Android APK (*.apk)")
+        if not path:
+            return
+        if not self._confirm_iisu_update():
+            return
+        # QFileDialog always returns a plain str, same as the download-URL
+        # case; apply_iisu_update() tells them apart by type (str = URL to
+        # fetch, Path = already-local file), so this local path needs
+        # wrapping here or it gets handed to urlopen() instead.
+        self._run_iisu_update(Path(path))
+
+    def _run_iisu_update(self, source) -> None:
+        # A modal dialog with its own live log/step display, rather than
+        # this page's one-line status label, this can run for several
+        # minutes (decompile, patch, rebuild, sign, boot the AVD, install),
+        # worth seeing progress on rather than staring at a static message.
+        dialog = IisuUpdateDialog(source, parent=self.window)
+        dialog.start()
+        dialog.exec()
+        if dialog.succeeded:
+            self._pending_iisu_download_url = None
+        self.iisu_update_status_label.setText(dialog.status_label.text())
