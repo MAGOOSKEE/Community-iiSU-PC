@@ -12,14 +12,17 @@ more general mechanism; this only actually works on KDE Plasma, not
 GNOME or other desktop environments, that's a real, known limitation,
 not something this module tries to hide.
 
-Everything else this module exports (RegisterHotKey-style global hotkey
-capture, the message-pump loop launch_bridge.py's keyboard-hotkey
-handling relies on, precise window enumeration by process) has no Linux
-port yet: it's silently inert here rather than crashing, so importing
-and running on Linux doesn't fail outright, but those specific features
-(keyboard quit hotkey, some window-tracking edge cases) don't yet do
-anything real on Linux. The controller-based quit chord (evdev) is a
-separate mechanism and isn't affected by this gap.
+Everything else this module exports (the RegisterHotKey-style user32
+mock, precise window enumeration by process) is silently inert here
+rather than crashing, so importing and running on Linux doesn't fail
+outright, but those specific low-level pieces don't do anything real on
+Linux. This is NOT a functional gap for the keyboard quit hotkey
+itself, though: launch_bridge.py's _linux_key_watcher() implements that
+feature completely separately, reading raw /dev/input events directly
+rather than going through winapi's user32 dispatch at all (there's no
+Linux equivalent of RegisterHotKey/GetMessageW to dispatch to). The
+controller-based quit chord (evdev, controller_bridge.py) is a third,
+independent mechanism, unaffected by any of this.
 """
 
 import shutil

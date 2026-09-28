@@ -41,6 +41,7 @@ import io
 import json
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -78,7 +79,7 @@ from shared.emulator_defaults import (
     retroarch_core_dll_for_android_core,
     standalone_profile_for_core_dll,
 )
-from shared.platform_compat import detached_popen_kwargs, new_console_creationflags, subprocess_creationflags
+from shared.platform_compat import IS_WINDOWS, detached_popen_kwargs, new_console_creationflags, subprocess_creationflags
 from winapi import (
     SW_MINIMIZE,
     SW_RESTORE,
@@ -271,16 +272,22 @@ def _terminate_native_pid(pid: int) -> bool:
 
 
 def _adb_media_volume_get() -> int | None:
-    """Read Android's MUSIC stream volume (stream 3) without showing a console."""
+    """Read Android's MUSIC stream volume (stream 3) without showing a
+    console. Tries the current `cmd media_session volume` API first,
+    falling back to the older `media volume` command some system image
+    versions still need."""
     try:
         result = subprocess.run(
-            ["adb", "shell", "media", "volume", "--stream", "3", "--get"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            creationflags=subprocess_creationflags(),
-            timeout=3,
+            ["adb", "shell", "cmd", "media_session", "volume", "--stream", "3", "--get"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+            creationflags=subprocess_creationflags(), timeout=3,
         )
+        if result.returncode != 0:
+            result = subprocess.run(
+                ["adb", "shell", "media", "volume", "--stream", "3", "--get"],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
+                creationflags=subprocess_creationflags(), timeout=3,
+            )
     except (OSError, subprocess.SubprocessError):
         return None
     # Typical Android output: "volume is 7 in range [0..15]"
@@ -291,11 +298,16 @@ def _adb_media_volume_get() -> int | None:
 def _adb_media_volume_set(volume: int) -> bool:
     try:
         result = subprocess.run(
+            ["adb", "shell", "cmd", "media_session", "volume", "--stream", "3", "--set", str(max(0, volume))],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=subprocess_creationflags(), timeout=3,
+        )
+        if result.returncode == 0:
+            return True
+        result = subprocess.run(
             ["adb", "shell", "media", "volume", "--stream", "3", "--set", str(max(0, volume))],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            creationflags=subprocess_creationflags(),
-            timeout=3,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=subprocess_creationflags(), timeout=3,
         )
         return result.returncode == 0
     except (OSError, subprocess.SubprocessError):
@@ -379,6 +391,9 @@ EXECUTABLE_SEARCH_MAX_DEPTH = 4
 ROM_SEARCH_MAX_DEPTH = 3
 
 
+_FIND_BY_NAME_SKIP_DIRS = {".git", ".cache", ".var", ".wine", ".steam", "node_modules", "proc", "sys", "dev"}
+
+
 def _find_by_name(root: Path, names: set[str], max_depth: int) -> Path | None:
     """Breadth-first search for any file in `names` under root, capped at
     max_depth directory levels below root (root's direct children are
@@ -409,7 +424,11 @@ def _find_by_name(root: Path, names: set[str], max_depth: int) -> Path | None:
                 if entry.name in names and entry.is_file():
                     return Path(entry.path)
             for entry in entries:
-                if entry.is_dir():
+                # follow_symlinks=False: a symlink loop (real on Linux,
+                # e.g. some Flatpak/Steam library layouts) would otherwise
+                # recurse forever; skip a handful of directory names that
+                # are either huge, irrelevant, or themselves loop-prone.
+                if entry.is_dir(follow_symlinks=False) and entry.name not in _FIND_BY_NAME_SKIP_DIRS:
                     next_level.append(Path(entry.path))
         current = next_level
         depth += 1
@@ -433,6 +452,16 @@ def find_executable(names: list[str], search_roots: list[Path], cache: dict) -> 
     cached = cache["executables"].get(cache_key)
     if cached and Path(cached).is_file():
         return Path(cached)
+
+    # A Flatpak-installed emulator's exported binary is already on PATH,
+    # checking that first is both a real shortcut and the only way
+    # find_executable() would ever notice it at all (search_roots are
+    # plain folders, not APT/Flatpak; shutil.which() handles both).
+    for name in names:
+        which_path = shutil.which(name)
+        if which_path and Path(which_path).is_file():
+            cache["executables"][cache_key] = which_path
+            return Path(which_path)
 
     for root in search_roots:
         if not root.is_dir():
@@ -544,8 +573,13 @@ def find_emulator_for_package(package: str, emulators: dict, rom_filename: str |
 
 def core_dll_from_pre_args(pre_args: list[str]) -> str | None:
     for arg in pre_args:
-        if arg.startswith("cores/") or arg.startswith("cores\\"):
-            return Path(arg).name
+        # config.json's pre_args are always written with "cores/..." (see
+        # shared/emulator_defaults.py); normalize a literal backslash
+        # first since Path.name on Linux's PurePosixPath doesn't treat
+        # "\\" as a separator at all, unlike Path.name on Windows.
+        normalized = arg.replace("\\", "/")
+        if normalized.startswith("cores/"):
+            return normalized.rsplit("/", 1)[-1]
     return None
 
 
@@ -923,6 +957,128 @@ def quit_key_watcher(config: dict) -> None:
             quit_tap_action(f"{label} tapped")
         was_down = is_down
 
+
+def _linux_key_watcher(config: dict) -> None:
+    """Linux equivalent of hotkey_listener()/quit_key_watcher() above:
+    Windows' RegisterHotKey/GetMessageW has no Linux equivalent, so this
+    reads raw key events directly off /dev/input instead (works
+    regardless of desktop environment, X11 or Wayland, unlike a
+    toolkit-level global-hotkey API). Needs read access to /dev/input,
+    normally means being in the `input` group.
+
+    Escape mirrors the configurable keyboard quit hotkey (tap: quit_tap_
+    action, hold 1.2s: full shutdown); Alt+F4/Ctrl+Q/Ctrl+Alt+X are fixed
+    shutdown shortcuts, and Ctrl+Shift+Esc is a fixed quit-tap shortcut,
+    none of these three are configurable the way the Escape binding is
+    (see BUTTON_NAME_TO_BIT/config.json's quit_hotkey for that)."""
+    import glob
+    import select
+    import struct
+
+    event_format = "qqHHi" if struct.calcsize("l") == 8 else "llHHi"
+    event_size = struct.calcsize(event_format)
+
+    EV_KEY = 1
+    KEY_ESC, KEY_LEFTCTRL, KEY_RIGHTCTRL = 1, 29, 97
+    KEY_LEFTALT, KEY_RIGHTALT = 56, 100
+    KEY_LEFTSHIFT, KEY_RIGHTSHIFT = 42, 54
+    KEY_F4, KEY_X, KEY_Q = 62, 45, 16
+    HOLD_SECONDS = 1.2
+
+    print("[bridge] Linux keyboard quit hotkeys active: Esc / Alt+F4 / Ctrl+Q / Ctrl+Alt+X")
+
+    pressed_keys: set[int] = set()
+    esc_down_time: float | None = None
+    last_rescan = 0.0
+    fds: dict[int, str] = {}
+
+    def update_fds() -> None:
+        nonlocal fds
+        current_paths = set(fds.values())
+        candidate_paths = set(glob.glob("/dev/input/by-id/*-kbd") + glob.glob("/dev/input/by-id/*-event-kbd"))
+        if not candidate_paths:
+            candidate_paths = set(glob.glob("/dev/input/event*"))
+        for path in candidate_paths - current_paths:
+            try:
+                fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+                fds[fd] = path
+            except OSError:
+                pass
+        for fd in [fd for fd, path in fds.items() if not os.path.exists(path)]:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            del fds[fd]
+
+    update_fds()
+
+    while True:
+        now = time.time()
+        if now - last_rescan > 5.0:
+            last_rescan = now
+            update_fds()
+
+        if esc_down_time and (now - esc_down_time > HOLD_SECONDS):
+            print("[bridge] Escape held on Linux, shutting down iiSU and the AVD...")
+            esc_down_time = None
+            shutdown_everything()
+            return
+
+        if not fds:
+            time.sleep(0.5)
+            continue
+
+        try:
+            ready, _, _ = select.select(list(fds.keys()), [], [], 0.05)
+        except OSError:
+            time.sleep(0.05)
+            continue
+
+        for fd in ready:
+            try:
+                chunk = os.read(fd, event_size * 32)
+            except OSError:
+                continue
+            if not chunk or len(chunk) < event_size:
+                continue
+            for offset in range(0, len(chunk) - event_size + 1, event_size):
+                _sec, _usec, ev_type, ev_code, ev_value = struct.unpack(event_format, chunk[offset:offset + event_size])
+                if ev_type != EV_KEY:
+                    continue
+
+                if ev_value == 1:  # key down
+                    pressed_keys.add(ev_code)
+                    is_ctrl = KEY_LEFTCTRL in pressed_keys or KEY_RIGHTCTRL in pressed_keys
+                    is_alt = KEY_LEFTALT in pressed_keys or KEY_RIGHTALT in pressed_keys
+                    is_shift = KEY_LEFTSHIFT in pressed_keys or KEY_RIGHTSHIFT in pressed_keys
+
+                    if ev_code == KEY_ESC:
+                        esc_down_time = time.time()
+                    if is_alt and ev_code == KEY_F4:
+                        print("[bridge] Alt+F4 pressed on Linux, shutting down iiSU...")
+                        shutdown_everything()
+                        return
+                    if is_ctrl and ev_code == KEY_Q:
+                        print("[bridge] Ctrl+Q pressed on Linux, shutting down iiSU...")
+                        shutdown_everything()
+                        return
+                    if is_ctrl and is_alt and ev_code == KEY_X:
+                        print("[bridge] Ctrl+Alt+X pressed on Linux, shutting down iiSU...")
+                        shutdown_everything()
+                        return
+                    if is_ctrl and is_shift and ev_code == KEY_ESC:
+                        print("[bridge] Ctrl+Shift+Esc pressed on Linux, closing running game / iiSU...")
+                        quit_tap_action("Ctrl+Shift+Escape pressed")
+
+                elif ev_value == 0:  # key up
+                    pressed_keys.discard(ev_code)
+                    if ev_code == KEY_ESC:
+                        held = (time.time() - esc_down_time) if esc_down_time else 0
+                        esc_down_time = None
+                        if held < HOLD_SECONDS:
+                            debug_log("Escape key released on Linux")
+                            quit_tap_action("Escape tapped")
 
 
 def load_windows_apps() -> dict:
@@ -1550,8 +1706,11 @@ def main() -> None:
         print(f"[bridge] {e}")
         sys.exit(1)
 
-    threading.Thread(target=hotkey_listener, args=(config,), daemon=True).start()
-    threading.Thread(target=quit_key_watcher, args=(config,), daemon=True).start()
+    if IS_WINDOWS:
+        threading.Thread(target=hotkey_listener, args=(config,), daemon=True).start()
+        threading.Thread(target=quit_key_watcher, args=(config,), daemon=True).start()
+    else:
+        threading.Thread(target=_linux_key_watcher, args=(config,), daemon=True).start()
 
     controller_bridge = ControllerBridge(
         is_game_running,
@@ -1559,6 +1718,40 @@ def main() -> None:
         config.get("controller_quit_chord"),
     )
     threading.Thread(target=controller_bridge.run, daemon=True).start()
+
+    def _watch_avd_lifetime() -> None:
+        """Self-terminates the bridge once the AVD it's serving is gone
+        (closed some other way than Stop, e.g. a crash), rather than
+        lingering as an orphaned process nobody can Start again over."""
+        time.sleep(2)
+        while True:
+            time.sleep(2)
+            try:
+                result = subprocess.run(
+                    ["adb", "devices"], capture_output=True, text=True, timeout=3,
+                    creationflags=subprocess_creationflags(),
+                )
+                if not any(line.startswith("emulator-") and "device" in line for line in result.stdout.splitlines()):
+                    debug_log("AVD is no longer running; shutting down bridge")
+                    os._exit(0)
+            except (OSError, subprocess.SubprocessError):
+                pass
+
+    threading.Thread(target=_watch_avd_lifetime, daemon=True).start()
+
+    def _toolbar_watcher() -> None:
+        """Belt-and-suspenders: re-hides the standalone emulator's side
+        toolbar periodically, in case something (a resize, a KWin rule
+        not yet applied) brings it back after the initial hide."""
+        time.sleep(2)
+        while True:
+            try:
+                hide_emulator_toolbar()
+            except Exception:
+                pass
+            time.sleep(2)
+
+    threading.Thread(target=_toolbar_watcher, daemon=True).start()
 
     # Launch iiSU directly rather than leaving the stock Android home
     # screen showing, whether this is a fresh boot or the bridge is being
