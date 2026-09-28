@@ -222,11 +222,3 @@ def check_for_updates_detailed() -> UpdateCheckResult:
             False,
         )
     return UpdateCheckResult(f"Update available: {latest} (installed: {current}).", True)
-
-
-def check_for_updates() -> str:
-    """Read-only: never downloads or installs anything, just reports
-    whether a newer commit/release is available. Kept for the Diagnostics
-    page's existing read-only check; check_for_updates_detailed() is the
-    version the Updates page uses to also gate its Install button."""
-    return check_for_updates_detailed().message
