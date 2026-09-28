@@ -224,21 +224,34 @@ def _find_window(substring: str) -> int | None:
         except ValueError:
             continue
 
-    if shutil.which("qdbus"):
-        try:
-            result = subprocess.run(
-                ["qdbus", "org.kde.KWin", "/KWin", "org.kde.KWin.supportInformation"],
-                capture_output=True, timeout=2,
-            )
-            if result.returncode == 0:
-                return 1
-        except Exception:
-            pass
-
+    # Last resort: confirm a real emulator/qemu process is actually
+    # running (still not a real window handle, callers only ever use
+    # this as a truthy "something's up" signal, never pass it back into
+    # an xdotool/KWin call expecting a real window id). Deliberately NOT
+    # "is qdbus/KWin reachable at all", which earlier just checked qdbus
+    # could talk to KWin and returned a fake id=1 unconditionally,
+    # including when no emulator was running at all.
     try:
-        result = subprocess.run(["pgrep", "-f", "qemu-system|emulator"], capture_output=True, text=True, timeout=1)
-        if result.returncode == 0 and result.stdout.strip():
-            return int(result.stdout.splitlines()[0])
+        result = subprocess.run(
+            ["pgrep", "-f", "qemu-system|[/ ]emulator( |$)"], capture_output=True, text=True, timeout=1,
+        )
+        if result.returncode == 0:
+            for line in result.stdout.splitlines():
+                line = line.strip()
+                if not line.isdigit():
+                    continue
+                pid = int(line)
+                # pgrep -f matches against the FULL command line, including
+                # its own argv (which contains this same search text),
+                # confirmed live on a real system: without this check,
+                # _find_window() always "finds" a window even when nothing
+                # is running at all, since pgrep matches itself every time.
+                try:
+                    if Path(f"/proc/{pid}/comm").read_text().strip() == "pgrep":
+                        continue
+                except OSError:
+                    pass
+                return pid
     except Exception:
         pass
     return None

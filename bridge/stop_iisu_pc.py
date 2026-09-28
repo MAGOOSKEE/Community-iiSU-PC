@@ -80,6 +80,13 @@ def is_avd_running() -> bool:
 
 
 def kill_tree(pid: int) -> None:
+    # Linux path relies on pid being its own process group leader
+    # (start_new_session=True at spawn time, see
+    # shared.platform_compat.detached_popen_kwargs(), used for both
+    # bridge_pid and emulator_pid), os.killpg() on a pid that shares a
+    # process group with this script would kill this script too. Verified
+    # live: correct (kills only the target) with start_new_session=True,
+    # kills the caller as well without it.
     if IS_WINDOWS:
         subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
         return

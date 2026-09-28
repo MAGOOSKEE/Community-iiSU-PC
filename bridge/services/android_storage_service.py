@@ -8,10 +8,14 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 BRIDGE_DIR = Path(__file__).resolve().parent.parent
 PROJECT_ROOT = BRIDGE_DIR.parent
+
+sys.path.insert(0, str(PROJECT_ROOT))
+from shared.platform_compat import IS_WINDOWS
 
 MEDIABRIDGE_INBOX = "/storage/emulated/0/Android/media/com.iisulauncher/iiSULauncher/mediabridge/inbox"
 
@@ -21,7 +25,7 @@ class AndroidStorageServiceError(Exception):
 
 
 def _adb_path() -> str:
-    bundled_adb = BRIDGE_DIR / "android-sdk-portable" / "sdk" / "platform-tools" / "adb.exe"
+    bundled_adb = BRIDGE_DIR / "android-sdk-portable" / "sdk" / "platform-tools" / ("adb.exe" if IS_WINDOWS else "adb")
     return str(bundled_adb) if bundled_adb.is_file() else "adb"
 
 

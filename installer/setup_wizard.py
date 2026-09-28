@@ -103,6 +103,29 @@ def require_java() -> None:
         raise RuntimeError("`keytool` was not found on PATH (it ships with any JDK), check your Java install includes it.")
 
 
+def _pip_install(package: str) -> subprocess.CompletedProcess:
+    """Runs `pip install --quiet <package>`, retrying with
+    --break-system-packages if the first attempt fails specifically
+    because of PEP 668 (Debian/Ubuntu/Fedora and most current distros
+    mark their system Python as "externally managed" and refuse a bare
+    pip install outside a venv). --break-system-packages is pip's own
+    documented escape hatch for exactly this case; safe here since
+    PySide6/Pillow are self-contained wheels, not something that
+    conflicts with apt-managed system packages. Not attempted on the
+    first try since it'd be a silent no-op (and an unnecessary flag) on
+    any system where it isn't needed at all, e.g. Windows or a venv."""
+    result = subprocess.run(
+        [sys.executable, "-m", "pip", "install", "--quiet", package], capture_output=True, text=True,
+        creationflags=CREATE_NO_WINDOW,
+    )
+    if result.returncode != 0 and "externally-managed-environment" in result.stderr:
+        result = subprocess.run(
+            [sys.executable, "-m", "pip", "install", "--quiet", "--break-system-packages", package],
+            capture_output=True, text=True, creationflags=CREATE_NO_WINDOW,
+        )
+    return result
+
+
 def ensure_pillow() -> None:
     """Pillow backs two purely cosmetic features, the desktop shortcut's
     real extracted icon (create_shortcut.py) and the Manager's Credits
@@ -119,10 +142,7 @@ def ensure_pillow() -> None:
         pass
     print("[setup] Pillow isn't installed (used for the desktop shortcut's real icon and the")
     print("[setup] Manager's Credits page avatars), installing it now...")
-    result = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "--quiet", "pillow"], capture_output=True, text=True,
-        creationflags=CREATE_NO_WINDOW,
-    )
+    result = _pip_install("pillow")
     if result.returncode == 0:
         print("[setup] Pillow installed.")
     else:
@@ -141,10 +161,7 @@ def ensure_pyside6() -> None:
     except ImportError:
         pass
     print("[setup] PySide6 isn't installed (this project's GUI toolkit), installing it now...")
-    result = subprocess.run(
-        [sys.executable, "-m", "pip", "install", "--quiet", "PySide6"], capture_output=True, text=True,
-        creationflags=CREATE_NO_WINDOW,
-    )
+    result = _pip_install("PySide6")
     if result.returncode == 0:
         print("[setup] PySide6 installed.")
     else:

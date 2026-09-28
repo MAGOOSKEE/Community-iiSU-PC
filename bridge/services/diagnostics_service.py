@@ -19,7 +19,8 @@ MANAGER_LOG_PATH = BRIDGE_DIR / "manager_debug.log"
 
 
 def _adb_path() -> str:
-    bundled_adb = BRIDGE_DIR / "android-sdk-portable" / "sdk" / "platform-tools" / "adb.exe"
+    adb_name = "adb.exe" if os.name == "nt" else "adb"
+    bundled_adb = BRIDGE_DIR / "android-sdk-portable" / "sdk" / "platform-tools" / adb_name
     return str(bundled_adb) if bundled_adb.is_file() else "adb"
 
 
@@ -46,7 +47,7 @@ def run_diagnostics(config_data: dict) -> list[tuple[str, str, str]]:
 
     config_path = BRIDGE_DIR / "config.json"
     apps_path = BRIDGE_DIR / "windows_apps.json"
-    adb_path = BRIDGE_DIR / "android-sdk-portable" / "sdk" / "platform-tools" / "adb.exe"
+    adb_path = BRIDGE_DIR / "android-sdk-portable" / "sdk" / "platform-tools" / ("adb.exe" if os.name == "nt" else "adb")
 
     add("OK" if BRIDGE_DIR.is_dir() else "ERROR", "Bridge directory", str(BRIDGE_DIR) if BRIDGE_DIR.is_dir() else f"Missing: {BRIDGE_DIR}")
     add("OK" if config_path.is_file() else "ERROR", "Bridge config", str(config_path) if config_path.is_file() else "bridge/config.json is missing")

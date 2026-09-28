@@ -34,7 +34,7 @@ from jre_env import java_exe, java_subprocess_env, keytool_exe
 INSTALLER_DIR = Path(__file__).parent
 
 sys.path.insert(0, str(INSTALLER_DIR.parent))
-from shared.platform_compat import subprocess_creationflags
+from shared.platform_compat import IS_WINDOWS, subprocess_creationflags
 
 sys.path.insert(0, str(INSTALLER_DIR.parent / "bridge"))
 import portable_sdk  # noqa: E402,F401, imported for its import-time PATH fix (adb), not used directly here
@@ -55,11 +55,11 @@ REDIRECTOR_ACTIVITY = "com.iisupc.stub.RedirectorActivity"
 
 
 def zipalign_exe() -> Path:
-    return BUILD_TOOLS_DIR / "zipalign.exe"
+    return BUILD_TOOLS_DIR / ("zipalign.exe" if IS_WINDOWS else "zipalign")
 
 
 def apksigner_bat() -> Path:
-    return BUILD_TOOLS_DIR / "apksigner.bat"
+    return BUILD_TOOLS_DIR / ("apksigner.bat" if IS_WINDOWS else "apksigner")
 
 
 def build_tools_available() -> bool:
