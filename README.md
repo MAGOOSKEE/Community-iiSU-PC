@@ -42,7 +42,7 @@ Double-click the **desktop shortcut**, or run the Manager script for your platfo
 - **Games**: Console (every detected ROM, grouped by multi-disc playlist) and PC (native apps and URI launches, see below).
 - **Emulators**: PC emulator mappings and search folders, test a mapping without starting the AVD, and reinstall iiSU's redirector apps.
 - **Settings**: Display (the Android VM's resolution and DPI), Emulator (named launch profiles for the Android SDK emulator, see below), and Advanced (hotkeys and debugging options such as "Show console windows").
-- **Backup & Diagnostics**: Backup & Restore (back up configuration to a ZIP or restore an earlier one) and Diagnostics (non-destructive checks of the install, Android VM/ADB, bridge, PC apps, Steam integration, logs; also where you check for and apply Community-iiSU-PC and iiSU updates).
+- **Backup & Diagnostics**: Backup & Restore (back up configuration to a ZIP or restore an earlier one, plus a separate backup of iiSU's own artwork and settings from inside the running VM) and Diagnostics (non-destructive checks of the install, Android VM/ADB, bridge, PC apps, Steam integration, logs; also where you check for and apply Community-iiSU-PC and iiSU updates).
 - **Credits**: who built this and how (see below).
 - **Uninstall**: below a divider at the bottom of the sidebar.
 
@@ -125,7 +125,8 @@ bridge/
                             hold each screen, widgets/ shared building blocks like the display-resolution
                             preview and the sidebar's rounded Card
   services/                non-GUI logic behind the GUI pages (diagnostics, backups, PC apps,
-                            Android storage, media library, iiSU update checks, Steam shortcuts)
+                            Android storage, media library, iiSU update checks, Android-side
+                            backups, Steam shortcuts)
   bridge_config.py         shared config.json loader
   apply_display.py         applies config.json's display settings to the AVD
   emulator_profiles.py     named emulator launch profiles (GPU, audio, cores, RAM, flags)
