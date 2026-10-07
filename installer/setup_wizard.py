@@ -29,6 +29,7 @@ from patch_iisu import patch_apk, validate_iisu_apk
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from shared import app_version
+from shared.steam_deck import STEAM_DECK_DISPLAY, is_steam_deck
 from shared.platform_compat import IS_WINDOWS, detached_popen_kwargs, subprocess_creationflags
 from shared.vm_backend import (
     BACKEND_AVD,
@@ -775,7 +776,9 @@ def write_bridge_config(avd_name: str, backend: str = BACKEND_AVD) -> None:
     # Saved so a later login to a different session type can't flip an
     # existing install onto a runtime that has no iiSU in it.
     config["vm_backend"] = backend
-    config.setdefault("display", DEFAULT_DISPLAY)
+    # A Steam Deck's panel is 1280x800; the 1080p default would be scaled
+    # down by the compositor and look soft.
+    config.setdefault("display", dict(STEAM_DECK_DISPLAY if is_steam_deck() else DEFAULT_DISPLAY))
     config.setdefault("emulators", build_emulators_map())
     config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
 
