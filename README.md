@@ -94,6 +94,7 @@ shared/qt_theme.py         the dark/gradient look and fonts shared by every wind
 shared/emulator_defaults.py  curated console -> PC emulator mappings, and which need a redirector
 shared/platform_compat.py  cross-platform subprocess/creationflags helpers (Windows vs Linux)
 shared/vm_backend.py       picks the Android runtime (SDK emulator vs Waydroid), adb-device parsing
+shared/app_version.py      the version banner at the top of every log
 shared/qt_avatars.py       fetches+circle-crops a GitHub avatar for the Credits page
 
 installer/
