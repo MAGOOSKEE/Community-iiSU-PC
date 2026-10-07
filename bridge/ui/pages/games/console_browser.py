@@ -23,8 +23,11 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+import game_overrides
 import sync_library
+from bridge_config import save_config
 from console_names import load_console_lookup
+from bridge.ui.dialogs.game_settings_dialog import GameSettingsDialog
 from bridge.ui.pages.base import PageBase
 from bridge.ui.workers.task_runner import run_in_background
 from shared.qt_theme import RED, TEXT_DIM
@@ -199,7 +202,11 @@ class ConsoleBrowserPage(PageBase):
                 type_label = "Playlist/Sheet"
             else:
                 type_label = "File"
-            item = QTreeWidgetItem([row["name"], row["shortname"], type_label, row["rel"], "Yes" if row["excepted"] else ""])
+            has_override = game_overrides.get_override(self.window.config_data, PurePosixPath(row["rel"]).name) is not None
+            item = QTreeWidgetItem([
+                f"{row['name']}  (custom settings)" if has_override else row["name"],
+                row["shortname"], type_label, row["rel"], "Yes" if row["excepted"] else "",
+            ])
             item.setData(0, Qt.ItemDataRole.UserRole, row["exception_key"])
             if row["hidden_from_iisu"]:
                 dim = QColor(TEXT_DIM)
@@ -241,15 +248,36 @@ class ConsoleBrowserPage(PageBase):
             return
 
         menu = QMenu(self)
+        settings_action = menu.addAction("Game Settings...")
+        settings_action.setEnabled(len(selected) == 1 and not selected[0]["hidden_from_iisu"])
+        menu.addSeparator()
         keep_action = menu.addAction("Keep Discs Separate")
         keep_action.setEnabled(any(row["is_playlist"] for row in selected))
         merge_action = menu.addAction("Merge Discs Together")
         merge_action.setEnabled(any(row["excepted"] for row in selected))
         chosen = menu.exec(self.tree.viewport().mapToGlobal(pos))
-        if chosen == keep_action:
+        if chosen == settings_action:
+            self._edit_game_settings(selected[0])
+        elif chosen == keep_action:
             self._add_exceptions()
         elif chosen == merge_action:
             self._remove_exceptions()
+
+    def _edit_game_settings(self, row: dict) -> None:
+        # The bridge only ever sees the ROM's file name at launch, so that's
+        # the key; it's the last part of the library-relative path.
+        rom_filename = PurePosixPath(row["rel"]).name
+        dialog = GameSettingsDialog(rom_filename, self.window.config_data, parent=self)
+        if dialog.exec() != dialog.DialogCode.Accepted or dialog.result_override is None:
+            return
+        updated = game_overrides.set_override(self.window.config_data, rom_filename, dialog.result_override)
+        try:
+            save_config(updated)
+        except OSError as exc:
+            QMessageBox.critical(self, "Game Settings", f"Couldn't save the setting:\n\n{exc}")
+            return
+        self.window.config_data = updated
+        self._render_filtered()
 
     def _add_exceptions(self) -> None:
         selected = [row for row in self._selected_rows() if row["is_playlist"]]

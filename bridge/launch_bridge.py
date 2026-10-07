@@ -65,6 +65,7 @@ from urllib.parse import unquote
 # every bare import below.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import game_overrides
 import portable_sdk  # noqa: F401; imported for its import-time PATH fix (adb), not used directly here
 from bridge_config import ConfigMissingError, load_config
 from controller_bridge import ControllerBridge
@@ -1566,6 +1567,14 @@ def handle_request(raw_intent: str) -> None:
         log_launch(f"FAILED: no known PC emulator mapped for package '{package}' (rom '{rom_filename}')", notify=True)
         return
 
+    # Per-game settings from the Manager's Console page: another emulator,
+    # extra flags, extra environment, or a command to run first. Applied
+    # after normal routing so a game with no override is untouched.
+    override = game_overrides.get_override(config, rom_filename)
+    if override:
+        profile, override_notes = game_overrides.apply_to_profile(profile, override, config["emulators"], IS_WINDOWS)
+        log_launch(f"OVERRIDE for '{rom_filename}': {', '.join(override_notes) or 'environment/pre-launch only'}")
+
     path_cache = load_path_cache()
 
     executable = find_executable(profile["exe_names"], search_roots, path_cache)
@@ -1602,9 +1611,15 @@ def handle_request(raw_intent: str) -> None:
         else:
             print("[bridge] could not locate iiSU window to hide")
 
+        if override and override["pre_launch"]:
+            pre_ok, pre_message = game_overrides.run_pre_launch(override["pre_launch"], IS_WINDOWS)
+            log_launch(f"{'PRE-LAUNCH' if pre_ok else 'PRE-LAUNCH PROBLEM'}: {pre_message}")
+
         print(f"[bridge] launching: {args}")
         log_launch(f"LAUNCHED: {friendly_emulator_name(executable)}, {args}")
-        process = subprocess.Popen(args, cwd=str(executable.parent))
+        process = subprocess.Popen(
+            args, cwd=str(executable.parent), env=game_overrides.launch_env(override) if override else None
+        )
         with current_process_lock:
             global current_process
             current_process = process

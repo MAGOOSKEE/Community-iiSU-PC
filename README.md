@@ -79,6 +79,10 @@ The Manager's **Games > Console** page lists every game detected in your ROM lib
 
 Both take effect on your next Start, not while Community-iiSU-PC is already running.
 
+### Per-game settings
+
+Right-click a single game and choose **Game Settings...** to change how just that game launches: use a different PC emulator than the console default, add extra command-line flags, set environment variables, or run a program (a display-mode switcher, a helper script) and wait for it before the game starts. Games with settings are marked "(custom settings)" in the list. They're stored in `bridge/config.json` under `game_overrides`, keyed by the ROM's file name, and apply on that game's next launch with no restart. A pre-launch program that fails or runs longer than 30 seconds is logged and the game launches anyway. RetroArch can't be picked as the override emulator because it needs a core chosen per file type.
+
 ## Uninstalling
 
 Open the Manager's **Uninstall** page for a preview of exactly what will be removed and how much space it frees before you confirm. It removes the Android VM and its portable SDK copy, `bridge/config.json`, the signing keystore, and the desktop shortcuts (both the Desktop copy and, on Linux, the app-menu entry under `~/.local/share/applications`). It does not touch your ROM library, your PC emulators, or the iiSU APK you supplied. On Windows it also flags `%LOCALAPPDATA%\Android\Sdk`, which the SDK downloader can end up using; left alone by default since a real Android Studio install would keep its own SDK there too.
@@ -125,6 +129,7 @@ bridge/
   bridge_config.py         shared config.json loader
   apply_display.py         applies config.json's display settings to the AVD
   emulator_profiles.py     named emulator launch profiles (GPU, audio, cores, RAM, flags)
+  game_overrides.py        per-game emulator/flags/environment/pre-launch settings
   waydroid_backend.py      starts/stops/connects Waydroid on Linux Wayland sessions
   start_iisu_pc.py         checks for updates, boots the AVD, starts launch_bridge.py
   updater.py               checks for (and, on a git checkout, applies) updates
