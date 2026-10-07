@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMessageBox,
+    QPlainTextEdit,
     QPushButton,
     QVBoxLayout,
 )
@@ -98,6 +99,15 @@ class UpdatesPage(PageBase):
         self.status_label.setWordWrap(True)
         self.status_label.setStyleSheet(f"color: {TEXT_DIM};")
         actions_layout.addWidget(self.status_label)
+
+        self.notes_label = QLabel("What's new")
+        self.notes_label.setVisible(False)
+        actions_layout.addWidget(self.notes_label)
+        self.notes_text = QPlainTextEdit()
+        self.notes_text.setReadOnly(True)
+        self.notes_text.setFixedHeight(150)
+        self.notes_text.setVisible(False)
+        actions_layout.addWidget(self.notes_text)
         self.body_layout.addWidget(actions_card)
 
         note = QLabel(
@@ -206,6 +216,10 @@ class UpdatesPage(PageBase):
         self._update_available = result.update_available
         self.install_button.setEnabled(result.update_available and not self._install_inflight)
         self.status_label.setText(result.message)
+        notes = result.notes if result.update_available else ""
+        self.notes_text.setPlainText(notes)
+        self.notes_label.setVisible(bool(notes))
+        self.notes_text.setVisible(bool(notes))
 
     def _check_error(self, message: str) -> None:
         self._check_inflight = False

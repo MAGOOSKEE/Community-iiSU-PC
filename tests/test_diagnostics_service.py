@@ -37,5 +37,26 @@ class RunDiagnosticsTests(unittest.TestCase):
         self.assertNotIn("1 Errors", summary_one)
 
 
+class TrimReleaseNotesTests(unittest.TestCase):
+    def test_empty_and_none(self):
+        self.assertEqual(svc.trim_release_notes(None), "")
+        self.assertEqual(svc.trim_release_notes("  \n "), "")
+
+    def test_normalizes_windows_newlines_and_strips(self):
+        self.assertEqual(svc.trim_release_notes("\r\n- one\r\n- two\r\n"), "- one\n- two")
+
+    def test_short_notes_are_untouched(self):
+        self.assertEqual(svc.trim_release_notes("a\nb", limit=10), "a\nb")
+
+    def test_long_notes_are_cut_at_a_line_boundary_with_a_marker(self):
+        notes = "\n".join(f"- line {i}" for i in range(100))
+        trimmed = svc.trim_release_notes(notes, limit=60)
+        self.assertTrue(trimmed.endswith("\n..."))
+        self.assertLessEqual(len(trimmed), 64)
+
+    def test_single_huge_line_is_hard_cut(self):
+        self.assertEqual(svc.trim_release_notes("x" * 50, limit=10), "x" * 10 + "...")
+
+
 if __name__ == "__main__":
     unittest.main()
