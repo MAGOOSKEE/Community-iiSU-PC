@@ -179,6 +179,22 @@ def summarize(results: list[tuple[str, str, str]]) -> str:
 class UpdateCheckResult:
     message: str
     update_available: bool
+    # What's in the update: new commit subjects for a git checkout, the
+    # release notes for a packaged install. Empty when there's nothing to say.
+    notes: str = ""
+
+
+def trim_release_notes(body: str | None, limit: int = 1500) -> str:
+    """Release notes as plain text for a small read-only box: normalized
+    newlines, no leading/trailing blank space, and cut at a line boundary
+    (with a marker) when over limit."""
+    text = (body or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    if len(text) <= limit:
+        return text
+    head = text[:limit]
+    if "\n" not in head:
+        return head + "..."
+    return head.rsplit("\n", 1)[0].rstrip() + "\n..."
 
 
 def check_for_updates_detailed() -> UpdateCheckResult:
@@ -205,7 +221,9 @@ def check_for_updates_detailed() -> UpdateCheckResult:
             return UpdateCheckResult(f"Up to date on {branch}. Nothing was downloaded or installed.", False)
         count = updater._run_git(["rev-list", "--count", f"HEAD..origin/{branch}"])
         behind = count.stdout.strip() if count and count.returncode == 0 else "one or more"
-        return UpdateCheckResult(f"Update available: {behind} new commit(s) on {branch}.", True)
+        log = updater._run_git(["log", "--format=- %s", "-n", "15", f"HEAD..origin/{branch}"])
+        notes = log.stdout.strip() if log and log.returncode == 0 else ""
+        return UpdateCheckResult(f"Update available: {behind} new commit(s) on {branch}.", True, notes)
 
     current = updater.get_installed_version()
     req = urllib.request.Request(
@@ -224,4 +242,4 @@ def check_for_updates_detailed() -> UpdateCheckResult:
             f"Latest release: {latest}. This install has no VERSION file for comparison. Nothing was downloaded or installed.",
             False,
         )
-    return UpdateCheckResult(f"Update available: {latest} (installed: {current}).", True)
+    return UpdateCheckResult(f"Update available: {latest} (installed: {current}).", True, trim_release_notes(releases[0].get("body")))

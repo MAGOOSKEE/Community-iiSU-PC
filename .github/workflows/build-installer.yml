@@ -33,6 +33,28 @@ jobs:
         with:
           python-version: "3.11"
 
+      # The installer's filename and the in-app updater both take their
+      # version from VERSION, not from the tag, so a tag that disagrees with
+      # it would publish an installer named for a different release than
+      # the one users are told they got. Fail before building anything.
+      - name: Check the tag matches VERSION
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        run: |
+          $version = (Get-Content VERSION -TotalCount 1).Trim()
+          if ($version -ne $env:GITHUB_REF_NAME) {
+            Write-Error "Tag $env:GITHUB_REF_NAME does not match VERSION ($version). Bump VERSION or retag."
+            exit 1
+          }
+
+      # Same checks tests.yml runs on pushes, repeated here so a tag can't
+      # publish an installer built from a tree the tests never saw.
+      - name: Compile-check every source file
+        run: python -m compileall -q bridge installer shared tests
+
+      - name: Run unit tests
+        run: python -m unittest discover -s tests
+
       # Temurin 21, matching the JDK this was developed and verified
       # against (see installer/build_jre.py), any recent JDK works,
       # jlink's module detection is mechanical (jdeps against
@@ -74,3 +96,10 @@ jobs:
         with:
           files: dist/installer/*.exe
           generate_release_notes: true
+          # Tags with a suffix (v0.5.3-alpha, v1.0.0-rc1) publish as
+          # pre-releases, matching how every release here has been cut by
+          # hand, and which is what the in-app updater expects (it reads the
+          # full releases list, not /releases/latest, which skips them).
+          # GitHub never labels a pre-release "Latest", so that label
+          # stays on the last plain release by design.
+          prerelease: ${{ contains(github.ref_name, '-') }}
