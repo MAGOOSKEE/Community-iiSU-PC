@@ -18,6 +18,7 @@ from bridge.ui.workers.log_stream import LogStreamRedirector
 from bridge.ui.workers.task_runner import run_in_background
 from shared.emulator_defaults import all_stub_packages
 from shared.platform_compat import subprocess_creationflags
+from shared.vm_backend import vm_device_connected
 from shared.qt_theme import Fonts, SPACING_MD, SPACING_SM
 
 import stub_apk
@@ -85,7 +86,7 @@ class RedirectorInstallDialog(QDialog):
 
     def _run_installs(self, replace_existing: bool) -> None:
         devices = subprocess.run(["adb", "devices"], capture_output=True, text=True, creationflags=subprocess_creationflags())
-        if not any(line.startswith("emulator-") and "device" in line for line in devices.stdout.splitlines()):
+        if not vm_device_connected(devices.stdout):
             self._log_stream.write("No running AVD found, start it from Home first, then try again.\n")
             return
 

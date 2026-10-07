@@ -2,13 +2,14 @@
 Applies config.json's "display" settings (width/height/density) to the AVD's
 actual hardware profile and cold-boots it so the change takes effect.
 
-gpu_mode is deliberately NOT handled here, unlike the others, it's passed
-straight to emulator.exe as a plain -gpu launch flag by start_iisu_pc.py
-instead, since it's read fresh from config.json on every launch, so a
-GPU-backend choice needs no dedicated "cold-boot to apply" cycle of its
-own the way an actual hardware-profile change (resolution) does: it just
-takes effect on the very next normal start, like every other config.json
-setting already does.
+GPU mode (and every other emulator launch option) is deliberately NOT
+handled here, unlike the others: it lives in the active emulator profile
+(see emulator_profiles.py) and is passed straight to emulator.exe as plain
+launch flags by start_iisu_pc.py instead, since it's read fresh from
+config.json on every launch, so it needs no dedicated "cold-boot to apply"
+cycle of its own the way an actual hardware-profile change (resolution)
+does: it just takes effect on the very next normal start, like every other
+config.json setting already does.
 
 This edits hw.lcd.width/height/density directly in the AVD's config.ini
 rather than using the live `adb shell wm size` override: `wm size` only
@@ -40,6 +41,7 @@ import stop_iisu_pc
 import start_iisu_pc
 from bridge_config import ConfigMissingError, load_config
 from portable_sdk import PORTABLE_AVD_HOME
+from shared.vm_backend import BACKEND_WAYDROID, resolve_backend
 
 
 def avd_config_path(avd_name: str) -> Path:
@@ -88,6 +90,15 @@ def main() -> None:
         sys.exit(1)
     avd_name = config["avd_name"]
     display = config["display"]
+
+    if resolve_backend(config) == BACKEND_WAYDROID:
+        # Waydroid has no AVD config.ini; its resolution props are applied
+        # by waydroid_backend.start() on every session start, so restarting
+        # is all it takes.
+        print(f"Restarting Waydroid at {display['width']}x{display['height']} @ {display['density']}dpi...")
+        stop_iisu_pc.main()
+        start_iisu_pc.main()
+        return
 
     config_ini = avd_config_path(avd_name)
     if not config_ini.is_file():

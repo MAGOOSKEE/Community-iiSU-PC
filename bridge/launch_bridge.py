@@ -80,6 +80,7 @@ from shared.emulator_defaults import (
     standalone_profile_for_core_dll,
 )
 from shared.platform_compat import IS_WINDOWS, detached_popen_kwargs, new_console_creationflags, open_uri, subprocess_creationflags
+from shared.vm_backend import BACKEND_WAYDROID, resolve_backend, vm_device_connected
 from winapi import (
     SW_MINIMIZE,
     SW_RESTORE,
@@ -631,6 +632,10 @@ def friendly_emulator_name(executable: Path) -> str:
     return executable.stem
 
 
+def _is_waydroid(config: dict) -> bool:
+    return resolve_backend(config) == BACKEND_WAYDROID
+
+
 def launch_iisu(config: dict) -> None:
     """Starts iiSU's own main activity directly via adb, instead of leaving
     the stock Android home screen showing after boot. iiSU declares both
@@ -660,7 +665,9 @@ def launch_iisu(config: dict) -> None:
     can still be resolving components (confirmed via `dumpsys package`:
     the activity is genuinely registered, `am start` just tried too
     early)."""
-    deadline = time.monotonic() + BOOTANIM_WAIT_SECONDS
+    # Waydroid has already waited for sys.boot_completed in
+    # waydroid_backend.start() and has no boot animation to watch for.
+    deadline = time.monotonic() + (0 if _is_waydroid(config) else BOOTANIM_WAIT_SECONDS)
     while time.monotonic() < deadline:
         result = subprocess.run(
             ["adb", "shell", "getprop", "init.svc.bootanim"], capture_output=True, text=True,
@@ -708,6 +715,16 @@ def show_iisu_window(config: dict) -> None:
     means stripping the title bar/border and resizing to the screen, see
     winapi.make_fullscreen."""
     end_game_handoff()
+    if _is_waydroid(config):
+        # Waydroid draws iiSU as one fullscreen Wayland window and there is
+        # no emulator toolbar or frame to strip. Wayland offers no way to
+        # raise another client's window, but Waydroid's own `show-full-ui`
+        # brings its window back to the front.
+        subprocess.Popen(
+            ["waydroid", "show-full-ui"], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, creationflags=subprocess_creationflags(),
+        )
+        return
     hwnd = find_window_by_title(config["iisu_window_title"])
     if hwnd is None:
         print("[bridge] could not locate iiSU window")
@@ -1731,7 +1748,7 @@ def main() -> None:
                     ["adb", "devices"], capture_output=True, text=True, timeout=3,
                     creationflags=subprocess_creationflags(),
                 )
-                if not any(line.startswith("emulator-") and "device" in line for line in result.stdout.splitlines()):
+                if not vm_device_connected(result.stdout):
                     debug_log("AVD is no longer running; shutting down bridge")
                     os._exit(0)
             except (OSError, subprocess.SubprocessError):
@@ -1744,7 +1761,7 @@ def main() -> None:
         toolbar periodically, in case something (a resize, a KWin rule
         not yet applied) brings it back after the initial hide."""
         time.sleep(2)
-        while True:
+        while not _is_waydroid(config):
             try:
                 hide_emulator_toolbar()
             except Exception:

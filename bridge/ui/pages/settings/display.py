@@ -22,10 +22,10 @@ import winapi
 from bridge.ui.pages.base import PageBase
 from bridge.ui.widgets.display_preview import DisplayPreview
 from shared.qt_theme import TEXT_DIM
+from shared.vm_backend import BACKEND_WAYDROID, resolve_backend
 
 RESOLUTION_PRESETS = ["1280 x 720", "1600 x 900", "1920 x 1080", "2560 x 1440", "3840 x 2160"]
 REFRESH_RATE_PRESETS = ["60", "90", "120", "144", "165", "240"]
-GPU_MODE_PRESETS = ["auto", "host", "swiftshader_indirect", "angle_indirect"]
 
 # This project's known-good baseline profile, auto-detect scales density
 # relative to this, not to any fixed Android density bucket, since the
@@ -82,18 +82,9 @@ class DisplayPage(PageBase):
         refresh_row.addStretch(1)
         grid.addLayout(refresh_row, 3, 1)
 
-        grid.addWidget(QLabel("GPU rendering:"), 4, 0)
-        self.gpu_combo = QComboBox()
-        self.gpu_combo.addItems(GPU_MODE_PRESETS)
-        grid.addWidget(self.gpu_combo, 4, 1)
-
-        gpu_note = QLabel(
-            'Try "host" or "swiftshader_indirect" here if you see screen tearing\n'
-            "or audio cutting out after tabbing away and back, a known Android\n"
-            'Emulator GPU-backend issue on some hardware. "auto" is the default.'
-        )
+        gpu_note = QLabel("GPU rendering and other emulator launch options live on the Emulator page.")
         gpu_note.setStyleSheet(f"color: {TEXT_DIM};")
-        grid.addWidget(gpu_note, 5, 0, 1, 2)
+        grid.addWidget(gpu_note, 4, 0, 1, 2)
 
         settings_col.addLayout(grid)
         redetect_button = QPushButton("Auto-detect from primary monitor")
@@ -123,7 +114,8 @@ class DisplayPage(PageBase):
         self.fullscreen_check = QCheckBox("Maximize the iiSU/AVD window automatically")
         self.body_layout.addWidget(self.fullscreen_check)
 
-        self.body_layout.addWidget(QLabel("AVD name:"))
+        self.avd_name_label = QLabel("AVD name:")
+        self.body_layout.addWidget(self.avd_name_label)
         self.avd_name_edit = QLineEdit()
         self.avd_name_edit.setFixedWidth(200)
         self.body_layout.addWidget(self.avd_name_edit)
@@ -140,9 +132,12 @@ class DisplayPage(PageBase):
         self.height_edit.setText(str(display.get("height", 1080)))
         self.density_edit.setText(str(display.get("density", 240)))
         self.refresh_edit.setText(str(display.get("refresh_rate", 60)))
-        self.gpu_combo.setCurrentText(display.get("gpu_mode", "auto"))
         self.fullscreen_check.setChecked(bool(self.window.config_data.get("iisu_fullscreen", True)))
         self.avd_name_edit.setText(self.window.config_data.get("avd_name", "iisuwin"))
+        # Waydroid has no AVD to name.
+        is_waydroid = resolve_backend(self.window.config_data) == BACKEND_WAYDROID
+        self.avd_name_label.setVisible(not is_waydroid)
+        self.avd_name_edit.setVisible(not is_waydroid)
         self._redraw_preview()
 
     def get_display(self) -> dict | None:
@@ -152,7 +147,9 @@ class DisplayPage(PageBase):
                 "height": int(self.height_edit.text()),
                 "density": int(self.density_edit.text()),
                 "refresh_rate": int(self.refresh_edit.text()),
-                "gpu_mode": self.gpu_combo.currentText(),
+                # Moved to the Emulator page's profiles; carried through
+                # untouched so an older config.json keeps its value.
+                "gpu_mode": self.window.config_data.get("display", {}).get("gpu_mode", "auto"),
             }
         except ValueError:
             return None

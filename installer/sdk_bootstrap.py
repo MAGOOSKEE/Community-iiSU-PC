@@ -51,6 +51,10 @@ SYSTEM_IMAGE = "system-images;android-36;google_apis_playstore;x86_64"
 BUILD_TOOLS_VERSION = "34.0.0"
 BUILD_TOOLS = f"build-tools;{BUILD_TOOLS_VERSION}"
 PACKAGES = ["platform-tools", "emulator", SYSTEM_IMAGE, BUILD_TOOLS]
+# Waydroid is the Android runtime on Wayland, so none of the multi-GB
+# emulator/system-image packages are needed there: just adb to talk to it
+# and build-tools to zipalign/sign the patched APK and the redirector stubs.
+TOOLING_PACKAGES = ["platform-tools", BUILD_TOOLS]
 DEVICE_PROFILE = "medium_phone"
 
 
@@ -76,6 +80,11 @@ def is_sdk_ready() -> bool:
         and zipalign_exe().is_file()
         and apksigner_bat().is_file()
     )
+
+
+def is_tooling_ready() -> bool:
+    adb_name = "adb.exe" if IS_WINDOWS else "adb"
+    return (SDK_ROOT / "platform-tools" / adb_name).is_file() and zipalign_exe().is_file() and apksigner_bat().is_file()
 
 
 def _make_download_reporthook():
@@ -162,8 +171,13 @@ def _run_with_heartbeat(args: list[str], what: str, interval: float = 15.0) -> N
         thread.join()
 
 
-def install_packages() -> None:
-    for package in PACKAGES:
+def install_packages(packages: list[str] | None = None) -> None:
+    """Installs packages (default: the full emulator SDK set). With
+    TOOLING_PACKAGES this is the Waydroid path, so only that subset has to
+    exist afterward."""
+    packages = packages or PACKAGES
+    tooling_only = packages == TOOLING_PACKAGES
+    for package in packages:
         if _package_already_installed(package):
             continue
         print(f"[sdk] installing {package} (this can take a while for the system image, several GB)...")
@@ -177,7 +191,7 @@ def install_packages() -> None:
     if not IS_WINDOWS:
         # Same as install_commandline_tools(): the zip/package extraction
         # doesn't preserve the executable bit on Linux.
-        for tool_dir in ("platform-tools", "emulator"):
+        for tool_dir in ("platform-tools",) if tooling_only else ("platform-tools", "emulator"):
             for path in (SDK_ROOT / tool_dir).glob("*"):
                 if path.is_file():
                     path.chmod(path.stat().st_mode | 0o755)
@@ -185,11 +199,11 @@ def install_packages() -> None:
             if exe.is_file():
                 exe.chmod(exe.stat().st_mode | 0o755)
 
-    if not is_sdk_ready():
+    if not (is_tooling_ready() if tooling_only else is_sdk_ready()):
         raise RuntimeError(
             f"SDK package install did not produce the expected files under {SDK_ROOT}. "
             f"Try running `{android_exe()} --sdk={SDK_ROOT} sdk install <package>` manually "
-            "for each of platform-tools / emulator / " + SYSTEM_IMAGE + " to see the actual error."
+            "for each of " + " / ".join(packages) + " to see the actual error."
         )
 
 
@@ -253,6 +267,13 @@ def rename_avd(old_name: str, new_name: str) -> Path:
     new_ini.write_text(ini_text, encoding="utf-8")
 
     return new_avd_dir
+
+
+def ensure_tooling() -> None:
+    """Waydroid counterpart of ensure_sdk_and_avd(): adb + build-tools only,
+    no emulator, no system image, no AVD."""
+    install_commandline_tools()
+    install_packages(TOOLING_PACKAGES)
 
 
 def ensure_sdk_and_avd(avd_name: str) -> Path:

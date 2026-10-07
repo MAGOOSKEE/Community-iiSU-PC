@@ -221,10 +221,58 @@ class SetupWindow(QMainWindow):
             QTimer.singleShot(1200, self._hide_and_wait_for_onboarding)
         else:
             self._set_status(f"Setup failed: {error}", RED)
-            if isinstance(error, setup_wizard.VirtualizationError):
+            if isinstance(error, setup_wizard.WaydroidMissingError) and error.plan is not None:
+                self._offer_waydroid_install(error)
+            elif isinstance(error, setup_wizard.VirtualizationError):
                 self._offer_hypervisor_fix(str(error))
             else:
                 QMessageBox.critical(self, "Setup failed", f"{error}\n\nSee the log for details.")
+
+    def _offer_waydroid_install(self, error) -> None:
+        """Opt-in only: nothing is installed unless the person says yes here.
+        On success Setup resumes by itself, since (unlike the hypervisor and
+        kvm-group fixes) nothing needs a restart or re-login afterward."""
+        plan = error.plan
+        answer = QMessageBox.question(
+            self, "Install Waydroid?",
+            f"{error}\n\nInstall it now? This runs:\n\n    {plan.display}\n\n"
+            "as administrator (you'll get a permission prompt), then Setup continues.",
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            QMessageBox.critical(self, "Setup failed", f"{error}\n\nSee the log for details.")
+            return
+        self.running = True
+        self.start_button.setEnabled(False)
+        self.browse_button.setEnabled(False)
+        self.progress.setRange(0, 0)
+        self._set_status("Installing Waydroid...")
+        self._install_signals = run_in_background(self._install_waydroid_thread, self._on_waydroid_installed, plan=plan)
+
+    def _install_waydroid_thread(self, plan) -> Exception | None:
+        old_stdout = sys.stdout
+        sys.stdout = self._log_stream
+        error: Exception | None = None
+        try:
+            setup_wizard.install_waydroid(plan)
+        except Exception as e:  # noqa: BLE001; surfaced to the user below, not swallowed
+            error = e
+            print(f"\n[setup] FAILED: {e}\n")
+        finally:
+            sys.stdout = old_stdout
+        return error
+
+    def _on_waydroid_installed(self, error: Exception | None) -> None:
+        self.running = False
+        self.progress.setRange(0, 100)
+        self.browse_button.setEnabled(True)
+        self.start_button.setEnabled(True)
+        if error is not None:
+            self.progress.setValue(0)
+            self._set_status(f"Waydroid install failed: {error}", RED)
+            QMessageBox.critical(self, "Couldn't install Waydroid", f"{error}\n\nSee the log for details.")
+            return
+        self._set_status("Waydroid installed, continuing setup...", GREEN)
+        self._start_setup()
 
     def _offer_hypervisor_fix(self, message: str) -> None:
         """VirtualizationError specifically (not every setup failure) means

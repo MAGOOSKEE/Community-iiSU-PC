@@ -54,6 +54,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from bridge.ui import boot_overlay_qt as boot_overlay
+import emulator_profiles
 import sync_library
 import updater
 import winapi
@@ -68,6 +69,7 @@ from portable_sdk import (
     set_quickboot_autosave,
 )
 from shared.platform_compat import IS_WINDOWS, detached_popen_kwargs, new_console_creationflags, subprocess_creationflags
+from shared.vm_backend import BACKEND_WAYDROID, resolve_backend, vm_device_connected
 
 BRIDGE_SCRIPT = Path(__file__).parent / "launch_bridge.py"
 STATE_PATH = Path(__file__).parent / ".runtime_state.json"
@@ -124,6 +126,8 @@ FINGERPRINT_PART_LABELS = {
     "emulators": "the emulator mappings",
     "usb_passthrough": "the USB passthrough list",
     "roms_dir": "the ROM library",
+    "emulator_profile": "the emulator profile",
+    "vm_backend": "the Android runtime",
 }
 
 
@@ -141,6 +145,8 @@ def compute_boot_fingerprint_parts(config: dict) -> dict[str, str]:
         "emulators": hashlib.sha256(json.dumps(config.get("emulators", {}), sort_keys=True).encode("utf-8")).hexdigest(),
         "usb_passthrough": hashlib.sha256(json.dumps(config.get("usb_passthrough", []), sort_keys=True).encode("utf-8")).hexdigest(),
         "roms_dir": _roms_signature(Path(config.get("roms_dir", ""))),
+        "emulator_profile": emulator_profiles.fingerprint(emulator_profiles.active_profile(config)),
+        "vm_backend": resolve_backend(config),
     }
 
 
@@ -200,9 +206,12 @@ def is_port_open(port: int) -> bool:
 
 
 def is_avd_running(avd_name: str) -> bool:
+    """Whether the Android VM is up and adb can see it. The name is kept
+    (and unused) from when this only ever meant an AVD: a running AVD shows
+    up as "emulator-5554\tdevice", Waydroid as "<ip>:5555\tdevice", and
+    vm_device_connected() accepts both."""
     result = subprocess.run(["adb", "devices"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
-    # A running AVD shows up as "emulator-5554\tdevice" (or similar) once booted.
-    return any(line.startswith("emulator-") and "device" in line for line in result.stdout.splitlines())
+    return vm_device_connected(result.stdout)
 
 
 def find_system_emulator_exe() -> Path | None:
@@ -300,7 +309,7 @@ def _launch_once(
     env: dict,
     usb_passthrough: list[dict],
     debug_console: bool,
-    gpu_mode: str,
+    profile: dict,
     force_cold_boot: bool,
 ) -> int | None:
     """One launch attempt. Logged to a real file, not a pipe, by default: a
@@ -317,25 +326,31 @@ def _launch_once(
     sensibly have both a console showing its output live and that same
     output redirected to a file.
 
-    gpu_mode is passed as a plain -gpu launch flag rather than written
-    into the AVD's config.ini (see apply_display.py, which still handles
-    width/height/density that way): it's read fresh from config.json and
-    handed to emulator.exe here every launch, taking effect immediately
-    rather than needing its own dedicated "cold-boot to apply" cycle the
-    way an actual hardware-profile change (resolution) does.
+    profile is the active emulator profile (see emulator_profiles.py): its
+    GPU backend, acceleration, cores, RAM, audio and extra flags are passed
+    as plain launch flags rather than written into the AVD's config.ini
+    (see apply_display.py, which still handles width/height/density that
+    way), read fresh from config.json and handed to emulator.exe here every
+    launch, taking effect immediately rather than needing a dedicated
+    "cold-boot to apply" cycle the way an actual hardware-profile change
+    (resolution) does. A changed profile does force one anyway, via the
+    boot fingerprint, since the guest sees different hardware.
 
     force_cold_boot decides whether -no-snapshot is passed at all, see
     compute_boot_fingerprint() in start_avd()'s caller. When it's False,
     the AVD attempts a quickboot resume instead of a full cold boot."""
-    args = [str(emulator_exe), "-avd", avd_name, "-gpu", gpu_mode, *build_usb_passthrough_args(usb_passthrough)]
+    # Profile flags include -accel on when KVM is present on Linux (same
+    # reasoning as Setup's own first boot). -no-boot-anim/-fixed-scale are
+    # kept Linux-only rather than changed for existing Windows installs too,
+    # since neither was something Windows behavior needed fixing.
+    args = [
+        str(emulator_exe), "-avd", avd_name,
+        *emulator_profiles.build_emulator_args(profile, IS_WINDOWS, kvm_present=Path("/dev/kvm").exists()),
+        *build_usb_passthrough_args(usb_passthrough),
+    ]
     if not IS_WINDOWS:
-        # -accel on: use KVM when available, same reasoning as Setup's own
-        # first boot. -no-boot-anim/-fixed-scale: kept Linux-only rather
-        # than changed for existing Windows installs too, since neither
-        # was something Windows behavior needed fixing.
-        if Path("/dev/kvm").exists():
-            args += ["-accel", "on"]
         args += ["-no-boot-anim", "-fixed-scale"]
+    print(f"[start] emulator profile: {emulator_profiles.describe(profile)}")
     if force_cold_boot:
         args.append("-no-snapshot")
     if debug_console:
@@ -388,6 +403,7 @@ def start_avd(
     debug_console: bool = False,
     gpu_mode: str = "auto",
     force_cold_boot: bool = True,
+    profile: dict | None = None,
 ) -> int | None:
     """Launches the AVD directly (bypassing the buggy `android emulator
     start` wrapper) and returns its PID once it's confirmed running, so the
@@ -405,7 +421,11 @@ def start_avd(
     doesn't come up in time, later retries within this same call fall
     back to a cold boot rather than repeating a resume that just failed,
     a bad/corrupt snapshot shouldn't be able to permanently block
-    starting at all."""
+    starting at all.
+
+    profile is the active emulator profile; omitted, one is built from
+    gpu_mode alone (how callers worked before profiles existed)."""
+    profile = emulator_profiles.normalize_profile(profile if profile is not None else {"gpu_mode": gpu_mode})
     system_emulator_exe = find_system_emulator_exe()
     if system_emulator_exe is None and not (PORTABLE_SDK / "emulator" / EMULATOR_BIN).is_file():
         print("[start] Could not find an existing Android Studio emulator install to bootstrap the portable copy from.")
@@ -423,6 +443,7 @@ def start_avd(
     avd_dir = PORTABLE_AVD_HOME / f"{avd_name}.avd"
     env = os.environ.copy()
     env.update(env_overrides)
+    env.update(emulator_profiles.parse_env(profile["env"]))
     if not IS_WINDOWS:
         # Qt (the boot overlay, and any Qt-based emulator UI) can pick up
         # a wrong HiDPI scale factor from some Linux desktop environments,
@@ -445,8 +466,12 @@ def start_avd(
         # is what actually decides whether a saved snapshot gets trusted
         # later, this just makes sure one exists for it to trust.
         set_quickboot_autosave(avd_dir, enabled=True)
-        patch_config_ini(avd_dir / "config.ini", force_cold_boot=effective_cold_boot)
-        pid = _launch_once(emulator_exe, avd_name, env, usb_passthrough, debug_console, gpu_mode, effective_cold_boot)
+        patch_config_ini(
+            avd_dir / "config.ini",
+            force_cold_boot=effective_cold_boot,
+            extra_overrides=emulator_profiles.config_ini_overrides(profile),
+        )
+        pid = _launch_once(emulator_exe, avd_name, env, usb_passthrough, debug_console, profile, effective_cold_boot)
         if pid is not None:
             return pid
         diagnose_system_image(avd_dir, env_overrides["ANDROID_SDK_ROOT"])
@@ -504,7 +529,8 @@ def main() -> None:
     # debug_console is on (it would just hide the console windows that
     # setting exists to show).
     show_overlay = (
-        not is_avd_running(avd_name)
+        resolve_backend(config) != BACKEND_WAYDROID
+        and not is_avd_running(avd_name)
         and config.get("show_boot_overlay", True)
         and not debug_console
     )
@@ -515,8 +541,26 @@ def main() -> None:
         boot_overlay.close(overlay)
 
 
+def _start_waydroid(config: dict, state: dict) -> None:
+    """The Waydroid counterpart of the AVD start below: no boot-fingerprint
+    or snapshot handling (a container has neither), just bring the session
+    up and record that this run is Waydroid so Stop knows what to tear down."""
+    import waydroid_backend
+
+    state["backend"] = BACKEND_WAYDROID
+    try:
+        serial = waydroid_backend.start(config)
+    except waydroid_backend.WaydroidError as e:
+        print(f"[start] {e}")
+        sys.exit(1)
+    state["adb_serial"] = serial
+    print("[start] Waydroid is up.")
+
+
 def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: bool, state: dict) -> None:
-    if is_avd_running(avd_name):
+    if resolve_backend(config) == BACKEND_WAYDROID:
+        _start_waydroid(config, state)
+    elif is_avd_running(avd_name):
         print(f"[start] {avd_name} is already running.")
     else:
         new_parts = compute_boot_fingerprint_parts(config)
@@ -527,8 +571,10 @@ def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: b
             print(f"[start] Starting {avd_name} (cold boot: {', '.join(reasons)})...")
         else:
             print(f"[start] Starting {avd_name} (quick resume)...")
-        gpu_mode = config.get("display", {}).get("gpu_mode", "auto")
-        pid = start_avd(avd_name, config.get("usb_passthrough", []), debug_console, gpu_mode, force_cold_boot)
+        pid = start_avd(
+            avd_name, config.get("usb_passthrough", []), debug_console,
+            force_cold_boot=force_cold_boot, profile=emulator_profiles.active_profile(config),
+        )
         if pid is None:
             sys.exit(1)
         state["emulator_pid"] = pid

@@ -59,6 +59,7 @@ NAV_GROUPS: dict[str, list[tuple[str, str]]] = {
     ],
     "settings": [
         ("settings", "Display"),
+        ("emulator", "Emulator"),
         ("advanced", "Advanced"),
     ],
     "backup_diagnostics": [

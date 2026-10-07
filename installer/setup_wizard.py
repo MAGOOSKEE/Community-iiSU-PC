@@ -29,6 +29,14 @@ from patch_iisu import patch_apk, validate_iisu_apk
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from shared.platform_compat import IS_WINDOWS, detached_popen_kwargs, subprocess_creationflags
+from shared.vm_backend import (
+    BACKEND_AVD,
+    BACKEND_WAYDROID,
+    ENV_AUTO_INSTALL,
+    preferred_backend,
+    resolve_backend,
+    vm_device_connected,
+)
 
 INSTALLER_DIR = Path(__file__).parent
 PROJECT_ROOT = INSTALLER_DIR.parent
@@ -49,6 +57,8 @@ DEFAULT_DISPLAY = {"width": 1920, "height": 1080, "density": 240, "refresh_rate"
 # several minutes there instead of well under one.
 AVD_BOOT_TIMEOUT = 420
 MIN_FREE_DISK_GB = 15
+# Waydroid needs only adb + build-tools here, its own image is stored system-wide.
+WAYDROID_MIN_FREE_DISK_GB = 4
 
 SETUP_STAGES = [
     "Checking prerequisites",
@@ -56,6 +66,16 @@ SETUP_STAGES = [
     "Preparing the signing key",
     "Patching iiSU",
     "Copying to the portable AVD",
+    "Installing iiSU and redirector stubs",
+    "Finishing up",
+]
+
+WAYDROID_SETUP_STAGES = [
+    "Checking prerequisites",
+    "Setting up Android tooling",
+    "Preparing the signing key",
+    "Patching iiSU",
+    "Preparing Waydroid",
     "Installing iiSU and redirector stubs",
     "Finishing up",
 ]
@@ -70,7 +90,7 @@ def find_input_apk() -> Path | None:
     return apks[0] if apks else None
 
 
-def check_disk_space() -> None:
+def check_disk_space(min_free_gb: float = MIN_FREE_DISK_GB) -> None:
     """The installer's own SDK copy and the portable copy under bridge/
     briefly coexist before cleanup_installer_sdk() reclaims the first one,
     so peak usage during setup is well above what either copy needs alone,
@@ -78,10 +98,10 @@ def check_disk_space() -> None:
     partway through a multi-GB download."""
     usage = shutil.disk_usage(INSTALLER_DIR)
     free_gb = usage.free / 1e9
-    if free_gb < MIN_FREE_DISK_GB:
+    if free_gb < min_free_gb:
         raise RuntimeError(
             f"Only {free_gb:.1f} GB free on the drive holding {INSTALLER_DIR}, this setup needs "
-            f"about {MIN_FREE_DISK_GB} GB (the SDK/AVD images are briefly duplicated between the "
+            f"about {min_free_gb} GB (the SDK/AVD images are briefly duplicated between the "
             "installer's own copy and the portable copy under bridge/ before cleanup). Free up some "
             "space and run this again."
         )
@@ -255,7 +275,7 @@ def wait_for_avd(avd_name: str, timeout: float, process: subprocess.Popen | None
             return False
         if not connected:
             result = subprocess.run(["adb", "devices"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
-            connected = any(line.startswith("emulator-") and "device" in line for line in result.stdout.splitlines())
+            connected = vm_device_connected(result.stdout)
             if not connected:
                 time.sleep(2)
                 continue
@@ -372,7 +392,59 @@ class VirtualizationError(RuntimeError):
 
 def is_avd_connected() -> bool:
     result = subprocess.run(["adb", "devices"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
-    return any(line.startswith("emulator-") and "device" in line for line in result.stdout.splitlines())
+    return vm_device_connected(result.stdout)
+
+
+def install_iisu_into_running_vm(patched_apk: Path) -> None:
+    """Installs the patched iiSU, makes it the home app, and installs the
+    redirector stubs into whichever Android VM is currently reachable over
+    adb (the AVD or Waydroid, the commands are identical)."""
+    print("[setup] installing the patched iiSU...")
+    result = None
+    for attempt in range(5):
+        result = subprocess.run(
+            ["adb", "install", "-r", str(patched_apk)], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW
+        )
+        if "Can't find service: package" not in result.stdout and "Can't find service: package" not in result.stderr:
+            break
+        # sys.boot_completed=1 (checked above) still isn't an ironclad
+        # guarantee PackageManagerService itself has finished registering
+        # with the service manager, which can still happen on a fresh
+        # AVD's very first cold boot. A few seconds' grace clears it.
+        print(f"[setup] package service not ready yet, retrying ({attempt + 1}/5)...")
+        time.sleep(5)
+
+    if "INSTALL_FAILED_UPDATE_INCOMPATIBLE" in result.stdout or "INSTALL_FAILED_UPDATE_INCOMPATIBLE" in result.stderr:
+        # The AVD already has a copy of iiSU installed signed with a
+        # different key than this run's, e.g. a previous setup attempt
+        # used a different keystore, or this AVD was reused from an
+        # unrelated earlier install. Safe to just replace it: at this
+        # point in first-time setup there's no bridge-managed app state on
+        # it worth preserving.
+        print("[setup] a differently-signed iiSU is already on this AVD, removing it and reinstalling fresh...")
+        subprocess.run(["adb", "uninstall", "com.iisulauncher"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
+        result = subprocess.run(
+            ["adb", "install", str(patched_apk)], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW
+        )
+    if result.returncode != 0 or "Success" not in result.stdout:
+        raise RuntimeError(f"adb install failed:\n{result.stdout}\n{result.stderr}")
+
+    # Sets iiSU's safe-mode launcher activity as the actual Home app and
+    # disables the stock Nexus launcher, so booting the AVD goes straight
+    # to iiSU instead of Android's own launcher/setup wizard.
+    subprocess.run(
+        ["adb", "shell", "cmd", "package", "set-home-activity", "com.iisulauncher/.launcher.StartupSafeModeActivity"],
+        capture_output=True, text=True, creationflags=CREATE_NO_WINDOW,
+    )
+    # Whichever stock launcher this runtime ships (the AVD's Nexus launcher,
+    # Waydroid's LineageOS one); a package that isn't there just errors out.
+    for stock_launcher in ("com.google.android.apps.nexuslauncher", "org.lineageos.trebuchet"):
+        subprocess.run(
+            ["adb", "shell", "pm", "disable-user", stock_launcher],
+            capture_output=True, text=True, creationflags=CREATE_NO_WINDOW,
+        )
+
+    install_default_redirectors()
 
 
 def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_apk: Path) -> None:
@@ -475,49 +547,7 @@ def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_a
             f"{setup_script} resumes from here rather than starting over."
         )
 
-    print("[setup] installing the patched iiSU...")
-    result = None
-    for attempt in range(5):
-        result = subprocess.run(
-            ["adb", "install", "-r", str(patched_apk)], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW
-        )
-        if "Can't find service: package" not in result.stdout and "Can't find service: package" not in result.stderr:
-            break
-        # sys.boot_completed=1 (checked above) still isn't an ironclad
-        # guarantee PackageManagerService itself has finished registering
-        # with the service manager, which can still happen on a fresh
-        # AVD's very first cold boot. A few seconds' grace clears it.
-        print(f"[setup] package service not ready yet, retrying ({attempt + 1}/5)...")
-        time.sleep(5)
-
-    if "INSTALL_FAILED_UPDATE_INCOMPATIBLE" in result.stdout or "INSTALL_FAILED_UPDATE_INCOMPATIBLE" in result.stderr:
-        # The AVD already has a copy of iiSU installed signed with a
-        # different key than this run's, e.g. a previous setup attempt
-        # used a different keystore, or this AVD was reused from an
-        # unrelated earlier install. Safe to just replace it: at this
-        # point in first-time setup there's no bridge-managed app state on
-        # it worth preserving.
-        print("[setup] a differently-signed iiSU is already on this AVD, removing it and reinstalling fresh...")
-        subprocess.run(["adb", "uninstall", "com.iisulauncher"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
-        result = subprocess.run(
-            ["adb", "install", str(patched_apk)], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW
-        )
-    if result.returncode != 0 or "Success" not in result.stdout:
-        raise RuntimeError(f"adb install failed:\n{result.stdout}\n{result.stderr}")
-
-    # Sets iiSU's safe-mode launcher activity as the actual Home app and
-    # disables the stock Nexus launcher, so booting the AVD goes straight
-    # to iiSU instead of Android's own launcher/setup wizard.
-    subprocess.run(
-        ["adb", "shell", "cmd", "package", "set-home-activity", "com.iisulauncher/.launcher.StartupSafeModeActivity"],
-        capture_output=True, text=True, creationflags=CREATE_NO_WINDOW,
-    )
-    subprocess.run(
-        ["adb", "shell", "pm", "disable-user", "com.google.android.apps.nexuslauncher"],
-        capture_output=True, text=True, creationflags=CREATE_NO_WINDOW,
-    )
-
-    install_default_redirectors()
+    install_iisu_into_running_vm(patched_apk)
 
     print("[setup] shutting the AVD back down (Community-iiSU-PC Manager.bat will bring it up properly from here on)...")
     subprocess.run(["adb", "emu", "kill"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
@@ -526,6 +556,79 @@ def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_a
         time.sleep(1)
     if process is not None and process.poll() is None:
         process.terminate()
+
+
+def boot_waydroid_and_install(patched_apk: Path) -> None:
+    """Waydroid counterpart of boot_avd_and_install(): starts the session,
+    installs into it over adb, then stops it again so the first real start
+    from the Manager goes through the same path as every later one."""
+    sys.path.insert(0, str(BRIDGE_DIR))
+    import waydroid_backend
+
+    print("[setup] starting Waydroid to install iiSU (this can take a minute)...")
+    try:
+        waydroid_backend.start({"display": DEFAULT_DISPLAY})
+        install_iisu_into_running_vm(patched_apk)
+    except waydroid_backend.WaydroidError as e:
+        raise RuntimeError(str(e)) from e
+    print("[setup] stopping Waydroid (Community-iiSU-PC Manager.sh will bring it up properly from here on)...")
+    waydroid_backend.stop()
+
+
+class WaydroidMissingError(RuntimeError):
+    """Raised when Waydroid isn't installed. plan is the opt-in distro
+    install this machine could run (None when there's no safe unattended
+    one), so a GUI can offer it as a button the way VirtualizationError
+    offers its fixes."""
+
+    def __init__(self, message: str, plan=None):
+        super().__init__(message)
+        self.plan = plan
+
+
+def install_waydroid(plan) -> None:
+    sys.path.insert(0, str(BRIDGE_DIR))
+    import waydroid_backend
+
+    try:
+        waydroid_backend.install_waydroid(plan)
+    except waydroid_backend.WaydroidError as e:
+        raise RuntimeError(str(e)) from e
+
+
+def ensure_waydroid_ready() -> None:
+    """Setup-time Waydroid preflight. Anything the user has to do with root
+    (install the package, load binder) is a hard stop with the exact
+    command; initializing Waydroid's images is offered through a polkit
+    prompt since it's a one-time download this tool can reasonably drive."""
+    sys.path.insert(0, str(BRIDGE_DIR))
+    import waydroid_backend
+
+    if shutil.which("waydroid") is None:
+        plan = waydroid_backend.install_plan_for_this_machine()
+        if plan is not None and os.environ.get(ENV_AUTO_INSTALL, "").strip() == "1":
+            print(f"[setup] Waydroid isn't installed, installing it ({ENV_AUTO_INSTALL}=1)...")
+            install_waydroid(plan)
+        else:
+            hint = f"It can be installed with `{plan.display}` (as administrator)." if plan else waydroid_backend.manual_install_hint()
+            raise WaydroidMissingError(
+                f"Waydroid isn't installed. {hint} Nothing is installed unless you opt in "
+                f"(the Setup window asks, or set {ENV_AUTO_INSTALL}=1 for a headless run).",
+                plan,
+            )
+
+    problems = waydroid_backend.preflight()
+    needs_init = [p for p in problems if "initialized" in p]
+    blockers = [p for p in problems if p not in needs_init]
+    if blockers:
+        raise RuntimeError("Waydroid isn't ready:\n- " + "\n- ".join(blockers))
+    if needs_init:
+        print("[setup] Waydroid hasn't been initialized yet, downloading its Android image (one time, ~1 GB)...")
+        try:
+            waydroid_backend.initialize()
+        except waydroid_backend.WaydroidError as e:
+            raise RuntimeError(str(e)) from e
+    print("[setup] Waydroid is installed and initialized.")
 
 
 def update_iisu(apk_path: Path, on_stage: Callable[[str, int, int], None] | None = None) -> None:
@@ -556,7 +659,9 @@ def update_iisu(apk_path: Path, on_stage: Callable[[str, int, int], None] | None
     config_path = BRIDGE_DIR / "config.json"
     if not config_path.is_file():
         raise RuntimeError(f"{config_path} not found, run Setup first before updating iiSU.")
-    avd_name = json.loads(config_path.read_text(encoding="utf-8"))["avd_name"]
+    saved_config = json.loads(config_path.read_text(encoding="utf-8"))
+    avd_name = saved_config["avd_name"]
+    backend = resolve_backend(saved_config)
 
     stage(0, "Patching the new APK")
     import stub_apk
@@ -582,17 +687,21 @@ def update_iisu(apk_path: Path, on_stage: Callable[[str, int, int], None] | None
         key_alias=KEY_ALIAS,
     )
 
-    stage(1, "Booting the AVD to install it")
-    sys.path.insert(0, str(BRIDGE_DIR))
-    import portable_sdk
+    if backend == BACKEND_WAYDROID:
+        stage(1, "Starting Waydroid to install it")
+        boot_waydroid_and_install(patched_apk)
+    else:
+        stage(1, "Booting the AVD to install it")
+        sys.path.insert(0, str(BRIDGE_DIR))
+        import portable_sdk
 
-    env_overrides = portable_sdk.ensure_portable_sdk(avd_name, sdk_bootstrap.SDK_ROOT)
-    import os
+        env_overrides = portable_sdk.ensure_portable_sdk(avd_name, sdk_bootstrap.SDK_ROOT)
+        import os
 
-    env = os.environ.copy()
-    env.update(env_overrides)
-    emulator_exe = portable_sdk.PORTABLE_SDK / "emulator" / portable_sdk.EMULATOR_BIN
-    boot_avd_and_install(emulator_exe, avd_name, env, patched_apk)
+        env = os.environ.copy()
+        env.update(env_overrides)
+        emulator_exe = portable_sdk.PORTABLE_SDK / "emulator" / portable_sdk.EMULATOR_BIN
+        boot_avd_and_install(emulator_exe, avd_name, env, patched_apk)
 
     stage(2, "Done")
     print(f"\n=== iiSU updated ({apk_path.name}) ===")
@@ -620,7 +729,7 @@ def cleanup_installer_sdk() -> None:
         print(f"[setup] freed {reclaimed / 1e9:.1f} GB by removing the now-redundant installer-side SDK copy")
 
 
-def write_bridge_config(avd_name: str) -> None:
+def write_bridge_config(avd_name: str, backend: str = BACKEND_AVD) -> None:
     """Creates bridge/config.json from the generic template if this is a
     fresh install (no config yet), or just patches avd_name/display into
     whatever's already there, so re-running this against an existing,
@@ -659,6 +768,9 @@ def write_bridge_config(avd_name: str) -> None:
                 str(home / "Emulation" / "emulators"),
             ]
     config["avd_name"] = avd_name
+    # Saved so a later login to a different session type can't flip an
+    # existing install onto a runtime that has no iiSU in it.
+    config["vm_backend"] = backend
     config.setdefault("display", DEFAULT_DISPLAY)
     config.setdefault("emulators", build_emulators_map())
     config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
@@ -738,28 +850,39 @@ def run_setup(apk_path: Path, on_stage: Callable[[str, int, int], None] | None =
     log, the whole run used to be one indeterminate spinner from start to
     finish, which gives no sense of whether a several-minute step is normal
     progress or actually stuck."""
-    total = len(SETUP_STAGES)
+    backend = preferred_backend()
+    stages = WAYDROID_SETUP_STAGES if backend == BACKEND_WAYDROID else SETUP_STAGES
+    total = len(stages)
 
     def stage(index: int) -> None:
-        label = SETUP_STAGES[index]
+        label = stages[index]
         print(f"\n=== Step {index + 1}/{total}: {label} ===")
         if on_stage:
             on_stage(label, index + 1, total)
 
     print("=== Community-iiSU-PC first-time setup ===\n")
     stage(0)
+    if backend == BACKEND_WAYDROID:
+        print("[setup] Wayland session detected, using Waydroid as the Android runtime (set IISUPC_VM_BACKEND=avd to use the emulator instead).")
     require_java()
     warn_missing_linux_extras()
     ensure_pillow()
     print(f"[setup] using {apk_path.name} as the source APK")
     validate_iisu_apk(apk_path)
-    check_disk_space()
+    check_disk_space(WAYDROID_MIN_FREE_DISK_GB if backend == BACKEND_WAYDROID else MIN_FREE_DISK_GB)
+    if backend == BACKEND_WAYDROID:
+        # Fail on the cheap, fixable-by-the-user problems before any download.
+        ensure_waydroid_ready()
 
     WORK_DIR.mkdir(parents=True, exist_ok=True)
 
     stage(1)
-    avd_dir = sdk_bootstrap.ensure_sdk_and_avd(DEFAULT_AVD_NAME)
-    print(f"[setup] AVD ready: {avd_dir}")
+    if backend == BACKEND_WAYDROID:
+        sdk_bootstrap.ensure_tooling()
+        print("[setup] adb and build-tools ready")
+    else:
+        avd_dir = sdk_bootstrap.ensure_sdk_and_avd(DEFAULT_AVD_NAME)
+        print(f"[setup] AVD ready: {avd_dir}")
 
     stage(2)
     keystore, keystore_password = ensure_keystore()
@@ -781,23 +904,31 @@ def run_setup(apk_path: Path, on_stage: Callable[[str, int, int], None] | None =
     import portable_sdk
 
     stage(4)
-    env_overrides = portable_sdk.ensure_portable_sdk(DEFAULT_AVD_NAME, sdk_bootstrap.SDK_ROOT)
+    if backend == BACKEND_WAYDROID:
+        portable_sdk.ensure_portable_platform_tools(sdk_bootstrap.SDK_ROOT)
+        stage(5)
+        boot_waydroid_and_install(patched_apk)
+    else:
+        env_overrides = portable_sdk.ensure_portable_sdk(DEFAULT_AVD_NAME, sdk_bootstrap.SDK_ROOT)
 
-    import os
-    env = os.environ.copy()
-    env.update(env_overrides)
-    emulator_exe = portable_sdk.PORTABLE_SDK / "emulator" / portable_sdk.EMULATOR_BIN
+        import os
+        env = os.environ.copy()
+        env.update(env_overrides)
+        emulator_exe = portable_sdk.PORTABLE_SDK / "emulator" / portable_sdk.EMULATOR_BIN
 
-    stage(5)
-    boot_avd_and_install(emulator_exe, DEFAULT_AVD_NAME, env, patched_apk)
+        stage(5)
+        boot_avd_and_install(emulator_exe, DEFAULT_AVD_NAME, env, patched_apk)
 
     stage(6)
-    write_bridge_config(DEFAULT_AVD_NAME)
+    write_bridge_config(DEFAULT_AVD_NAME, backend)
     cleanup_installer_sdk()
     create_desktop_shortcut(apk_path)
 
     print("\n=== Setup complete ===")
-    print(f"iiSU is installed and the bridge is configured for AVD '{DEFAULT_AVD_NAME}'.")
+    if backend == BACKEND_WAYDROID:
+        print("iiSU is installed in Waydroid and the bridge is configured for it.")
+    else:
+        print(f"iiSU is installed and the bridge is configured for AVD '{DEFAULT_AVD_NAME}'.")
     print("Run 'Community-iiSU-PC Manager.bat' (one folder up) to configure and launch.")
 
 

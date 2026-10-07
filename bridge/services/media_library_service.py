@@ -1,7 +1,5 @@
-"""Non-UI logic behind the Media Library page, the durable iiDB artwork
-registry and MediaBridge install/verify/rescan calls, extracted ahead of
-porting that page to Qt (this is the largest remaining page, so per the Qt
-rewrite plan its service layer comes first).
+"""Non-UI logic behind the Media Library page: the durable saved-artwork
+registry and MediaBridge install/verify/rescan calls.
 
 ADB plumbing (adb_command/adb_shell_direct/android_remote_quote) is
 reused from android_storage_service rather than duplicated a third time.
@@ -12,18 +10,17 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 import uuid
-from datetime import datetime
 from pathlib import Path
 
 from services.android_storage_service import adb_command, adb_shell_direct, android_remote_quote
 
 BRIDGE_DIR = Path(__file__).resolve().parent.parent
-IIDB_DIR = BRIDGE_DIR / "iidb"
-IIDB_LIBRARY_DIR = IIDB_DIR / "library"
-IIDB_REGISTRY_PATH = IIDB_DIR / "installed_media.json"
-IIDB_API_BASE = "https://iidb.iisu.network/api/v1"
+# The on-disk folder is still named "iidb": renaming it would orphan every
+# existing user's saved library and registry for no functional gain.
+MEDIA_DIR = BRIDGE_DIR / "iidb"
+MEDIA_LIBRARY_DIR = MEDIA_DIR / "library"
+MEDIA_REGISTRY_PATH = MEDIA_DIR / "installed_media.json"
 
 MEDIABRIDGE_INBOX = "/storage/emulated/0/Android/media/com.iisulauncher/iiSULauncher/mediabridge/inbox"
 MEDIABRIDGE_COMPONENT = "com.iisulauncher/com.iisulauncher.pcbridge.MediaBridgeReceiver"
@@ -54,23 +51,23 @@ def media_registry_empty() -> dict:
 
 
 def load_media_registry() -> dict:
-    if not IIDB_REGISTRY_PATH.is_file():
+    if not MEDIA_REGISTRY_PATH.is_file():
         return media_registry_empty()
     try:
-        data = json.loads(IIDB_REGISTRY_PATH.read_text(encoding="utf-8"))
+        data = json.loads(MEDIA_REGISTRY_PATH.read_text(encoding="utf-8"))
         if not isinstance(data, dict) or data.get("version") != 1 or not isinstance(data.get("games"), dict):
             raise ValueError("Unsupported or invalid installed media registry")
         return data
     except Exception as exc:
-        raise MediaLibraryServiceError(f"Couldn't read installed media registry:\n{IIDB_REGISTRY_PATH}\n\n{exc}") from exc
+        raise MediaLibraryServiceError(f"Couldn't read installed media registry:\n{MEDIA_REGISTRY_PATH}\n\n{exc}") from exc
 
 
 def save_media_registry(registry: dict) -> None:
-    IIDB_DIR.mkdir(parents=True, exist_ok=True)
+    MEDIA_DIR.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(registry, indent=2, ensure_ascii=False) + "\n"
-    temp = IIDB_REGISTRY_PATH.with_suffix(".json.tmp")
+    temp = MEDIA_REGISTRY_PATH.with_suffix(".json.tmp")
     temp.write_text(payload, encoding="utf-8")
-    os.replace(temp, IIDB_REGISTRY_PATH)
+    os.replace(temp, MEDIA_REGISTRY_PATH)
 
 
 def media_records(registry: dict):
@@ -102,72 +99,14 @@ def media_remote_filename(asset_type: str, slot: int, extension: str) -> str:
     return f"{base.format(slot=slot)}.{extension}"
 
 
-def register_installed_media(
-    *,
-    tab_id: str,
-    rom_id: str,
-    display_name: str,
-    asset_dir: str,
-    asset_type: str,
-    slot: int,
-    source_file: Path,
-    iidb_asset_id=None,
-    iidb_parent_id=None,
-    remote_filename: str | None = None,
-) -> dict:
-    """Persist one successfully installed asset and a durable Windows copy."""
-    import shutil
-
-    source_file = Path(source_file)
-    if not source_file.is_file():
-        raise FileNotFoundError(source_file)
-    extension = source_file.suffix.lower().lstrip(".") or "bin"
-    safe_tab = re.sub(r"[^A-Za-z0-9._-]+", "_", tab_id).strip("._") or "unknown"
-    safe_game = re.sub(r'[<>:"/\\|?*]+', "_", display_name).strip(" .") or "game"
-    asset_id = str(iidb_asset_id) if iidb_asset_id is not None else sha256_file(source_file)[:16]
-    relative = Path(safe_tab) / safe_game / asset_type / f"{asset_id}.{extension}"
-    durable = IIDB_LIBRARY_DIR / relative
-    durable.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        same_file = source_file.resolve() == durable.resolve()
-    except OSError:
-        same_file = False
-    if not same_file:
-        shutil.copy2(source_file, durable)
-    sha256 = sha256_file(durable)
-
-    registry = load_media_registry()
-    key = media_game_key(tab_id, rom_id)
-    game = registry["games"].setdefault(
-        key, {"tab_id": tab_id, "rom_id": rom_id, "display_name": display_name, "asset_dir": asset_dir, "assets": []}
-    )
-    game.update({"tab_id": tab_id, "rom_id": rom_id, "display_name": display_name, "asset_dir": asset_dir})
-    assets = game.setdefault("assets", [])
-    assets[:] = [a for a in assets if not (a.get("asset_type") == asset_type and int(a.get("slot", 1)) == int(slot))]
-    record = {
-        "iidb_asset_id": iidb_asset_id,
-        "iidb_parent_id": iidb_parent_id,
-        "asset_type": asset_type,
-        "slot": int(slot),
-        "file": relative.as_posix(),
-        "sha256": sha256,
-        "extension": extension,
-        "remote_filename": remote_filename or media_remote_filename(asset_type, int(slot), extension),
-        "installed_at": datetime.now().isoformat(timespec="seconds"),
-    }
-    assets.append(record)
-    save_media_registry(registry)
-    return record
-
-
 def media_local_file(asset: dict) -> Path:
-    # Registry v1 paths are relative to iidb/library. Tolerate the early
+    # Registry v1 paths are relative to the library folder. Tolerate the early
     # bootstrap form that accidentally included a leading "library/".
     relative = Path(str(asset.get("file", "")))
     parts = relative.parts
     if parts and parts[0].lower() == "library":
         relative = Path(*parts[1:])
-    return IIDB_LIBRARY_DIR / relative
+    return MEDIA_LIBRARY_DIR / relative
 
 
 def media_asset_remote_path(game: dict, asset: dict) -> str:

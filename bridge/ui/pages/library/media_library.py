@@ -3,11 +3,9 @@ its core Check/Restore/preview flow. Backed by
 bridge/services/media_library_service.py and the native soundbite player
 in bridge/ui/audio/winmm_playback.py.
 
-Deliberately not carried over in this pass: the iiDB Browser (a whole
-separate search/cart/install sub-window, ~1300 lines in the original),
-"Browse iiDB" is present but reports it isn't ported yet rather than being
-silently missing. Everything that manages ALREADY-saved media (the actual
-point of this page day to day: Check/Restore/preview) is real.
+This only manages media that was already saved to the local library
+(Check/Restore/preview). Browsing and installing new artwork is iiSU's own
+job now, so there is no in-Manager catalog browser.
 
 Connection status is checked when this page becomes visible rather than
 on Home's continuous 2-second poll regardless of which page is showing,
@@ -35,7 +33,6 @@ from PySide6.QtWidgets import (
 from bridge.services import android_storage_service
 from bridge.services import media_library_service as svc
 from bridge.ui.audio.winmm_playback import WinmmPlaybackError, WinmmPlayer, format_ms
-from bridge.ui.dialogs.iidb_browser_dialog import IidbBrowserDialog
 from bridge.ui.pages.base import PageBase
 from bridge.ui.widgets.card import Card
 from bridge.ui.widgets.status_dot import StatusDot
@@ -53,9 +50,8 @@ class MediaLibraryPage(PageBase):
         self._tree_assets: dict[str, tuple[dict, dict]] = {}
         self._selected: tuple[dict, dict] | None = None
         self._player = WinmmPlayer()
-        self._iidb_window: IidbBrowserDialog | None = None
 
-        self.add_header("Media Library", "Durable iiDB artwork history and one-click recovery after iiSU rescans.")
+        self.add_header("Media Library", "Saved artwork history and one-click recovery after iiSU rescans.")
 
         connection_row = QWidget()
         connection_layout = QHBoxLayout(connection_row)
@@ -99,10 +95,6 @@ class MediaLibraryPage(PageBase):
         open_local_button.clicked.connect(self._open_local_library)
         button_row_layout.addWidget(open_local_button)
         button_row_layout.addStretch(1)
-        browse_iidb_button = QPushButton("Browse iiDB")
-        browse_iidb_button.setObjectName("accent")
-        browse_iidb_button.clicked.connect(self._open_iidb_browser)
-        button_row_layout.addWidget(browse_iidb_button)
         self.body_layout.addWidget(button_row)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -392,8 +384,8 @@ class MediaLibraryPage(PageBase):
     # == Actions ==
 
     def _open_local_library(self) -> None:
-        svc.IIDB_LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
-        open_uri(str(svc.IIDB_LIBRARY_DIR))
+        svc.MEDIA_LIBRARY_DIR.mkdir(parents=True, exist_ok=True)
+        open_uri(str(svc.MEDIA_LIBRARY_DIR))
 
     def _check_media(self) -> None:
         ready, detail = android_storage_service.adb_device_ready()
@@ -477,18 +469,3 @@ class MediaLibraryPage(PageBase):
             QMessageBox.warning(self, "Media Restore", "Some assets could not be restored:\n\n" + "\n".join(failures[:10]))
         else:
             QMessageBox.information(self, "Media Restore", f"Restore complete.\n\nRestored: {restored}\nAlready correct: {skipped}")
-
-    def _open_iidb_browser(self) -> None:
-        if self._iidb_window is not None:
-            self._iidb_window.show()
-            self._iidb_window.raise_()
-            self._iidb_window.activateWindow()
-            return
-        window = IidbBrowserDialog(self)
-        window.finished.connect(self._on_iidb_browser_closed)
-        window.show()
-        self._iidb_window = window
-
-    def _on_iidb_browser_closed(self, _result=None) -> None:
-        self._iidb_window = None
-        self.refresh()

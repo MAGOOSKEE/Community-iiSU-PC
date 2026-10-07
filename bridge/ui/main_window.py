@@ -44,12 +44,14 @@ from bridge.ui.pages.library.media_library import MediaLibraryPage
 from bridge.ui.pages.library.roms import RomsPage
 from bridge.ui.pages.settings.advanced import AdvancedPage
 from bridge.ui.pages.settings.display import DisplayPage
+from bridge.ui.pages.settings.emulator import EmulatorPage
 from bridge.ui.pages.uninstall import UninstallPage
 from bridge.ui.pages.updates import UpdatesPage
 from bridge.ui.widgets.transitions import fade_in
 from bridge.ui.workers.task_runner import run_in_background
 from bridge.ui.sidebar import DANGER_NAV_ITEMS, LOCKED_NAV, NAV_GROUPS, NAV_ITEMS, Sidebar
 from bridge_config import CONFIG_PATH, load_config, save_config
+import emulator_profiles
 from shared.platform_compat import detached_popen_kwargs
 from shared.qt_theme import Fonts, GREEN, PANEL_BG_HOVER, RED, TEXT_DIM
 
@@ -176,6 +178,8 @@ class ManagerWindow(QMainWindow):
         self.register_subpage("games_console", ConsoleBrowserPage(self))
         self.display_page = DisplayPage(self)
         self.register_subpage("settings", self.display_page)
+        self.emulator_page = EmulatorPage(self)
+        self.register_subpage("emulator", self.emulator_page)
         self.advanced_page = AdvancedPage(self)
         self.register_subpage("advanced", self.advanced_page)
         self.register_subpage("backup_restore", BackupRestorePage(self))
@@ -185,9 +189,10 @@ class ManagerWindow(QMainWindow):
             self.roms_page.reload_from_config,
             self.emulators_page.reload_from_config,
             self.display_page.reload_from_config,
+            self.emulator_page.reload_from_config,
             self.advanced_page.reload_from_config,
         ]
-        for key in ("roms", "emulators", "settings", "advanced"):
+        for key in ("roms", "emulators", "settings", "emulator", "advanced"):
             self.dirty_checkers[key] = self._is_settings_dirty
             self.save_handlers[key] = self._save_settings
 
@@ -224,6 +229,11 @@ class ManagerWindow(QMainWindow):
         if CONFIG_PATH.is_file():
             try:
                 self.config_data = load_config()
+                # In-memory only until Save: gives every install an explicit
+                # profiles block (synthesized from the old display.gpu_mode),
+                # so the Emulator page isn't "dirty" the moment it opens.
+                active, profiles = emulator_profiles.get_profiles(self.config_data)
+                self.config_data = emulator_profiles.with_profiles(self.config_data, active, profiles)
                 self.configured = True
                 self._config_mtime = CONFIG_PATH.stat().st_mtime
                 return
@@ -284,6 +294,9 @@ class ManagerWindow(QMainWindow):
             settings["show_boot_overlay"] = self.advanced_page.get_show_boot_overlay()
             settings["debug_show_console_windows"] = self.advanced_page.get_debug_show_console_windows()
 
+        if hasattr(self, "emulator_page"):
+            settings["emulator_profiles"] = self.emulator_page.get_emulator_profiles()
+
         if hasattr(self, "display_page"):
             display = self.display_page.get_display()
             if display is None:
@@ -298,7 +311,7 @@ class ManagerWindow(QMainWindow):
         return settings
 
     def _is_settings_dirty(self) -> bool:
-        if not any(hasattr(self, name) for name in ("roms_page", "emulators_page", "display_page", "advanced_page")):
+        if not any(hasattr(self, name) for name in ("roms_page", "emulators_page", "display_page", "emulator_page", "advanced_page")):
             return False
         current = self._gather_settings(silent=True)
         if current is None:
