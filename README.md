@@ -52,6 +52,12 @@ On startup, Community-iiSU-PC re-syncs your ROM library into the VM automaticall
 
 Settings > **Emulator** holds named launch configurations for the Android SDK emulator: GPU rendering (`auto`, `host`, `swiftshader_indirect`, `angle_indirect`), hardware acceleration, CPU cores, RAM, audio (default, speakers only, or no audio), extra emulator flags, and environment variables. Pick a profile, Save, Stop, Open to test it; a profile change cold-boots the VM once. Presets cover the usual suspects, and Duplicate lets you A/B one change at a time. To chase down audio problems: duplicate your profile, try "Speakers only", then "No audio at all" to confirm audio is the cause, then try other GPU modes. Profiles only change launch options on the AVD that Setup created, not which Android system image it runs. (They don't apply on Waydroid.)
 
+### Steam and Steam Deck
+
+Settings > Advanced > **Add to Steam** adds Community-iiSU-PC to Steam as a non-Steam game (on Windows and Linux, native or Flatpak Steam), so you can start it from Steam's library, Big Picture, or a Steam Deck's Game Mode. Close Steam first: it rewrites its shortcut list when it exits and would undo the change, so the button refuses while Steam is running. The previous list is kept as a `.bak` next to it, and **Remove from Steam** undoes it. The shortcut starts the VM and bridge and then ends, so Steam shows it as stopped while iiSU keeps running.
+
+On a Steam Deck, Setup starts with a 1280x800 display profile, and Game Mode (gamescope) counts as a Wayland session, so Waydroid is chosen. Both are untested on real Deck hardware.
+
 A fullscreen overlay covers the AVD boot and the emulator hand-off, showing what's happening ("Booting Community-iiSU-PC...", "Waiting on DuckStation...") instead of raw desktop. It's off while the debug console checkbox is on.
 
 By default, **Escape** controls game quitting and shutdown: tap it while a game is running to force-quit the game and return to iiSU, or tap it while already in iiSU to shut down Community-iiSU-PC. On Linux, Alt+F4, Ctrl+Q, and Ctrl+Alt+X also force a full shutdown, and Ctrl+Shift+Esc mirrors an Escape tap; these four aren't currently rebindable (Escape itself is, in Settings > Advanced, on both platforms). Pressing **Select+Start** together on a controller does the same thing on either platform, and the chord is remappable to any combination of buttons.
@@ -94,6 +100,7 @@ shared/qt_theme.py         the dark/gradient look and fonts shared by every wind
 shared/emulator_defaults.py  curated console -> PC emulator mappings, and which need a redirector
 shared/platform_compat.py  cross-platform subprocess/creationflags helpers (Windows vs Linux)
 shared/vm_backend.py       picks the Android runtime (SDK emulator vs Waydroid), adb-device parsing
+shared/steam_deck.py       Steam Deck and gamescope (Game Mode) detection
 shared/app_version.py      the version banner at the top of every log
 shared/qt_avatars.py       fetches+circle-crops a GitHub avatar for the Credits page
 
@@ -114,7 +121,7 @@ bridge/
                             hold each screen, widgets/ shared building blocks like the display-resolution
                             preview and the sidebar's rounded Card
   services/                non-GUI logic behind the GUI pages (diagnostics, backups, PC apps,
-                            Android storage, media library, iiSU update checks)
+                            Android storage, media library, iiSU update checks, Steam shortcuts)
   bridge_config.py         shared config.json loader
   apply_display.py         applies config.json's display settings to the AVD
   emulator_profiles.py     named emulator launch profiles (GPU, audio, cores, RAM, flags)

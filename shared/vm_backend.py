@@ -27,6 +27,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 from shared.platform_compat import IS_WINDOWS
+from shared.steam_deck import is_gamescope_session
 
 BACKEND_AVD = "avd"
 BACKEND_WAYDROID = "waydroid"
@@ -43,7 +44,13 @@ def is_wayland_session(env: Mapping[str, str] | None = None, is_windows: bool = 
     if is_windows:
         return False
     env = os.environ if env is None else env
-    return env.get("XDG_SESSION_TYPE", "").strip().lower() == "wayland" or bool(env.get("WAYLAND_DISPLAY", "").strip())
+    return (
+        env.get("XDG_SESSION_TYPE", "").strip().lower() == "wayland"
+        or bool(env.get("WAYLAND_DISPLAY", "").strip())
+        # Steam's Game Mode runs gamescope, itself a Wayland compositor,
+        # and doesn't always set the session variables above.
+        or is_gamescope_session(env)
+    )
 
 
 def waydroid_installed(which: Callable[[str], str | None] = shutil.which) -> bool:

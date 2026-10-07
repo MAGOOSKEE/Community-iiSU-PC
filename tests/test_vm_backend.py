@@ -21,6 +21,11 @@ class PreferredBackendTests(unittest.TestCase):
     def test_wayland_display_alone_picks_waydroid(self):
         self.assertEqual(vb.preferred_backend({"WAYLAND_DISPLAY": "wayland-1"}, is_windows=False), vb.BACKEND_WAYDROID)
 
+    def test_steam_game_mode_counts_as_wayland(self):
+        self.assertTrue(vb.is_wayland_session({"XDG_CURRENT_DESKTOP": "gamescope"}, is_windows=False))
+        self.assertTrue(vb.is_wayland_session({"GAMESCOPE_WAYLAND_DISPLAY": "gamescope-0"}, is_windows=False))
+        self.assertEqual(vb.preferred_backend({"XDG_CURRENT_DESKTOP": "gamescope"}, is_windows=False), vb.BACKEND_WAYDROID)
+
     def test_x11_picks_avd(self):
         self.assertEqual(vb.preferred_backend({"XDG_SESSION_TYPE": "x11", "DISPLAY": ":0"}, is_windows=False), vb.BACKEND_AVD)
 
