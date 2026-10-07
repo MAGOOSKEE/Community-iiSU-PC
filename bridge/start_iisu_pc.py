@@ -68,6 +68,7 @@ from portable_sdk import (
     patch_config_ini,
     set_quickboot_autosave,
 )
+from shared import app_version
 from shared.platform_compat import IS_WINDOWS, detached_popen_kwargs, new_console_creationflags, subprocess_creationflags
 from shared.vm_backend import BACKEND_WAYDROID, resolve_backend, vm_device_connected
 
@@ -361,6 +362,9 @@ def _launch_once(
         )
     else:
         log_file = open(EMULATOR_LOG_PATH, "wb")
+        # The emulator inherits this handle and appends after the banner.
+        log_file.write((app_version.banner("emulator") + "\n").encode("utf-8"))
+        log_file.flush()
         try:
             process = subprocess.Popen(
                 args,
@@ -505,8 +509,10 @@ def main() -> None:
     try:
         config = load_config()
     except ConfigMissingError as e:
+        print(f"[start] {app_version.banner('start')}")
         print(f"[start] {e}")
         sys.exit(1)
+    print(f"[start] {app_version.banner('start', f'backend {resolve_backend(config)}')}")
 
     # Automatic project updates are opt-in. Customized installations can
     # therefore start safely without upstream files silently replacing local

@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from services import windows_apps_service
+from shared import app_version
 
 BRIDGE_DIR = Path(__file__).resolve().parent.parent
 MANAGER_LOG_PATH = BRIDGE_DIR / "manager_debug.log"
@@ -48,6 +49,8 @@ def run_diagnostics(config_data: dict) -> list[tuple[str, str, str]]:
 
     def add(status: str, check: str, details: str) -> None:
         results.append((status, check, details))
+
+    add("OK", "Version", app_version.banner("diagnostics"))
 
     config_path = BRIDGE_DIR / "config.json"
     apps_path = BRIDGE_DIR / "windows_apps.json"

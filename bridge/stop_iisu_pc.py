@@ -42,6 +42,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from portable_sdk import PORTABLE_AVD_HOME
+from shared import app_version
 from shared.platform_compat import IS_WINDOWS, subprocess_creationflags
 from shared.vm_backend import BACKEND_WAYDROID, resolve_backend, vm_device_connected
 
@@ -198,6 +199,7 @@ def main() -> None:
     # What actually ran last time wins over what config would pick now, so
     # a session started under one backend is always stopped by that one.
     backend = state.get("backend") or resolve_backend(load_config_safely())
+    print(f"[stop] {app_version.banner('stop', f'backend {backend}')}")
 
     if backend == BACKEND_WAYDROID:
         stop_waydroid()

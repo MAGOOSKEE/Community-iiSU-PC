@@ -39,6 +39,7 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+from shared import app_version
 from shared.platform_compat import detached_popen_kwargs, subprocess_creationflags
 from shared.vm_backend import (
     WAYDROID_ADB_PORT,
@@ -189,6 +190,8 @@ def apply_display(display: dict) -> None:
 
 def _start_session_process() -> subprocess.Popen:
     log_file = open(WAYDROID_LOG_PATH, "wb")
+    log_file.write((app_version.banner("waydroid") + "\n").encode("utf-8"))
+    log_file.flush()
     try:
         return subprocess.Popen(
             ["waydroid", "session", "start"],
