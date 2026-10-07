@@ -28,6 +28,7 @@ from jre_env import java_exe, java_subprocess_env, keytool_exe
 from patch_iisu import patch_apk, validate_iisu_apk
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from shared import app_version
 from shared.platform_compat import IS_WINDOWS, detached_popen_kwargs, subprocess_creationflags
 from shared.vm_backend import (
     BACKEND_AVD,
@@ -463,6 +464,8 @@ def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_a
         import portable_sdk
         portable_sdk.set_quickboot_autosave(portable_sdk.PORTABLE_AVD_HOME / f"{avd_name}.avd", enabled=False)
         log_file = open(log_path, "wb")
+        log_file.write((app_version.banner("setup first boot") + "\n").encode("utf-8"))
+        log_file.flush()
         try:
             process = subprocess.Popen(
                 # -no-window: nothing here needs the user to see or touch
@@ -653,6 +656,7 @@ def update_iisu(apk_path: Path, on_stage: Callable[[str, int, int], None] | None
         if on_stage:
             on_stage(label, index + 1, total)
 
+    print(app_version.banner("iiSU update"))
     print(f"[update] using {apk_path.name} as the source APK")
     validate_iisu_apk(apk_path)
 
@@ -860,6 +864,7 @@ def run_setup(apk_path: Path, on_stage: Callable[[str, int, int], None] | None =
         if on_stage:
             on_stage(label, index + 1, total)
 
+    print(app_version.banner("setup", f"backend {backend}"))
     print("=== Community-iiSU-PC first-time setup ===\n")
     stage(0)
     if backend == BACKEND_WAYDROID:

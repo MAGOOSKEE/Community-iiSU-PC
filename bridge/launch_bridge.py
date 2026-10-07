@@ -74,6 +74,7 @@ from controller_bridge import ControllerBridge
 # subprocess with cwd set to this directory, not the project root.
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from bridge.ui import boot_overlay_qt as boot_overlay
+from shared import app_version
 from shared.emulator_defaults import (
     all_emulator_exe_names,
     retroarch_core_dll_for_android_core,
@@ -1716,12 +1717,16 @@ def main() -> None:
     debug_log(
         f"launch_bridge starting; PID={os.getpid()}; Python={sys.version.split()[0]}"
     )
+    version_banner = app_version.banner("launch_bridge")
+    debug_log(version_banner)
+    print(f"[bridge] {version_banner}")
 
     try:
         config = load_config()
     except ConfigMissingError as e:
         print(f"[bridge] {e}")
         sys.exit(1)
+    log_launch(f"BRIDGE STARTED: {version_banner}")
 
     if IS_WINDOWS:
         threading.Thread(target=hotkey_listener, args=(config,), daemon=True).start()
