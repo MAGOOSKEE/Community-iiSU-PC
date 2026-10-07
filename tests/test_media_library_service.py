@@ -18,13 +18,13 @@ from services import media_library_service as svc
 class RegistryTests(unittest.TestCase):
     def test_load_missing_registry_returns_empty(self):
         with tempfile.TemporaryDirectory() as tmp:
-            with patch.object(svc, "IIDB_REGISTRY_PATH", Path(tmp) / "installed_media.json"):
+            with patch.object(svc, "MEDIA_REGISTRY_PATH", Path(tmp) / "installed_media.json"):
                 self.assertEqual(svc.load_media_registry(), svc.media_registry_empty())
 
     def test_save_then_load_round_trips(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "installed_media.json"
-            with patch.object(svc, "IIDB_REGISTRY_PATH", path), patch.object(svc, "IIDB_DIR", Path(tmp)):
+            with patch.object(svc, "MEDIA_REGISTRY_PATH", path), patch.object(svc, "MEDIA_DIR", Path(tmp)):
                 registry = {"version": 1, "games": {"a|b": {"assets": []}}}
                 svc.save_media_registry(registry)
                 self.assertEqual(svc.load_media_registry(), registry)
@@ -33,7 +33,7 @@ class RegistryTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "installed_media.json"
             path.write_text('{"version": 2, "games": {}}', encoding="utf-8")
-            with patch.object(svc, "IIDB_REGISTRY_PATH", path):
+            with patch.object(svc, "MEDIA_REGISTRY_PATH", path):
                 with self.assertRaises(svc.MediaLibraryServiceError):
                     svc.load_media_registry()
 
@@ -61,11 +61,11 @@ class FilenameAndPathTests(unittest.TestCase):
 
     def test_media_local_file_strips_legacy_library_prefix(self):
         asset = {"file": "library/tab/game/icon/abc123.png"}
-        self.assertEqual(svc.media_local_file(asset), svc.IIDB_LIBRARY_DIR / "tab" / "game" / "icon" / "abc123.png")
+        self.assertEqual(svc.media_local_file(asset), svc.MEDIA_LIBRARY_DIR / "tab" / "game" / "icon" / "abc123.png")
 
     def test_media_local_file_normal_path(self):
         asset = {"file": "tab/game/icon/abc123.png"}
-        self.assertEqual(svc.media_local_file(asset), svc.IIDB_LIBRARY_DIR / "tab" / "game" / "icon" / "abc123.png")
+        self.assertEqual(svc.media_local_file(asset), svc.MEDIA_LIBRARY_DIR / "tab" / "game" / "icon" / "abc123.png")
 
     def test_media_asset_remote_path_uses_stored_remote_filename(self):
         game = {"asset_dir": "/sdcard/games/mygame"}
@@ -99,7 +99,7 @@ class MediaCheckAssetTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             local_path = Path(tmp) / "icon.png"
             local_path.write_bytes(b"hello")
-            with patch.object(svc, "IIDB_LIBRARY_DIR", Path(tmp)):
+            with patch.object(svc, "MEDIA_LIBRARY_DIR", Path(tmp)):
                 asset = {"file": "icon.png", "sha256": "0" * 64}
                 status, _detail = svc.media_check_asset({}, asset)
                 self.assertEqual(status, "LOCAL_CHANGED")
@@ -108,7 +108,7 @@ class MediaCheckAssetTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             local_path = Path(tmp) / "icon.png"
             local_path.write_bytes(b"hello")
-            with patch.object(svc, "IIDB_LIBRARY_DIR", Path(tmp)):
+            with patch.object(svc, "MEDIA_LIBRARY_DIR", Path(tmp)):
                 asset = {"file": "icon.png", "sha256": svc.sha256_file(local_path), "asset_type": "icon", "extension": "png"}
                 game = {"asset_dir": "/sdcard/x"}
                 fake_result = MagicMock(returncode=1, stdout="", stderr="no such file")
@@ -121,7 +121,7 @@ class MediaCheckAssetTests(unittest.TestCase):
             local_path = Path(tmp) / "icon.png"
             local_path.write_bytes(b"hello")
             local_hash = svc.sha256_file(local_path)
-            with patch.object(svc, "IIDB_LIBRARY_DIR", Path(tmp)):
+            with patch.object(svc, "MEDIA_LIBRARY_DIR", Path(tmp)):
                 asset = {"file": "icon.png", "sha256": local_hash, "asset_type": "icon", "extension": "png"}
                 game = {"asset_dir": "/sdcard/x"}
                 fake_result = MagicMock(returncode=0, stdout=f"{local_hash}  icon.png\n", stderr="")

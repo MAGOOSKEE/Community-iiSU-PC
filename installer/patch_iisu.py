@@ -31,6 +31,11 @@ MainActivity, this class exists for no other purpose than coordinating
 one game launch. find_main_activity_smali()/LOG_ANCHOR is tried first for
 older iiSU builds that still have it; find_game_launch_coordinator_smali()
 is the fallback once it's gone.
+
+7.5-prerelease2 needed no change to any of the above (the coordinator was
+"ax2", the PrimaryHomeActions holder "jq6"); what did break were the
+obfuscated iiSU class names hardcoded in MediaBridgeReceiver.smali, so
+those are now discovered at patch time too (find_asset_helper_class()).
 """
 
 import re
@@ -236,6 +241,8 @@ def patch_all_start_activity_calls(path: Path) -> int:
     return patched
 
 
+# A name no R8-obfuscated field can collide with (iiSU's own are 1-2 letters).
+HOLDER_FIELD = "iisupcHolder"
 PRIMARY_HOME_ACTIONS_METHOD_ANCHOR = ".method public final a()Lcom/iisulauncher/launcher/MainActivity;"
 PRIMARY_HOME_ACTIONS_CLASS_RE = re.compile(r"^\.class public final L(\w+);$", re.MULTILINE)
 
@@ -271,7 +278,7 @@ def patch_primary_home_actions_holder(decompiled_dir: Path) -> tuple[Path, str]:
     path, class_name, text = candidates[0]
     class_ref = f"L{class_name};"
 
-    static_field = f".field public static volatile c:{class_ref}"
+    static_field = f".field public static volatile {HOLDER_FIELD}:{class_ref}"
     if static_field not in text:
         field_anchor = "# instance fields"
         if field_anchor not in text:
@@ -284,7 +291,7 @@ def patch_primary_home_actions_holder(decompiled_dir: Path) -> tuple[Path, str]:
             1,
         )
 
-    sput = f"    sput-object p0, {class_ref}->c:{class_ref}"
+    sput = f"    sput-object p0, {class_ref}->{HOLDER_FIELD}:{class_ref}"
     if sput not in text:
         ctor_start = text.find(".method public constructor <init>()V")
         if ctor_start < 0:
@@ -313,20 +320,66 @@ def patch_primary_home_actions_holder(decompiled_dir: Path) -> tuple[Path, str]:
     path.write_text(text, encoding="utf-8")
     return path, class_name
 
-def inject_launch_bridge(decompiled_dir: Path, primary_home_actions_class: str) -> None:
+# The asset-index helper MediaBridgeReceiver drives (iiSU's own static
+# n/m/o/M/K/I utilities). R8 renames the class every rebuild ("wy6" in 7.4,
+# "qa7" in 7.5-prerelease1, "xa7" in 7.5-prerelease2) but kept these method
+# letters and descriptors through all three, so it's found by structure.
+ASSET_HELPER_METHODS = (
+    ".method public static n(Ljava/io/File;Ljava/lang/String;)Ljava/io/File;",
+    ".method public static m(Ljava/io/File;Ljava/lang/String;)Ljava/util/List;",
+    ".method public static o(Ljava/io/File;)Ljava/io/File;",
+    ".method public static M(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;Ljava/io/File;)V",
+    ".method public static K(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;Ljava/io/File;)V",
+    ".method public static I(Landroid/content/Context;Ljava/lang/String;Ljava/lang/String;Ljava/io/File;"
+    "Ljava/util/List;Ljava/util/List;Ljava/io/File;Ljava/io/File;Ljava/lang/Long;)V",
+)
+MAIN_ACTIVITY_REFRESH_METHOD = ".method public static final v(Lcom/iisulauncher/launcher/MainActivity;)V"
+ASSET_INDEX_BLOCK_RE = re.compile(r"[ \t]*# IISUPC_ASSET_INDEX_BEGIN\n.*?[ \t]*# IISUPC_ASSET_INDEX_END\n", re.DOTALL)
+CLASS_DECL_RE = re.compile(r"^\.class [^\n]*L(\w+);$", re.MULTILINE)
+
+
+def find_asset_helper_class(decompiled_dir: Path) -> str | None:
+    """Returns the obfuscated class name of iiSU's asset-index helper (see
+    ASSET_HELPER_METHODS), or None if no class has the full signature set,
+    in which case MediaBridge installs files without re-indexing them. More
+    than one match is treated the same as none: guessing wrong would make
+    the receiver call into an unrelated class."""
+    matches = []
+    for path in decompiled_dir.rglob("*.smali"):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if all(sig in text for sig in ASSET_HELPER_METHODS):
+            class_match = CLASS_DECL_RE.search(text)
+            if class_match:
+                matches.append(class_match.group(1))
+    return matches[0] if len(matches) == 1 else None
+
+
+def inject_launch_bridge(decompiled_dir: Path, primary_home_actions_class: str, asset_helper_class: str | None = None) -> None:
     """Copies smali_patch/*.smali into the decompiled tree, substituting the
-    placeholder "je6" class reference MediaBridgeReceiver.smali is written
-    against for whichever class patch_primary_home_actions_holder() actually
-    found this build (that name changes every rebuild, see its own
-    docstring), so MediaBridgeReceiver keeps pointing at a class that
-    genuinely exists in the patched APK instead of silently referencing one
-    that doesn't."""
+    LIISUPC_HOLDER / LIISUPC_ASSETS class tokens MediaBridgeReceiver.smali is
+    written against for whichever classes this iiSU build actually uses
+    (those names change every rebuild, see patch_primary_home_actions_holder()
+    and find_asset_helper_class()), so the receiver keeps pointing at classes
+    that genuinely exist in the patched APK instead of silently referencing
+    ones that don't. With no asset helper found, the asset-index block is
+    stripped out of the receiver instead of leaving dangling references."""
     dest = decompiled_dir / "smali" / BRIDGE_PACKAGE_SMALI_DIR
     dest.mkdir(parents=True, exist_ok=True)
     for smali_file in SMALI_PATCH_DIR.glob("*.smali"):
         text = smali_file.read_text(encoding="utf-8")
-        text = text.replace("Lje6;", f"L{primary_home_actions_class};")
+        text = text.replace("LIISUPC_HOLDER;", f"L{primary_home_actions_class};")
+        if asset_helper_class:
+            text = text.replace("LIISUPC_ASSETS;", f"L{asset_helper_class};")
+        else:
+            text = ASSET_INDEX_BLOCK_RE.sub("", text)
         (dest / smali_file.name).write_text(text, encoding="utf-8")
+
+
+def has_main_activity_refresh(decompiled_dir: Path) -> bool:
+    return any(
+        MAIN_ACTIVITY_REFRESH_METHOD in path.read_text(encoding="utf-8", errors="replace")
+        for path in decompiled_dir.rglob("MainActivity.smali")
+    )
 
 
 def patch_manifest_for_media_bridge(decompiled_dir: Path) -> None:
@@ -426,7 +479,14 @@ def patch_apk(
     print(f"[patch] patched PrimaryHomeActions holder ({primary_home_actions_class}) in {primary_home_actions.relative_to(decompiled_dir)}")
 
     print("[patch] injecting iiSU-PC bridge classes...")
-    inject_launch_bridge(decompiled_dir, primary_home_actions_class)
+    asset_helper_class = find_asset_helper_class(decompiled_dir)
+    if asset_helper_class:
+        print(f"[patch] found iiSU's asset-index helper ({asset_helper_class})")
+    else:
+        print("[patch] WARNING: couldn't find iiSU's asset-index helper, MediaBridge will install media without re-indexing it.")
+    if not has_main_activity_refresh(decompiled_dir):
+        print("[patch] WARNING: MainActivity's refresh entry point is gone, MediaBridge rescans will fail until the receiver is updated.")
+    inject_launch_bridge(decompiled_dir, primary_home_actions_class, asset_helper_class)
     patch_manifest_for_media_bridge(decompiled_dir)
     fix_extract_native_libs(decompiled_dir)
 

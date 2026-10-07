@@ -4,7 +4,7 @@ into a plain state-machine class with no GUI-toolkit dependency (no Tk,
 no Qt) so bridge/ui/pages/media_library.py can drive it with a QTimer the
 same way manager.py drove it with self.after().
 
-Only plays uncompressed PCM WAV, iiDB soundbites are always this format,
+Only plays uncompressed PCM WAV, saved soundbites are always this format,
 so no other codec support was ever needed here.
 """
 

@@ -1,10 +1,12 @@
 # Community-iiSU-PC Setup
 
-Runs iiSU (an Android emulation frontend) inside a hardware-accelerated Android VM on Windows or Linux, patched so launching a game in iiSU hands off to a real PC emulator instead of an Android one.
+Runs iiSU (an Android emulation frontend) inside a hardware-accelerated Android runtime on Windows or Linux (the Android SDK emulator, or Waydroid on Linux Wayland sessions), patched so launching a game in iiSU hands off to a real PC emulator instead of an Android one.
 
 **This does not include iiSU itself.** iiSU is closed-source, third-party software this project has no direct affiliation with. You will need your own copy of its APK. This tool patches *your* copy, the same way any APK-patching/modding tool works; it never bundles or redistributes iiSU's binary.
 
-**Linux support** (KDE Plasma) was contributed by [jacksterson](https://github.com/jacksterson). It's real and functional: SDK/AVD bootstrap, patching, the keyboard and controller quit hotkeys, KWin-based fullscreen/window management, `.desktop` shortcuts, and a Flatpak-based emulator downloader. The one gap: fullscreen/window management is KWin-specific, so it works on KDE Plasma but not GNOME/other desktop environments.
+**Linux support** (KDE Plasma) was contributed by [jacksterson](https://github.com/jacksterson). It's real and functional: SDK/AVD bootstrap, patching, the keyboard and controller quit hotkeys, KWin-based fullscreen/window management, `.desktop` shortcuts, and a Flatpak-based emulator downloader. The one gap: fullscreen/window management for the SDK emulator is KWin-specific, so it works on KDE Plasma but not GNOME/other desktop environments.
+
+**Waydroid on Wayland:** on a Linux Wayland session, Setup uses [Waydroid](https://waydro.id) instead of the Android SDK emulator (it skips the multi-GB emulator and system image download, and needs no KVM group setup). Waydroid draws iiSU as its own fullscreen Wayland window, so none of the KWin window handling applies and it works on GNOME too. On X11, or if you set `IISUPC_VM_BACKEND=avd` before running Setup, the SDK emulator is used as before. Setup saves the choice to `config.json` (`vm_backend`), so logging into a different session type later never switches an installed setup. This path was written against Waydroid's documented CLI and is unit-tested for its parsing and selection logic, but hasn't been run end to end on a real Waydroid install yet, so reports are welcome.
 
 ## Installing
 
@@ -19,6 +21,7 @@ Runs iiSU (an Android emulation frontend) inside a hardware-accelerated Android 
 - Whichever PC emulators you want to use (DuckStation, Dolphin, PCSX2, etc.); install these yourself, or use the Manager's built-in downloader (winget on Windows, Flatpak on Linux)
 - A few GB of free disk space and a decent internet connection (first run downloads the Android SDK + a system image)
 - **CPU virtualization must be turned on.** Windows: enable it in your BIOS, and ensure Hyper-V or the Windows Hypervisor Platform and Virtual Machine Platform are enabled. Linux: KVM enabled and `/dev/kvm` accessible (usually means being in the `kvm` group).
+- **Linux Wayland sessions** additionally need Waydroid installed from your distro (`waydroid` on PATH), a kernel with binder support, and the `waydroid-container` service. If Waydroid isn't installed, the Setup window offers to install it from your distro's own repositories (apt, dnf, zypper or apk) through a polkit permission prompt, and only if you say yes (set `IISUPC_INSTALL_WAYDROID=1` to opt in for a headless run). Arch-based distros get pointed at the AUR instead, since it needs a helper run as a normal user. Setup also runs `waydroid init` for you (through a polkit prompt) if it hasn't been run, and tells you the exact command for anything else it can't do without root, such as a kernel without binder.
 - Python 3.11+ and a JDK on PATH (`java` and `keytool` need to work from a terminal), e.g. [Eclipse Temurin](https://adoptium.net/) or your distro's OpenJDK package. Windows users can skip this by using the installer above instead, which bundles both.
 
 ## First-time setup
@@ -35,15 +38,19 @@ Once it's done, a short onboarding wizard walks you through your ROM directory, 
 Double-click the **desktop shortcut**, or run the Manager script for your platform (**`Community-iiSU-PC Manager.bat`** on Windows, **`./Community-iiSU-PC\ Manager.sh`** on Linux): one window, navigated with the sidebar:
 
 - **Home**: AVD/bridge status, Open/Stop, a running status line, and quick buttons to your ROMs folder and logs.
-- **Library**: ROM Directory (your host ROM folder), Media Library (check/restore saved media, and browse/install more through iiDB), Android Storage (browse and manage the VM's shared storage over ADB).
+- **Library**: ROM Directory (your host ROM folder), Media Library (check/restore saved media), Android Storage (browse and manage the VM's shared storage over ADB).
 - **Games**: Console (every detected ROM, grouped by multi-disc playlist) and PC (native apps and URI launches, see below).
 - **Emulators**: PC emulator mappings and search folders, test a mapping without starting the AVD, and reinstall iiSU's redirector apps.
-- **Settings**: Display (the Android VM's resolution and DPI) and Advanced (hotkeys and debugging options such as "Show console windows").
+- **Settings**: Display (the Android VM's resolution and DPI), Emulator (named launch profiles for the Android SDK emulator, see below), and Advanced (hotkeys and debugging options such as "Show console windows").
 - **Backup & Diagnostics**: Backup & Restore (back up configuration to a ZIP or restore an earlier one) and Diagnostics (non-destructive checks of the install, Android VM/ADB, bridge, PC apps, Steam integration, logs; also where you check for and apply Community-iiSU-PC and iiSU updates).
 - **Credits**: who built this and how (see below).
 - **Uninstall**: below a divider at the bottom of the sidebar.
 
 On startup, Community-iiSU-PC re-syncs your ROM library into the VM automatically. Automatic project updates are opt-in and can be enabled from Backup & Diagnostics; **Check for Updates Now** only checks whether an update is available and does not download or install it. The same page also checks whether a newer iiSU is available (against its official GitHub releases) and can re-patch and reinstall it, with a manual override to point at any APK directly, useful for an official pre-release build shared before it's on the releases page. iiSU still needs to notice new games: hit "Rescan full library" in its Library settings.
+
+### Emulator profiles
+
+Settings > **Emulator** holds named launch configurations for the Android SDK emulator: GPU rendering (`auto`, `host`, `swiftshader_indirect`, `angle_indirect`), hardware acceleration, CPU cores, RAM, audio (default, speakers only, or no audio), extra emulator flags, and environment variables. Pick a profile, Save, Stop, Open to test it; a profile change cold-boots the VM once. Presets cover the usual suspects, and Duplicate lets you A/B one change at a time. To chase down audio problems: duplicate your profile, try "Speakers only", then "No audio at all" to confirm audio is the cause, then try other GPU modes. Profiles only change launch options on the AVD that Setup created, not which Android system image it runs. (They don't apply on Waydroid.)
 
 A fullscreen overlay covers the AVD boot and the emulator hand-off, showing what's happening ("Booting Community-iiSU-PC...", "Waiting on DuckStation...") instead of raw desktop. It's off while the debug console checkbox is on.
 
@@ -86,6 +93,7 @@ VERSION                    this install's release tag, compared against GitHub R
 shared/qt_theme.py         the dark/gradient look and fonts shared by every window in this project
 shared/emulator_defaults.py  curated console -> PC emulator mappings, and which need a redirector
 shared/platform_compat.py  cross-platform subprocess/creationflags helpers (Windows vs Linux)
+shared/vm_backend.py       picks the Android runtime (SDK emulator vs Waydroid), adb-device parsing
 shared/qt_avatars.py       fetches+circle-crops a GitHub avatar for the Credits page
 
 installer/
@@ -104,9 +112,11 @@ bridge/
                             hold each screen, widgets/ shared building blocks like the display-resolution
                             preview and the sidebar's rounded Card
   services/                non-GUI logic behind the GUI pages (diagnostics, backups, PC apps,
-                            Android storage, media library/iiDB, iiSU update checks)
+                            Android storage, media library, iiSU update checks)
   bridge_config.py         shared config.json loader
   apply_display.py         applies config.json's display settings to the AVD
+  emulator_profiles.py     named emulator launch profiles (GPU, audio, cores, RAM, flags)
+  waydroid_backend.py      starts/stops/connects Waydroid on Linux Wayland sessions
   start_iisu_pc.py         checks for updates, boots the AVD, starts launch_bridge.py
   updater.py               checks for (and, on a git checkout, applies) updates
   stop_iisu_pc.py          tears both back down
@@ -135,7 +145,7 @@ Maintainer-only, not needed to run or develop the project day to day: `installer
 
 - Run the Manager's **Backup & Diagnostics > Diagnostics** page first for a non-destructive check of the installation, configuration, Android VM/ADB, bridge, PC apps, Steam integration, and logs.
 - `bridge/manager_debug.log` and `bridge/bridge_debug.log` preserve Manager and launch-bridge diagnostics, including uncaught Python exceptions that might otherwise disappear when a console closes.
-- `installer/patch_iisu.py`'s patch is anchored on specific log strings in iiSU's code. If iiSU updates and changes them, the patch fails loudly instead of silently producing a broken build.
+- `installer/patch_iisu.py`'s patch is anchored on specific log strings in iiSU's code. If iiSU updates and changes them, the patch fails loudly instead of silently producing a broken build. The Media Library's MediaBridge hooks find iiSU's obfuscated helper classes by method signature at patch time; if that fails the patch still completes with a warning and media is installed without re-indexing.
 - `bridge/emulator.log`, `bridge/bridge.log`, and `bridge/stop.log` cover the AVD, the launch bridge, and shutdown respectively. Open the Manager's Home page (Logs button) to check them.
 - Re-running setup is safe: it skips anything already done and won't overwrite an existing `config.json`'s settings.
 - Community-iiSU-PC uses a quick resume when nothing relevant has changed since the last start, and only cold-boots (a bit slower) when your settings or ROM library have changed since then, or on the very first start.

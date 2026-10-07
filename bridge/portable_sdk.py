@@ -119,17 +119,24 @@ CONFIG_INI_STATIC_OVERRIDES = {
 }
 
 
-def patch_config_ini(config_ini: Path, force_cold_boot: bool = True) -> None:
+def patch_config_ini(config_ini: Path, force_cold_boot: bool = True, extra_overrides: dict[str, str] | None = None) -> None:
     """Applies CONFIG_INI_STATIC_OVERRIDES plus fastboot.forceColdBoot,
     which is the one entry re-patched on every single start (not just the
     one-time bootstrap copy), see start_iisu_pc.py's boot-fingerprint
     check, which decides force_cold_boot each run. This is belt-and-
     suspenders alongside the matching -no-snapshot/no launch flag in
     start_iisu_pc.py, in case anything ever launches this AVD another
-    way."""
+    way.
+
+    extra_overrides carries per-launch settings that belong in config.ini
+    (the active emulator profile's audio devices, see emulator_profiles.py)."""
     if not config_ini.is_file():
         return
-    overrides = {**CONFIG_INI_STATIC_OVERRIDES, "fastboot.forceColdBoot": "yes" if force_cold_boot else "no"}
+    overrides = {
+        **CONFIG_INI_STATIC_OVERRIDES,
+        **(extra_overrides or {}),
+        "fastboot.forceColdBoot": "yes" if force_cold_boot else "no",
+    }
     lines = config_ini.read_text(encoding="utf-8").splitlines()
     seen = set()
     new_lines = []
@@ -177,6 +184,22 @@ def is_bootstrapped(avd_name: str) -> bool:
         and (PORTABLE_SDK / "platform-tools" / ADB_BIN).is_file()
         and (PORTABLE_AVD_HOME / f"{avd_name}.avd" / "config.ini").is_file()
     )
+
+
+def ensure_portable_platform_tools(source_sdk_root: Path) -> None:
+    """Copies just platform-tools (adb) into the portable SDK. The Waydroid
+    backend needs adb on PATH (see _prepend_platform_tools_to_path) but has
+    no emulator, system image, or AVD to bring along."""
+    portable_adb = PORTABLE_SDK / "platform-tools" / ADB_BIN
+    if portable_adb.is_file():
+        return
+    source_platform_tools_dir = source_sdk_root / "platform-tools"
+    print(f"[bootstrap] copying platform-tools ({source_platform_tools_dir} -> {PORTABLE_SDK / 'platform-tools'}), one-time...")
+    _robocopy(source_platform_tools_dir, PORTABLE_SDK / "platform-tools")
+    if not IS_WINDOWS:
+        for path in (PORTABLE_SDK / "platform-tools").glob("*"):
+            if path.is_file():
+                path.chmod(path.stat().st_mode | 0o755)
 
 
 def ensure_portable_sdk(avd_name: str, source_sdk_root: Path) -> dict:

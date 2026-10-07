@@ -43,6 +43,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from portable_sdk import PORTABLE_AVD_HOME
 from shared.platform_compat import IS_WINDOWS, subprocess_creationflags
+from shared.vm_backend import BACKEND_WAYDROID, resolve_backend, vm_device_connected
 
 # adb/taskkill/powershell are all console-subsystem executables; this
 # script itself always runs from the GUI (pythonw.exe), which has no
@@ -76,7 +77,30 @@ def load_avd_name(state: dict) -> str | None:
 
 def is_avd_running() -> bool:
     result = subprocess.run(["adb", "devices"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
-    return any(line.startswith("emulator-") and "device" in line for line in result.stdout.splitlines())
+    return vm_device_connected(result.stdout)
+
+
+def load_config_safely() -> dict:
+    if not CONFIG_PATH.is_file():
+        return {}
+    try:
+        with open(CONFIG_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def stop_waydroid() -> None:
+    """Ends the Waydroid session (and its adb connection). The container is
+    a system service and is deliberately left running. Failures are
+    reported, not raised: Stop must still go on to kill the bridge."""
+    try:
+        import waydroid_backend
+
+        print("[stop] stopping the Waydroid session...")
+        waydroid_backend.stop()
+    except Exception as e:  # noqa: BLE001; Stop must keep going to tear down the bridge
+        print(f"[stop] couldn't stop Waydroid cleanly ({e})")
 
 
 def kill_tree(pid: int) -> None:
@@ -171,8 +195,13 @@ def clear_stale_locks(avd_name: str | None) -> None:
 def main() -> None:
     state = load_state()
     avd_name = load_avd_name(state)
+    # What actually ran last time wins over what config would pick now, so
+    # a session started under one backend is always stopped by that one.
+    backend = state.get("backend") or resolve_backend(load_config_safely())
 
-    if is_avd_running():
+    if backend == BACKEND_WAYDROID:
+        stop_waydroid()
+    elif is_avd_running():
         print("[stop] asking the AVD to shut down gracefully...")
         subprocess.run(["adb", "emu", "kill"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
         deadline = time.time() + GRACEFUL_STOP_TIMEOUT
@@ -185,7 +214,7 @@ def main() -> None:
         kill_tree(bridge_pid)
 
     emulator_pid = state.get("emulator_pid")
-    if emulator_pid is not None and is_avd_running():
+    if emulator_pid is not None and backend != BACKEND_WAYDROID and is_avd_running():
         print(f"[stop] killing emulator_pid {emulator_pid}...")
         kill_tree(emulator_pid)
 
@@ -203,10 +232,11 @@ def main() -> None:
     # distinctive enough path to scope the sweep to just this AVD.
     print("[stop] sweeping for any orphaned launch_bridge.py process...")
     kill_by_cmdline_match("launch_bridge.py")
-    print("[stop] sweeping for any remaining emulator/qemu process for this AVD...")
-    kill_by_cmdline_match("android-sdk-portable")
-    if avd_name:
-        kill_by_cmdline_match(f"-avd {avd_name}")
+    if backend != BACKEND_WAYDROID:
+        print("[stop] sweeping for any remaining emulator/qemu process for this AVD...")
+        kill_by_cmdline_match("android-sdk-portable")
+        if avd_name:
+            kill_by_cmdline_match(f"-avd {avd_name}")
 
     # adb.exe runs as a persistent background server (any `adb` command
     # spawns it if it isn't already running) and never exits on its own
@@ -217,12 +247,13 @@ def main() -> None:
     print("[stop] stopping the adb server...")
     subprocess.run(["adb", "kill-server"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
 
-    clear_stale_locks(avd_name)
+    if backend != BACKEND_WAYDROID:
+        clear_stale_locks(avd_name)
 
     if STATE_PATH.is_file():
         STATE_PATH.unlink()
 
-    print("[stop] Done. Bridge and AVD should both be fully stopped now.")
+    print("[stop] Done. Bridge and Android VM should both be fully stopped now.")
 
 
 if __name__ == "__main__":
