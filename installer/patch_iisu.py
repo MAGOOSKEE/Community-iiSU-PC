@@ -247,6 +247,25 @@ PRIMARY_HOME_ACTIONS_METHOD_ANCHOR = ".method public final a()Lcom/iisulauncher/
 PRIMARY_HOME_ACTIONS_CLASS_RE = re.compile(r"^\.class public final L(\w+);$", re.MULTILINE)
 
 
+def find_primary_home_actions_holder(decompiled_dir: Path) -> tuple[Path, str, str]:
+    """Read-only lookup of the PrimaryHomeActions holder: (file, obfuscated
+    class name, file text). Raises RuntimeError unless exactly one class
+    matches. Shared by the patch and by patch_check's compatibility report."""
+    candidates = []
+    for path in decompiled_dir.rglob("*.smali"):
+        text = path.read_text(encoding="utf-8", errors="replace")
+        class_match = PRIMARY_HOME_ACTIONS_CLASS_RE.search(text)
+        if class_match and PRIMARY_HOME_ACTIONS_METHOD_ANCHOR in text:
+            candidates.append((path, class_match.group(1), text))
+
+    if len(candidates) != 1:
+        raise RuntimeError(
+            f"Expected exactly one iiSU PrimaryHomeActions holder class, found {len(candidates)}. "
+            "iiSU's code has likely changed and this patch needs updating by hand."
+        )
+    return candidates[0]
+
+
 def patch_primary_home_actions_holder(decompiled_dir: Path) -> tuple[Path, str]:
     """Expose iiSU's existing injected PrimaryHomeActions instance (called
     "je6" in the build this was first written against).
@@ -262,20 +281,7 @@ def patch_primary_home_actions_holder(decompiled_dir: Path) -> tuple[Path, str]:
     the class name is read out of each candidate file instead of glob'd by
     filename, and reused for the field/sput text it injects. Idempotent.
     """
-    candidates = []
-    for path in decompiled_dir.rglob("*.smali"):
-        text = path.read_text(encoding="utf-8", errors="replace")
-        class_match = PRIMARY_HOME_ACTIONS_CLASS_RE.search(text)
-        if class_match and PRIMARY_HOME_ACTIONS_METHOD_ANCHOR in text:
-            candidates.append((path, class_match.group(1), text))
-
-    if len(candidates) != 1:
-        raise RuntimeError(
-            f"Expected exactly one iiSU PrimaryHomeActions holder class, found {len(candidates)}. "
-            "iiSU's code has likely changed and this patch needs updating by hand."
-        )
-
-    path, class_name, text = candidates[0]
+    path, class_name, text = find_primary_home_actions_holder(decompiled_dir)
     class_ref = f"L{class_name};"
 
     static_field = f".field public static volatile {HOLDER_FIELD}:{class_ref}"
@@ -460,6 +466,15 @@ def patch_apk(
 
     print(f"[patch] decompiling {source_apk.name}...")
     decompile(source_apk, decompiled_dir)
+
+    # The same read-only report `patch_check.py` prints, so a Setup log
+    # alone says which build this was and which hooks were found.
+    import patch_check
+
+    print(f"[patch] build: {patch_check.KNOWN_BUILDS.get(patch_check.sha256_file(source_apk), 'not one this project has seen before')}"
+          f" (versionName {patch_check.read_version_name(decompiled_dir) or 'unknown'})")
+    for finding in patch_check.inspect_decompiled(decompiled_dir):
+        print(f"[patch]   {finding.status.upper():8} {finding.name}: {finding.detail}")
 
     print("[patch] locating the ROM-launch code...")
     try:

@@ -143,6 +143,14 @@ class UpdatesPage(PageBase):
         )
         iisu_manual_button.clicked.connect(self._pick_manual_iisu_apk)
         iisu_actions.addWidget(iisu_manual_button)
+        iisu_compat_button = QPushButton("Check an APK...")
+        iisu_compat_button.setObjectName("ghost")
+        iisu_compat_button.setToolTip(
+            "Inspect an iiSU APK and report whether this tool can patch it, without installing "
+            "anything. Takes about a minute. Worth doing on a new pre-release before updating to it."
+        )
+        iisu_compat_button.clicked.connect(self._check_apk_compatibility)
+        iisu_actions.addWidget(iisu_compat_button)
         iisu_layout.addLayout(iisu_actions)
 
         self.iisu_update_status_label = QLabel("Check for iiSU updates hasn't been run yet.")
@@ -287,6 +295,30 @@ class UpdatesPage(PageBase):
         if not self._confirm_iisu_update():
             return
         self._run_iisu_update(self._pending_iisu_download_url)
+
+    def _check_apk_compatibility(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Select an iiSU APK to check", "", "Android APK (*.apk)")
+        if not path:
+            return
+        self.iisu_update_status_label.setText(f"Checking {Path(path).name} (about a minute)...")
+        self._compat_signals = run_in_background(self._compat_worker, self._on_compat_done, self._on_compat_error, path)
+
+    @staticmethod
+    def _compat_worker(path: str) -> str:
+        import patch_check
+
+        return patch_check.format_report(patch_check.check_apk(Path(path)))
+
+    def _on_compat_done(self, report_text: str) -> None:
+        self.iisu_update_status_label.setText(report_text.splitlines()[-1])
+        box = QMessageBox(self)
+        box.setWindowTitle("iiSU APK compatibility")
+        box.setText(report_text.splitlines()[-1])
+        box.setDetailedText(report_text)
+        box.exec()
+
+    def _on_compat_error(self, message: str) -> None:
+        self.iisu_update_status_label.setText(f"Couldn't check that APK: {message}")
 
     def _pick_manual_iisu_apk(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Select an iiSU APK", "", "Android APK (*.apk)")
