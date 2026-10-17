@@ -283,4 +283,20 @@ def ensure_sdk_and_avd(avd_name: str) -> Path:
     install_commandline_tools()
     install_packages()
     create_default_avd()
-    return rename_avd(DEVICE_PROFILE, avd_name)
+    avd_dir = rename_avd(DEVICE_PROFILE, avd_name)
+    enlarge_data_partition(avd_dir)
+    return avd_dir
+
+
+def enlarge_data_partition(avd_dir: Path) -> None:
+    """The profile's default 6 GB data partition fills up (iiSU's artwork
+    alone reaches 2 GB, on top of a Play-image Android), after which iiSU
+    crashes with SQLITE_FULL. Sets a bigger one, but only while the AVD has
+    no data image yet: the emulator never resizes an existing one, and
+    changing the setting then would only confuse it."""
+    from shared import vm_storage
+
+    if any((avd_dir / name).exists() for name in ("userdata-qemu.img", "userdata-qemu.img.qcow2", "userdata.img")):
+        return
+    if vm_storage.set_data_partition_size(avd_dir / "config.ini"):
+        print(f"[sdk] AVD data partition set to {vm_storage.DEFAULT_DATA_PARTITION_GB} GB")
