@@ -55,11 +55,12 @@ class BackupRestorePage(PageBase):
         data_heading.setFont(Fonts.heading())
         data_layout.addWidget(data_heading)
         data_note = QLabel(
-            "Backs up iiSU's own media and app-data folders from the running Android VM, so a reinstall "
-            "doesn't lose your custom artwork and settings. The VM has to be running. Restoring "
-            "replaces files with the same names, leaves everything else alone, and stops iiSU while it "
-            "copies; Stop and Open Community-iiSU-PC afterwards so iiSU reloads it. ROMs and the "
-            "Media Bridge inbox are not included."
+            "Backs up the artwork and media files iiSU keeps in the running Android VM, so a reinstall or "
+            "a rebuilt VM doesn't make it download them all again. The VM has to be running. Restoring "
+            "replaces files with the same names, leaves everything else alone, and switches iiSU off while "
+            "it copies; Stop and Open Community-iiSU-PC afterwards so iiSU reloads it. Not included: your "
+            "ROMs, and iiSU's private in-app data (favorites, play history, settings), which Android "
+            "keeps where no backup can reach it."
         )
         data_note.setWordWrap(True)
         data_note.setStyleSheet(f"color: {TEXT_DIM};")

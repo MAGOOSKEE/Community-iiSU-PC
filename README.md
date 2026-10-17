@@ -42,7 +42,7 @@ Double-click the **desktop shortcut**, or run the Manager script for your platfo
 - **Games**: Console (every detected ROM, grouped by multi-disc playlist) and PC (native apps and URI launches, see below).
 - **Emulators**: PC emulator mappings and search folders, test a mapping without starting the AVD, and reinstall iiSU's redirector apps.
 - **Settings**: Display (the Android VM's resolution and DPI), Emulator (named launch profiles for the Android SDK emulator, see below), and Advanced (hotkeys and debugging options such as "Show console windows").
-- **Backup & Diagnostics**: Backup & Restore (back up configuration to a ZIP or restore an earlier one, plus a separate backup of iiSU's own artwork and settings from inside the running VM) and Diagnostics (non-destructive checks of the install, Android VM/ADB, bridge, PC apps, Steam integration, logs; also where you check for and apply Community-iiSU-PC and iiSU updates).
+- **Backup & Diagnostics**: Backup & Restore (back up configuration to a ZIP or restore an earlier one, plus a separate backup of the artwork and media files iiSU keeps inside the running VM; iiSU's private in-app data such as favorites and play history can't be backed up) and Diagnostics (non-destructive checks of the install, Android VM/ADB, bridge, PC apps, Steam integration, logs; also where you check for and apply Community-iiSU-PC and iiSU updates).
 - **Credits**: who built this and how (see below).
 - **Uninstall**: below a divider at the bottom of the sidebar.
 

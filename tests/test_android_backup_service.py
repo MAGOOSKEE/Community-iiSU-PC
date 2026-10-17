@@ -112,13 +112,30 @@ class ArchiveTests(unittest.TestCase):
 class FakeAdb:
     """Stands in for adb_command: `media` exists with files, `data` doesn't."""
 
-    def __init__(self, existing=("media",), push_ok=True):
+    DF_HEALTHY = "Filesystem Size Used Avail Use% Mounted on\n/dev/block/dm-55 16G 1.0G 15G 7% /data\n"
+    DF_FULL = "Filesystem Size Used Avail Use% Mounted on\n/dev/block/dm-55 5.8G 5.8G 1M 100% /data\n"
+
+    def __init__(self, existing=("media",), push_ok=True, extract_ok=True, df=None):
         self.existing = existing
         self.push_ok = push_ok
+        self.extract_ok = extract_ok
+        self.df = df or self.DF_HEALTHY
         self.calls: list[tuple] = []
+        self.pushed_tar_members: list[str] = []
 
     def __call__(self, *args, timeout=30):
         self.calls.append(args)
+        if args[0] == "shell" and len(args) == 2 and args[1].startswith("df -h"):
+            return _completed(stdout=self.df)
+        if args[0] == "shell" and len(args) == 2 and "tar xf" in args[1]:
+            return _completed() if self.extract_ok else _completed(1, stderr="tar: bad archive\n")
+        if args[0] == "push" and args[2].endswith(".tar"):
+            if self.push_ok:
+                import tarfile
+                with tarfile.open(args[1]) as tar:
+                    self.pushed_tar_members += tar.getnames()
+                return _completed()
+            return _completed(1, stderr="adb: error: no space\n[  0%] /data/local/tmp/x.tar: 100%\n")
         if args[0] == "shell" and len(args) == 2 and args[1].startswith("[ -d"):
             label = next((k for k, v in svc.SOURCES.items() if v in args[1]), None)
             return _completed(stdout="yes\n" if label in self.existing else "")
@@ -162,7 +179,7 @@ class BackupRestoreFlowTests(unittest.TestCase):
             with self.assertRaises(svc.AndroidBackupError):
                 svc.create_backup(Path(tmp) / "b.zip")
 
-    def test_restore_force_stops_iisu_then_pushes_contents_to_the_right_folder(self):
+    def test_restore_disables_iisu_around_the_push_and_pushes_contents_to_the_right_folder(self):
         fake = FakeAdb(existing=("media",))
         with tempfile.TemporaryDirectory() as tmp, self._patched(fake)[0], self._patched(fake)[1]:
             archive = Path(tmp) / "b.zip"
@@ -171,10 +188,54 @@ class BackupRestoreFlowTests(unittest.TestCase):
             outcomes = svc.restore_backup(archive)
         self.assertEqual(outcomes, {"media": "restored"})
         verbs = [c[:3] for c in fake.calls]
-        self.assertEqual(verbs[0], ("shell", "am", "force-stop"))
-        push = next(c for c in fake.calls if c[0] == "push")
-        self.assertTrue(push[1].endswith("/."))
-        self.assertEqual(push[2], svc.SOURCES["media"])
+        # iiSU is the Home app and relaunches itself after a force-stop, racing
+        # the push; it has to be disabled, not just stopped.
+        self.assertEqual(verbs[0], ("shell", "pm", "disable-user"))
+        self.assertEqual(verbs[-1], ("shell", "pm", "enable"))
+        self.assertNotIn(("shell", "am", "force-stop"), verbs)
+        # One tar pushed to the VM's tmp dir (not file by file), with paths
+        # relative to the destination, then extracted there and cleaned up.
+        pushes = [c for c in fake.calls if c[0] == "push"]
+        self.assertEqual(len(pushes), 1)
+        self.assertTrue(pushes[0][2].startswith("/data/local/tmp/") and pushes[0][2].endswith(".tar"))
+        self.assertEqual(fake.pushed_tar_members, ["iiSULauncher/art/a.png"])
+        extract = next(c for c in fake.calls if c[0] == "shell" and len(c) == 2 and "tar xf" in c[1])
+        self.assertIn(svc.SOURCES["media"], extract[1])
+        cleanup = next(c for c in fake.calls if c[0] == "shell" and len(c) == 2 and c[1].startswith("rm -f"))
+        self.assertGreater(fake.calls.index(cleanup), fake.calls.index(extract))
+        self.assertLess(fake.calls.index(pushes[0]), fake.calls.index(extract))
+        self.assertLess(verbs.index(("shell", "pm", "disable-user")), fake.calls.index(pushes[0]))
+
+    def test_a_failed_extract_is_reported_and_the_tar_is_still_removed(self):
+        fake = FakeAdb(existing=("media",), extract_ok=False)
+        with tempfile.TemporaryDirectory() as tmp, self._patched(fake)[0], self._patched(fake)[1]:
+            archive = Path(tmp) / "b.zip"
+            svc.create_backup(archive)
+            fake.calls.clear()
+            outcomes = svc.restore_backup(archive)
+        self.assertIn("bad archive", outcomes["media"])
+        self.assertTrue(any(c[0] == "shell" and len(c) == 2 and c[1].startswith("rm -f") for c in fake.calls))
+
+    def test_restore_refuses_when_the_vm_hasnt_the_space_and_pushes_nothing(self):
+        fake = FakeAdb(existing=("media",))
+        with tempfile.TemporaryDirectory() as tmp, self._patched(fake)[0], self._patched(fake)[1]:
+            archive = Path(tmp) / "b.zip"
+            svc.create_backup(archive)
+            fake.calls.clear()
+            fake.df = FakeAdb.DF_FULL
+            outcomes = svc.restore_backup(archive)
+        self.assertIn("not enough free space", outcomes["media"])
+        self.assertFalse(any(c[0] == "push" for c in fake.calls))
+        self.assertEqual([c[:3] for c in fake.calls][-1], ("shell", "pm", "enable"))
+
+    def test_iisu_is_re_enabled_even_when_the_push_fails(self):
+        fake = FakeAdb(existing=("media",), push_ok=False)
+        with tempfile.TemporaryDirectory() as tmp, self._patched(fake)[0], self._patched(fake)[1]:
+            archive = Path(tmp) / "b.zip"
+            svc.create_backup(archive)
+            fake.calls.clear()
+            svc.restore_backup(archive)
+        self.assertEqual([c[:3] for c in fake.calls][-1], ("shell", "pm", "enable"))
 
     def test_restore_reports_a_failed_push_per_source(self):
         fake = FakeAdb(existing=("media",), push_ok=False)
@@ -193,6 +254,119 @@ class BackupRestoreFlowTests(unittest.TestCase):
             with self.assertRaises(svc.AndroidBackupError):
                 svc.restore_backup(junk)
         self.assertEqual(fake.calls, [])
+
+
+class ChunkTests(unittest.TestCase):
+    def _folder(self, tmp, sizes):
+        root = Path(tmp) / "f"
+        for name, size in sizes.items():
+            path = root / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"x" * size)
+        return root
+
+    def test_files_are_grouped_up_to_the_chunk_size(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._folder(tmp, {"a": 40, "b": 40, "c": 40, "d": 40})
+            chunks = svc.plan_chunks(root, chunk_bytes=100)
+            self.assertEqual([[p.name for p in c] for c in chunks], [["a", "b"], ["c", "d"]])
+
+    def test_an_oversized_file_gets_a_chunk_of_its_own_and_nothing_is_lost(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._folder(tmp, {"a": 10, "big": 500, "c": 10})
+            chunks = svc.plan_chunks(root, chunk_bytes=100)
+            self.assertEqual(sorted(p.name for c in chunks for p in c), ["a", "big", "c"])
+            self.assertIn(["big"], [[p.name for p in c] for c in chunks])
+
+    def test_empty_folder_has_no_chunks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertEqual(svc.plan_chunks(Path(tmp)), [])
+
+    def test_tar_paths_are_relative_to_the_folder(self):
+        import tarfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = self._folder(tmp, {"iiSULauncher/art/a.png": 5})
+            tar_path = Path(tmp) / "t.tar"
+            svc.build_restore_tar(root, [root / "iiSULauncher" / "art" / "a.png"], tar_path)
+            with tarfile.open(tar_path) as tar:
+                self.assertEqual(tar.getnames(), ["iiSULauncher/art/a.png"])
+
+
+class FlakyLinkTests(unittest.TestCase):
+    """The link dropping mid-push (seen live) must cost a retry, not the restore."""
+
+    def test_a_dropped_push_is_retried_after_wait_for_device_and_then_succeeds(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "f"
+            (folder / "iiSULauncher").mkdir(parents=True)
+            (folder / "iiSULauncher" / "a.png").write_bytes(b"x" * 10)
+            calls, state = [], {"pushes": 0}
+
+            def fake(*args, timeout=30):
+                calls.append(args)
+                if args[0] == "shell" and args[1].startswith("df -h"):
+                    return _completed(stdout=FakeAdb.DF_HEALTHY)
+                if args[0] == "push":
+                    state["pushes"] += 1
+                    return _completed(1, stderr="adb: error: failed to read copy response: EOF\n") if state["pushes"] < 3 else _completed()
+                return _completed()
+
+            with patch.object(svc, "adb_command", fake):
+                result = svc._restore_folder("media", folder, Path(tmp))
+            self.assertEqual(result, "restored")
+            self.assertEqual(state["pushes"], 3)
+            self.assertEqual(sum(1 for c in calls if c[0] == "wait-for-device"), 2)
+
+    def test_giving_up_names_the_part_and_the_real_error(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "f"
+            (folder / "iiSULauncher").mkdir(parents=True)
+            (folder / "iiSULauncher" / "a.png").write_bytes(b"x" * 10)
+
+            def fake(*args, timeout=30):
+                if args[0] == "shell" and args[1].startswith("df -h"):
+                    return _completed(stdout=FakeAdb.DF_HEALTHY)
+                if args[0] == "push":
+                    return _completed(1, stderr="adb: error: device offline\n")
+                return _completed()
+
+            with patch.object(svc, "adb_command", fake):
+                result = svc._restore_folder("media", folder, Path(tmp))
+            self.assertTrue(result.startswith("failed: part 1 of 1"))
+            self.assertIn("device offline", result)
+
+    def test_big_libraries_are_sent_in_several_parts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "f"
+            folder.mkdir()
+            for i in range(5):
+                (folder / f"f{i}.bin").write_bytes(b"x" * 60)
+            pushes = []
+
+            def fake(*args, timeout=30):
+                if args[0] == "shell" and args[1].startswith("df -h"):
+                    return _completed(stdout=FakeAdb.DF_HEALTHY)
+                if args[0] == "push":
+                    pushes.append(args[2])
+                return _completed()
+
+            with patch.object(svc, "adb_command", fake):
+                result = svc._restore_folder("media", folder, Path(tmp), chunk_bytes=130)
+            self.assertEqual(result, "restored")
+            self.assertEqual(len(pushes), 3)  # 2 + 2 + 1 files
+
+
+class ErrorLineTests(unittest.TestCase):
+    def test_prefers_the_error_over_the_trailing_progress_line(self):
+        stderr = "adb: error: failed to copy 'x' to '/sdcard/y': remote secure_mkdirs failed\n[  0%] /sdcard/y/gb.png: 100%\n"
+        self.assertIn("secure_mkdirs failed", svc.error_line(stderr))
+
+    def test_falls_back_to_the_last_line_then_to_a_default(self):
+        self.assertEqual(svc.error_line("one\ntwo\n"), "two")
+        self.assertEqual(svc.error_line("", ""), "adb push failed")
+
+    def test_looks_at_stdout_too_and_truncates(self):
+        self.assertTrue(svc.error_line("", "x" * 400 + " error").endswith("error") or len(svc.error_line("", "x" * 400)) == 160)
 
 
 class SummaryTests(unittest.TestCase):

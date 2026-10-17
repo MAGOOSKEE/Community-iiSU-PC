@@ -1,7 +1,11 @@
-"""Backs up and restores iiSU's own data inside the Android VM, so a
-reinstall (or the Uninstall page) doesn't lose the artwork, collections and
-settings iiSU keeps there. The existing Backup & Restore page only covers
-this project's config files.
+"""Backs up and restores the files iiSU keeps in its shared media folder
+inside the Android VM (downloaded artwork and media), so a reinstall or a
+rebuilt VM doesn't make it download all of that again. The existing Backup &
+Restore page only covers this project's config files.
+
+NOT covered: iiSU's private in-app data (its settings, favorites, play
+history), which lives in Android's protected app storage that adb can't
+read on a non-debuggable app without root.
 
 What's covered, using nothing but adb (no root, no emulator-specific
 tricks, so it works the same on the AVD and on Waydroid):
@@ -25,6 +29,7 @@ and unit-tested; the pull/push glue needs a running VM.
 from __future__ import annotations
 
 import shutil
+import tarfile
 import tempfile
 import zipfile
 from dataclasses import dataclass, field
@@ -32,6 +37,7 @@ from datetime import datetime
 from pathlib import Path, PurePosixPath
 
 from services.android_storage_service import adb_command, adb_device_ready, android_remote_quote
+from shared import vm_storage
 
 IISU_PACKAGE = "com.iisulauncher"
 SOURCES: dict[str, str] = {
@@ -195,11 +201,33 @@ def create_backup(destination: Path) -> BackupResult:
     return result
 
 
+def error_line(stderr: str, stdout: str = "") -> str:
+    """The most useful line of an adb failure. adb prints a progress line
+    last, which is useless as an error message, so prefer a line that says
+    error/failed, falling back to the last line of anything."""
+    lines = [line.strip() for line in (stderr + "\n" + stdout).splitlines() if line.strip()]
+    for line in reversed(lines):
+        if "error" in line.lower() or "failed" in line.lower():
+            return line[:160]
+    return (lines[-1][:160] if lines else "adb push failed")
+
+
 def restore_backup(source: Path) -> dict[str, str]:
-    """Pushes the archive's files back into the VM, replacing same-named
+    """Copies the archive's files back into the VM, replacing same-named
     files and leaving everything else alone. Returns {label: outcome}.
-    iiSU is force-stopped first so it doesn't rewrite files mid-restore;
-    it needs a restart (Stop, Open) afterwards to pick the data up."""
+
+    Files go over as tar chunks (about 256 MB each) pushed to
+    /data/local/tmp and extracted inside the VM, the way sync_library.py
+    moves the ROM placeholders, never file by file or as one huge stream.
+    Both failed on a real 2 GB library (seen live): thousands of per-file
+    pushes, and a single 2 GB push, each dropped the adb link partway. A
+    dropped link now costs one retry of one chunk.
+
+    iiSU is disabled while the files are written and re-enabled afterwards
+    (always, even on failure). A force-stop isn't enough: iiSU is the Home
+    app, so Android relaunches it within a second and it starts rewriting
+    its own assets folder. It needs a restart (Stop, Open) afterwards to
+    pick the data up."""
     inspect_archive(source)  # raises on a bad archive before touching the VM
     ready, detail = adb_device_ready()
     if not ready:
@@ -209,18 +237,100 @@ def restore_backup(source: Path) -> dict[str, str]:
     outcomes: dict[str, str] = {}
     try:
         folders = extract_archive(source, work)
-        adb_command("shell", "am", "force-stop", IISU_PACKAGE, timeout=30)
-        for label, folder in folders.items():
-            remote = SOURCES[label]
-            adb_command("shell", f"mkdir -p {android_remote_quote(remote)}", timeout=30)
-            # "/." pushes the folder's contents rather than the folder itself
-            pushed = adb_command("push", str(folder) + "/.", remote, timeout=PULL_TIMEOUT)
-            if pushed.returncode == 0:
-                outcomes[label] = "restored"
-            else:
-                outcomes[label] = "failed: " + ((pushed.stderr.strip().splitlines() or ["adb push failed"])[-1][:120])
+        adb_command("shell", "pm", "disable-user", IISU_PACKAGE, timeout=30)
+        try:
+            for label, folder in folders.items():
+                outcomes[label] = _restore_folder(label, folder, work)
+        finally:
+            adb_command("shell", "pm", "enable", IISU_PACKAGE, timeout=30)
     except OSError as exc:
         raise AndroidBackupError(f"Restore failed:\n{exc}") from exc
     finally:
         shutil.rmtree(work, ignore_errors=True)
     return outcomes
+
+
+CHUNK_BYTES = 256 * 1024 * 1024
+CHUNK_ATTEMPTS = 3
+
+
+def plan_chunks(folder: Path, chunk_bytes: int = CHUNK_BYTES) -> list[list[Path]]:
+    """Groups the folder's files into lists of roughly chunk_bytes each (a
+    file bigger than that goes alone), in a stable order."""
+    chunks: list[list[Path]] = []
+    current: list[Path] = []
+    size = 0
+    for path in sorted(folder.rglob("*")):
+        if not path.is_file():
+            continue
+        file_size = path.stat().st_size
+        if current and size + file_size > chunk_bytes:
+            chunks.append(current)
+            current, size = [], 0
+        current.append(path)
+        size += file_size
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def build_restore_tar(folder: Path, files: list[Path], tar_path: Path) -> int:
+    """Tars the given files with paths relative to folder, so extracting
+    inside the destination reproduces the layout. Returns the file count."""
+    with tarfile.open(tar_path, "w") as tar:
+        for path in files:
+            tar.add(path, arcname=path.relative_to(folder).as_posix(), recursive=False)
+    return len(files)
+
+
+def _restore_chunk(remote: str, remote_tar: str, tar_path: Path) -> str | None:
+    """Pushes and extracts one chunk. Returns None on success or the error."""
+    try:
+        pushed = adb_command("push", str(tar_path), remote_tar, timeout=PULL_TIMEOUT)
+        if pushed.returncode != 0:
+            return error_line(pushed.stderr, pushed.stdout)
+        extract = (
+            f"mkdir -p {android_remote_quote(remote)} && cd {android_remote_quote(remote)} "
+            f"&& tar xf {android_remote_quote(remote_tar)}"
+        )
+        extracted = adb_command("shell", extract, timeout=PULL_TIMEOUT)
+        if extracted.returncode != 0:
+            return error_line(extracted.stderr, extracted.stdout)
+        return None
+    finally:
+        adb_command("shell", f"rm -f {android_remote_quote(remote_tar)}", timeout=60)
+
+
+def _restore_folder(label: str, folder: Path, work: Path, chunk_bytes: int = CHUNK_BYTES) -> str:
+    """Restores one source in chunks. Each chunk is pushed, extracted and
+    deleted before the next, so the VM only ever holds one chunk's tar on top
+    of the files themselves, and a dropped adb link (seen live on a 2 GB
+    library) costs one retry of one chunk, not the whole restore. Extraction
+    only replaces same-named files, so retrying or re-running is harmless."""
+    remote = SOURCES[label]
+    remote_tar = f"/data/local/tmp/iisupc_restore_{label}.tar"
+    chunks = plan_chunks(folder, chunk_bytes)
+    if not chunks:
+        return "restored"
+
+    total_kb = sum(p.stat().st_size for chunk in chunks for p in chunk) // 1024
+    biggest_kb = max(sum(p.stat().st_size for p in chunk) for chunk in chunks) // 1024
+    needed_kb = total_kb + biggest_kb + 64 * 1024
+    usage = vm_storage.parse_df(adb_command("shell", "df -h /data", timeout=30).stdout)
+    if usage is not None and usage.avail_kb < needed_kb:
+        return f"failed: not enough free space in the VM ({vm_storage.describe(usage)}); needs about {needed_kb // 1024} MB"
+
+    for index, files in enumerate(chunks, start=1):
+        tar_path = work / f"restore_{label}_{index}.tar"
+        build_restore_tar(folder, files, tar_path)
+        error = None
+        for attempt in range(CHUNK_ATTEMPTS):
+            if attempt:
+                adb_command("wait-for-device", timeout=120)
+            error = _restore_chunk(remote, remote_tar, tar_path)
+            if error is None:
+                break
+        tar_path.unlink(missing_ok=True)
+        if error is not None:
+            return f"failed: part {index} of {len(chunks)}: {error}"
+    return "restored"
