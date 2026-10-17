@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from services import windows_apps_service
-from shared import app_version
+from shared import app_version, vm_storage
 
 BRIDGE_DIR = Path(__file__).resolve().parent.parent
 MANAGER_LOG_PATH = BRIDGE_DIR / "manager_debug.log"
@@ -42,6 +42,30 @@ def _adb_command(*args: str, timeout: int = 30):
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
     )
+
+
+def vm_storage_check(df_output: str, configured_gb: float | None = None) -> tuple[str, str, str]:
+    """The Diagnostics row for the Android VM's internal storage:
+    (status, check name, details). A full data partition is what makes iiSU
+    crash with "database or disk is full", so a nearly full one is an error,
+    and the details say what to do about it."""
+    check = "Android VM storage"
+    usage = vm_storage.parse_df(df_output)
+    if usage is None:
+        return "WARNING", check, "Couldn't read the VM's storage usage."
+    summary = vm_storage.describe(usage)
+    level = vm_storage.usage_level(usage)
+    small = configured_gb is not None and configured_gb < vm_storage.DEFAULT_DATA_PARTITION_GB
+    advice = (
+        f" This VM's data partition is {configured_gb:g} GB; new installs get {vm_storage.DEFAULT_DATA_PARTITION_GB} GB. "
+        "See \"If the VM runs out of internal storage\" in the README to rebuild it bigger."
+        if small else ""
+    )
+    if level == "critical":
+        return "ERROR", check, f"{summary}. iiSU crashes with \"database or disk is full\" at this point." + advice
+    if level == "low":
+        return "WARNING", check, f"{summary}. Running low." + advice
+    return "OK", check, summary
 
 
 def run_diagnostics(config_data: dict) -> list[tuple[str, str, str]]:
@@ -108,6 +132,14 @@ def run_diagnostics(config_data: dict) -> list[tuple[str, str, str]]:
                 listing = _adb_command("shell", f"ls -ld {quoted}", timeout=10)
                 if listing.returncode == 0:
                     add("OK", "Android shared storage", "/storage/emulated/0 is accessible")
+                    df = _adb_command("shell", "df -h /data", timeout=10)
+                    configured_gb = None
+                    avd_config = BRIDGE_DIR / "android-sdk-portable" / "avd-home" / f"{config.get('avd_name', 'iisuwin')}.avd" / "config.ini"
+                    try:
+                        configured_gb = vm_storage.parse_configured_gb(avd_config.read_text(encoding="utf-8"))
+                    except OSError:
+                        pass
+                    add(*vm_storage_check(df.stdout or "", configured_gb))
                 else:
                     add("ERROR", "Android shared storage", (listing.stderr or listing.stdout or "Unable to access shared storage").strip())
             else:

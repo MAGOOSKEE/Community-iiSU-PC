@@ -165,6 +165,18 @@ Maintainer-only, not needed to run or develop the project day to day: `installer
 - Re-running setup is safe: it skips anything already done and won't overwrite an existing `config.json`'s settings.
 - Community-iiSU-PC uses a quick resume when nothing relevant has changed since the last start, and only cold-boots (a bit slower) when your settings or ROM library have changed since then, or on the very first start.
 
+### If the VM runs out of internal storage
+
+Symptom: iiSU crashes at startup or while scanning, and the system log shows `SQLiteFullException: database or disk is full` or `ENOSPC (No space left on device)`. Diagnostics shows **Android VM storage** as an error. The cause is the Android data partition, which AVDs created before v0.5.5 size at 6 GB. A Play-image Android plus iiSU's downloaded artwork (about 2 GB for a 2,000-game library) fills it. New installs get 16 GB. Android can't grow an existing data partition, so an existing VM has to have its data image recreated:
+
+1. **Back up** iiSU's artwork: Backup & Restore > Back Up iiSU Data. Note that iiSU's private in-app data (favorites, play history, settings) can't be backed up and will be reset.
+2. **Stop** Community-iiSU-PC.
+3. In `bridge/android-sdk-portable/avd-home/iisuwin.avd/`, move (don't delete, so you can roll back) `userdata-qemu.img.qcow2`, `userdata-qemu.img`, `encryptionkey.img(.qcow2)`, `cache.img(.qcow2)` and the `snapshots` folder somewhere else, and set `disk.dataPartition.size=16G` in `config.ini`.
+4. **Open** it (it creates a fresh, bigger data image), then reinstall iiSU: Updates > iiSU App Updates > Use a Different APK..., pick your iiSU APK. This also reinstalls the redirector apps.
+5. **Restore** the artwork: Backup & Restore > Restore iiSU Data, then Stop and Open once more.
+
+Freeing space without rebuilding is rarely enough: clearing Android's caches frees little, and the bulk of the space is app data Android keeps private.
+
 ## Credits
 
 - **[MAGOOSKEE](https://github.com/MAGOOSKEE)**: project owner, built and maintains Community-iiSU-PC.
