@@ -70,6 +70,16 @@ def parse_df(output: str) -> StorageUsage | None:
     return None
 
 
+def parse_df_kb(output: str) -> StorageUsage | None:
+    """Exact usage from `df -k /data` (all columns in 1K blocks), for callers
+    that want more precision than df -h's one decimal."""
+    for line in reversed(output.strip().splitlines()):
+        parts = line.split()
+        if len(parts) >= 5 and parts[4].endswith("%") and parts[1].isdigit() and parts[2].isdigit() and parts[3].isdigit():
+            return StorageUsage(int(parts[1]), int(parts[2]), int(parts[3]))
+    return None
+
+
 def usage_level(usage: StorageUsage) -> str:
     """"ok", "low" (under 10% free) or "critical" (under 200 MB free: iiSU
     starts crashing and Android can't even update apps)."""

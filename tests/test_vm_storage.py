@@ -91,6 +91,17 @@ class ConfigIniTests(unittest.TestCase):
         self.assertIsNone(vs.parse_configured_gb("hw.ramSize=2048\n"))
 
 
+class ParseDfKbTests(unittest.TestCase):
+    def test_reads_exact_kilobytes(self):
+        out = "Filesystem       1K-blocks    Used Available Use% Mounted on\n/dev/block/dm-55   8107484 1257732   6702296  16% /data/user/0\n"
+        usage = vs.parse_df_kb(out)
+        self.assertEqual((usage.total_kb, usage.used_kb, usage.avail_kb), (8107484, 1257732, 6702296))
+
+    def test_garbage_is_none(self):
+        self.assertIsNone(vs.parse_df_kb("df: /data: No such file"))
+        self.assertIsNone(vs.parse_df_kb(DF_HEALTHY))  # human-readable sizes, not 1K blocks
+
+
 class ClampTests(unittest.TestCase):
     def test_values_inside_the_range_pass_through(self):
         self.assertEqual(vs.clamp_storage_gb(32), 32)

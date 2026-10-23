@@ -43,6 +43,7 @@ from bridge.ui.pages.library.android_storage import AndroidStoragePage
 from bridge.ui.pages.library.media_library import MediaLibraryPage
 from bridge.ui.pages.library.roms import RomsPage
 from bridge.ui.pages.settings.advanced import AdvancedPage
+from bridge.ui.pages.settings.storage import StoragePage
 from bridge.ui.pages.settings.display import DisplayPage
 from bridge.ui.pages.settings.emulator import EmulatorPage
 from bridge.ui.pages.uninstall import UninstallPage
@@ -180,6 +181,7 @@ class ManagerWindow(QMainWindow):
         self.register_subpage("settings", self.display_page)
         self.emulator_page = EmulatorPage(self)
         self.register_subpage("emulator", self.emulator_page)
+        self.register_subpage("storage", StoragePage(self))
         self.advanced_page = AdvancedPage(self)
         self.register_subpage("advanced", self.advanced_page)
         self.register_subpage("backup_restore", BackupRestorePage(self))

@@ -480,7 +480,10 @@ def apply_lean_profile():
     return report
 
 
-def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_apk: Path, lean: bool = False) -> None:
+def boot_avd_and_install(
+    emulator_exe: Path, avd_name: str, env: dict, patched_apk: Path, lean: bool = False,
+    after_install: Callable[[], None] | None = None,
+) -> None:
     process = None
     log_path = WORK_DIR / "first_boot_emulator.log"
     if is_avd_connected():
@@ -597,7 +600,12 @@ def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_a
             process.terminate()
         import portable_sdk
         portable_sdk.reset_avd_data(portable_sdk.PORTABLE_AVD_HOME / f"{avd_name}.avd")
-        return boot_avd_and_install(emulator_exe, avd_name, env, patched_apk, lean=False)
+        return boot_avd_and_install(emulator_exe, avd_name, env, patched_apk, lean=False, after_install=after_install)
+
+    if after_install is not None:
+        # The VM is up and fully set up at this point; callers that need it
+        # running (restoring a backup into a rebuilt VM) do their work here.
+        after_install()
 
     print("[setup] shutting the AVD back down (Community-iiSU-PC Manager.bat will bring it up properly from here on)...")
     subprocess.run(["adb", "emu", "kill"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
@@ -756,6 +764,28 @@ def update_iisu(apk_path: Path, on_stage: Callable[[str, int, int], None] | None
 
     stage(2, "Done")
     print(f"\n=== iiSU updated ({apk_path.name}) ===")
+
+
+def rebuild_avd_with_iisu(
+    avd_name: str, patched_apk: Path, lean: bool = False, after_install: Callable[[], None] | None = None
+) -> None:
+    """Boots an AVD whose data files were just replaced with empty ones (the
+    Settings > Storage resize) and sets it up like a fresh install: iiSU, the
+    redirector apps, the lean profile if asked. after_install runs while the
+    VM is up, before it is shut down again. Any failure stops the emulator so
+    the caller can put the old data files back."""
+    sys.path.insert(0, str(BRIDGE_DIR))
+    import portable_sdk
+
+    env_overrides = portable_sdk.ensure_portable_sdk(avd_name, sdk_bootstrap.SDK_ROOT)
+    env = os.environ.copy()
+    env.update(env_overrides)
+    emulator_exe = portable_sdk.PORTABLE_SDK / "emulator" / portable_sdk.EMULATOR_BIN
+    try:
+        boot_avd_and_install(emulator_exe, avd_name, env, patched_apk, lean=lean, after_install=after_install)
+    except BaseException:
+        subprocess.run(["adb", "emu", "kill"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
+        raise
 
 
 def cleanup_installer_sdk() -> None:
