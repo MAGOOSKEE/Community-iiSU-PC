@@ -72,5 +72,32 @@ class QuickbootAutosaveRegressionTests(unittest.TestCase):
         self.assertIs(mock_autosave.call_args.kwargs["enabled"], True)
 
 
+class HeadlessLaunchTests(unittest.TestCase):
+    def _emulator_args(self, headless: bool) -> list[str]:
+        """The command line _launch_once builds, without starting anything."""
+        profile = start_iisu_pc.emulator_profiles.normalize_profile({})
+        with patch.object(start_iisu_pc.subprocess, "Popen") as popen, \
+             patch.object(start_iisu_pc, "is_avd_running", return_value=True), \
+             patch("builtins.open", unittest.mock.mock_open()):
+            start_iisu_pc._launch_once(Path("emulator.exe"), "iisuwin", {}, [], False, profile, False, headless)
+            return popen.call_args.args[0]
+
+    def test_headless_adds_no_window(self):
+        self.assertIn("-no-window", self._emulator_args(headless=True))
+
+    def test_a_normal_start_keeps_the_window(self):
+        self.assertNotIn("-no-window", self._emulator_args(headless=False))
+
+    def test_start_avd_passes_headless_through_every_attempt(self):
+        with patch.object(start_iisu_pc, "find_system_emulator_exe", return_value=Path("C:/fake/emulator.exe")), \
+             patch.object(start_iisu_pc, "ensure_portable_sdk", return_value={"ANDROID_SDK_ROOT": "C:/fake/sdk"}), \
+             patch.object(start_iisu_pc, "clear_stale_locks"), \
+             patch.object(start_iisu_pc, "patch_config_ini"), \
+             patch.object(start_iisu_pc, "set_quickboot_autosave"), \
+             patch.object(start_iisu_pc, "_launch_once", return_value=1) as launch:
+            start_iisu_pc.start_avd("iisuwin", [], headless=True)
+        self.assertIs(launch.call_args.args[-1], True)
+
+
 if __name__ == "__main__":
     unittest.main()

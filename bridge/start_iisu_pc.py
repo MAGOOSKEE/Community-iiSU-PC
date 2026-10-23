@@ -312,6 +312,7 @@ def _launch_once(
     debug_console: bool,
     profile: dict,
     force_cold_boot: bool,
+    headless: bool = False,
 ) -> int | None:
     """One launch attempt. Logged to a real file, not a pipe, by default: a
     pipe's write end would get inherited by this long-lived process and
@@ -354,6 +355,9 @@ def _launch_once(
     print(f"[start] emulator profile: {emulator_profiles.describe(profile)}")
     if force_cold_boot:
         args.append("-no-snapshot")
+    if headless:
+        # No emulator window at all; adb, the bridge and iiSU itself run as usual.
+        args.append("-no-window")
     if debug_console:
         process = subprocess.Popen(
             args,
@@ -408,6 +412,7 @@ def start_avd(
     gpu_mode: str = "auto",
     force_cold_boot: bool = True,
     profile: dict | None = None,
+    headless: bool = False,
 ) -> int | None:
     """Launches the AVD directly (bypassing the buggy `android emulator
     start` wrapper) and returns its PID once it's confirmed running, so the
@@ -475,7 +480,7 @@ def start_avd(
             force_cold_boot=effective_cold_boot,
             extra_overrides=emulator_profiles.config_ini_overrides(profile),
         )
-        pid = _launch_once(emulator_exe, avd_name, env, usb_passthrough, debug_console, profile, effective_cold_boot)
+        pid = _launch_once(emulator_exe, avd_name, env, usb_passthrough, debug_console, profile, effective_cold_boot, headless)
         if pid is not None:
             return pid
         diagnose_system_image(avd_dir, env_overrides["ANDROID_SDK_ROOT"])
@@ -504,7 +509,10 @@ def sync_rom_library() -> None:
         print(f"[start] ROM library sync failed ({e}), continuing anyway")
 
 
-def main() -> None:
+def main(headless: bool = False) -> None:
+    """headless=True boots the Android VM without its window (and without the
+    boot overlay, which would have nothing to cover), for running it in the
+    background or on a machine nobody is sitting at."""
     winapi.ensure_linux_kwin_rules()
     try:
         config = load_config()
@@ -539,10 +547,11 @@ def main() -> None:
         and not is_avd_running(avd_name)
         and config.get("show_boot_overlay", True)
         and not debug_console
+        and not headless
     )
     overlay = boot_overlay.show("Booting Community-iiSU-PC, please wait...") if show_overlay else None
     try:
-        _run_start_sequence(config, avd_name, port, debug_console, state)
+        _run_start_sequence(config, avd_name, port, debug_console, state, headless)
     finally:
         boot_overlay.close(overlay)
 
@@ -563,7 +572,7 @@ def _start_waydroid(config: dict, state: dict) -> None:
     print("[start] Waydroid is up.")
 
 
-def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: bool, state: dict) -> None:
+def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: bool, state: dict, headless: bool = False) -> None:
     if resolve_backend(config) == BACKEND_WAYDROID:
         _start_waydroid(config, state)
     elif is_avd_running(avd_name):
@@ -579,13 +588,13 @@ def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: b
             print(f"[start] Starting {avd_name} (quick resume)...")
         pid = start_avd(
             avd_name, config.get("usb_passthrough", []), debug_console,
-            force_cold_boot=force_cold_boot, profile=emulator_profiles.active_profile(config),
+            force_cold_boot=force_cold_boot, profile=emulator_profiles.active_profile(config), headless=headless,
         )
         if pid is None:
             sys.exit(1)
         state["emulator_pid"] = pid
         save_boot_fingerprint(compute_boot_fingerprint(config), new_parts)
-        print(f"[start] {avd_name} is up.")
+        print(f"[start] {avd_name} is up{' (headless, no window)' if headless else ''}.")
 
     print("[start] Syncing your ROM library into the AVD...")
     sync_rom_library()
@@ -661,4 +670,4 @@ def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: b
 
 
 if __name__ == "__main__":
-    main()
+    main(headless="--headless" in sys.argv[1:])

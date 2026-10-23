@@ -199,6 +199,10 @@ class HomePage(PageBase):
 
     def _show_advanced_menu(self) -> None:
         menu = QMenu(self)
+        boot_headless = menu.addAction("Boot Headless (no window)", self._start_headless)
+        # Only meaningful when nothing is running yet.
+        boot_headless.setEnabled(self.window.configured and not self.busy and not (self.window.last_bridge_up or self.window.last_avd_up))
+        menu.addSeparator()
         menu.addAction("ROMs Folder", self._open_roms_folder)
         menu.addAction("Open Logs Folder", self._open_logs)
         menu.addAction("Recreate Shortcut", self._recreate_desktop_shortcut)
@@ -288,13 +292,18 @@ class HomePage(PageBase):
         self.window.hide()
         self._hidden_for_setup = True
 
-    def _start(self) -> None:
+    def _start(self, headless: bool = False) -> None:
         if self.busy:
             return
         self._set_busy(True)
-        self.stage_label.setText("Starting...")
-        self._append_log("\n--- Start ---\n")
-        self._guarded_signals = run_in_background(self._run_guarded, self._on_guarded_done, self._on_guarded_error, start_iisu_pc.main)
+        self.stage_label.setText("Starting (headless)..." if headless else "Starting...")
+        self._append_log("\n--- Start (headless, no window) ---\n" if headless else "\n--- Start ---\n")
+        self._guarded_signals = run_in_background(
+            self._run_guarded, self._on_guarded_done, self._on_guarded_error, lambda: start_iisu_pc.main(headless=headless)
+        )
+
+    def _start_headless(self) -> None:
+        self._start(headless=True)
 
     def _stop(self) -> None:
         if self.busy:
