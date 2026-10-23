@@ -28,7 +28,7 @@ from jre_env import java_exe, java_subprocess_env, keytool_exe
 from patch_iisu import patch_apk, validate_iisu_apk
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from shared import app_version
+from shared import app_version, vm_storage
 from shared.steam_deck import STEAM_DECK_DISPLAY, is_steam_deck
 from shared.platform_compat import IS_WINDOWS, detached_popen_kwargs, subprocess_creationflags
 from shared.vm_backend import (
@@ -397,10 +397,12 @@ def is_avd_connected() -> bool:
     return vm_device_connected(result.stdout)
 
 
-def install_iisu_into_running_vm(patched_apk: Path) -> None:
+def install_iisu_into_running_vm(patched_apk: Path, lean: bool = False):
     """Installs the patched iiSU, makes it the home app, and installs the
     redirector stubs into whichever Android VM is currently reachable over
-    adb (the AVD or Waydroid, the commands are identical)."""
+    adb (the AVD or Waydroid, the commands are identical). With lean=True the
+    VM is then trimmed to what iiSU needs (see apply_lean_profile) and the
+    trim's report is returned; None otherwise."""
     print("[setup] installing the patched iiSU...")
     result = None
     for attempt in range(5):
@@ -447,9 +449,38 @@ def install_iisu_into_running_vm(patched_apk: Path) -> None:
         )
 
     install_default_redirectors()
+    return apply_lean_profile() if lean else None
 
 
-def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_apk: Path) -> None:
+def apply_lean_profile():
+    """Trims the running AVD down to the Files app, Chrome, the Play Store
+    with its Google services, LeanKeyboard and the core system (see
+    shared/vm_trim.py for what and why). Always safe to call: if the keyboard
+    can't be downloaded the trim just keeps Gboard, and a trim that leaves the
+    VM unhealthy is rolled back by the service. Returns its TrimReport; the
+    caller must check report.needs_rebuild (the VM stopped booting)."""
+    sys.path.insert(0, str(BRIDGE_DIR))
+    from services import vm_trim_service as trim
+    from shared import vm_trim
+
+    def adb(*args, timeout=30):
+        return subprocess.run(
+            ["adb", *args], capture_output=True, text=True, timeout=timeout,
+            creationflags=CREATE_NO_WINDOW, encoding="utf-8", errors="replace",
+        )
+
+    keyboard_apk = None
+    try:
+        keyboard_apk = trim.download_pinned(vm_trim.LEAN_KEYBOARD, WORK_DIR / "leankeyboard.apk", lambda m: print(f"[setup]   {m}"))
+    except Exception as e:  # noqa: BLE001; offline or a bad download must not fail Setup, Gboard just stays
+        print(f"[setup] couldn't get LeanKeyboard ({e}), keeping the default keyboard")
+    print("[setup] trimming the Android VM down to what iiSU needs (this includes a reboot to check it still starts)...")
+    report = trim.make_lean(adb, keyboard_apk, progress=lambda m: print(f"[setup]   {m}"))
+    print(f"[setup] lean profile: {report.summary()}")
+    return report
+
+
+def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_apk: Path, lean: bool = False) -> None:
     process = None
     log_path = WORK_DIR / "first_boot_emulator.log"
     if is_avd_connected():
@@ -551,7 +582,22 @@ def boot_avd_and_install(emulator_exe: Path, avd_name: str, env: dict, patched_a
             f"{setup_script} resumes from here rather than starting over."
         )
 
-    install_iisu_into_running_vm(patched_apk)
+    report = install_iisu_into_running_vm(patched_apk, lean=lean)
+    if report is not None and report.needs_rebuild:
+        # A trimmed VM that no longer boots can't be repaired in place (no
+        # package manager without a booted system). On a fresh install there's
+        # nothing in it worth keeping, so start the data over and install
+        # again without the trim.
+        print("[setup] the trimmed VM stopped booting, so the trim is being skipped: rebuilding the VM and installing normally...")
+        subprocess.run(["adb", "emu", "kill"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
+        deadline = time.time() + 30
+        while time.time() < deadline and is_avd_connected():
+            time.sleep(1)
+        if process is not None and process.poll() is None:
+            process.terminate()
+        import portable_sdk
+        portable_sdk.reset_avd_data(portable_sdk.PORTABLE_AVD_HOME / f"{avd_name}.avd")
+        return boot_avd_and_install(emulator_exe, avd_name, env, patched_apk, lean=False)
 
     print("[setup] shutting the AVD back down (Community-iiSU-PC Manager.bat will bring it up properly from here on)...")
     subprocess.run(["adb", "emu", "kill"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
@@ -734,7 +780,7 @@ def cleanup_installer_sdk() -> None:
         print(f"[setup] freed {reclaimed / 1e9:.1f} GB by removing the now-redundant installer-side SDK copy")
 
 
-def write_bridge_config(avd_name: str, backend: str = BACKEND_AVD) -> None:
+def write_bridge_config(avd_name: str, backend: str = BACKEND_AVD, storage_gb: int | None = None, lean: bool | None = None) -> None:
     """Creates bridge/config.json from the generic template if this is a
     fresh install (no config yet), or just patches avd_name/display into
     whatever's already there, so re-running this against an existing,
@@ -776,6 +822,10 @@ def write_bridge_config(avd_name: str, backend: str = BACKEND_AVD) -> None:
     # Saved so a later login to a different session type can't flip an
     # existing install onto a runtime that has no iiSU in it.
     config["vm_backend"] = backend
+    if storage_gb is not None:
+        config["vm_storage_gb"] = storage_gb
+    if lean is not None:
+        config["lean_vm"] = lean
     # A Steam Deck's panel is 1280x800; the 1080p default would be scaled
     # down by the compositor and look soft.
     config.setdefault("display", dict(STEAM_DECK_DISPLAY if is_steam_deck() else DEFAULT_DISPLAY))
@@ -846,7 +896,12 @@ def create_desktop_shortcut(apk_path: Path) -> None:
         print(f"[setup] couldn't create a desktop shortcut ({e}), you can still use Community-iiSU-PC Manager.bat directly")
 
 
-def run_setup(apk_path: Path, on_stage: Callable[[str, int, int], None] | None = None) -> None:
+def run_setup(
+    apk_path: Path,
+    on_stage: Callable[[str, int, int], None] | None = None,
+    storage_gb: int = vm_storage.DEFAULT_DATA_PARTITION_GB,
+    lean: bool = True,
+) -> None:
     """Does the actual work, given a source APK path, shared by the CLI
     entry point below and setup_gui.py, so both stay in sync with exactly
     one implementation. Reports progress via plain print(), which the GUI
@@ -867,7 +922,10 @@ def run_setup(apk_path: Path, on_stage: Callable[[str, int, int], None] | None =
         if on_stage:
             on_stage(label, index + 1, total)
 
+    storage_gb = vm_storage.clamp_storage_gb(storage_gb)
     print(app_version.banner("setup", f"backend {backend}"))
+    if backend == BACKEND_AVD:
+        print(f"[setup] Android VM internal storage: {storage_gb} GB (a maximum, it only uses what's filled), lean profile: {'on' if lean else 'off'}")
     print("=== Community-iiSU-PC first-time setup ===\n")
     stage(0)
     if backend == BACKEND_WAYDROID:
@@ -889,7 +947,7 @@ def run_setup(apk_path: Path, on_stage: Callable[[str, int, int], None] | None =
         sdk_bootstrap.ensure_tooling()
         print("[setup] adb and build-tools ready")
     else:
-        avd_dir = sdk_bootstrap.ensure_sdk_and_avd(DEFAULT_AVD_NAME)
+        avd_dir = sdk_bootstrap.ensure_sdk_and_avd(DEFAULT_AVD_NAME, storage_gb)
         print(f"[setup] AVD ready: {avd_dir}")
 
     stage(2)
@@ -925,10 +983,14 @@ def run_setup(apk_path: Path, on_stage: Callable[[str, int, int], None] | None =
         emulator_exe = portable_sdk.PORTABLE_SDK / "emulator" / portable_sdk.EMULATOR_BIN
 
         stage(5)
-        boot_avd_and_install(emulator_exe, DEFAULT_AVD_NAME, env, patched_apk)
+        boot_avd_and_install(emulator_exe, DEFAULT_AVD_NAME, env, patched_apk, lean=lean)
 
     stage(6)
-    write_bridge_config(DEFAULT_AVD_NAME, backend)
+    write_bridge_config(
+        DEFAULT_AVD_NAME, backend,
+        storage_gb=storage_gb if backend == BACKEND_AVD else None,
+        lean=lean if backend == BACKEND_AVD else None,
+    )
     cleanup_installer_sdk()
     create_desktop_shortcut(apk_path)
 

@@ -276,7 +276,7 @@ def ensure_tooling() -> None:
     install_packages(TOOLING_PACKAGES)
 
 
-def ensure_sdk_and_avd(avd_name: str) -> Path:
+def ensure_sdk_and_avd(avd_name: str, storage_gb: int | None = None) -> Path:
     """Top-level entry point: makes sure the SDK is installed and an AVD
     named avd_name exists under ~/.android/avd/, ready for
     bridge/portable_sdk.py to adopt into a fully portable copy."""
@@ -284,11 +284,11 @@ def ensure_sdk_and_avd(avd_name: str) -> Path:
     install_packages()
     create_default_avd()
     avd_dir = rename_avd(DEVICE_PROFILE, avd_name)
-    enlarge_data_partition(avd_dir)
+    enlarge_data_partition(avd_dir, storage_gb)
     return avd_dir
 
 
-def enlarge_data_partition(avd_dir: Path) -> None:
+def enlarge_data_partition(avd_dir: Path, storage_gb: int | None = None) -> None:
     """The profile's default 6 GB data partition fills up (iiSU's artwork
     alone reaches 2 GB, on top of a Play-image Android), after which iiSU
     crashes with SQLITE_FULL. Sets a bigger one, but only while the AVD has
@@ -298,5 +298,6 @@ def enlarge_data_partition(avd_dir: Path) -> None:
 
     if any((avd_dir / name).exists() for name in ("userdata-qemu.img", "userdata-qemu.img.qcow2", "userdata.img")):
         return
-    if vm_storage.set_data_partition_size(avd_dir / "config.ini"):
-        print(f"[sdk] AVD data partition set to {vm_storage.DEFAULT_DATA_PARTITION_GB} GB")
+    gb = storage_gb or vm_storage.DEFAULT_DATA_PARTITION_GB
+    if vm_storage.set_data_partition_size(avd_dir / "config.ini", gb):
+        print(f"[sdk] AVD data partition set to {gb} GB")

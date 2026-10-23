@@ -153,6 +153,46 @@ def patch_config_ini(config_ini: Path, force_cold_boot: bool = True, extra_overr
     config_ini.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
 
 
+# Everything that belongs to the VM's data partition. Deleting or moving all of
+# them makes the emulator build a fresh, empty data image on the next start,
+# at whatever size config.ini asks for. version_num.cache has to go with them,
+# and encryptionkey.img too: the metadata-encryption keys belong to the old data.
+DATA_FILES = (
+    "userdata-qemu.img.qcow2",
+    "userdata-qemu.img",
+    "encryptionkey.img.qcow2",
+    "encryptionkey.img",
+    "cache.img.qcow2",
+    "cache.img",
+    "snapshots",
+    "version_num.cache",
+)
+
+
+def reset_avd_data(avd_dir: Path, aside: Path | None = None) -> list[str]:
+    """Removes the AVD's data files so the next boot starts from an empty
+    data partition. With `aside`, moves them into that folder instead of
+    deleting (so the old data can be put back). Returns the names handled.
+    The VM must be stopped."""
+    import shutil
+
+    handled = []
+    if aside is not None:
+        aside.mkdir(parents=True, exist_ok=True)
+    for name in DATA_FILES:
+        source = avd_dir / name
+        if not source.exists():
+            continue
+        if aside is not None:
+            shutil.move(str(source), str(aside / name))
+        elif source.is_dir():
+            shutil.rmtree(source, ignore_errors=True)
+        else:
+            source.unlink(missing_ok=True)
+        handled.append(name)
+    return handled
+
+
 def set_quickboot_autosave(avd_dir: Path, enabled: bool) -> None:
     """The emulator rewrites its own quickbootChoice.ini on exit based on
     its current save-on-exit preference, independent of any launch flag:

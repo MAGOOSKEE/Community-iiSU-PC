@@ -91,5 +91,50 @@ class ConfigIniTests(unittest.TestCase):
         self.assertIsNone(vs.parse_configured_gb("hw.ramSize=2048\n"))
 
 
+class ClampTests(unittest.TestCase):
+    def test_values_inside_the_range_pass_through(self):
+        self.assertEqual(vs.clamp_storage_gb(32), 32)
+        self.assertEqual(vs.clamp_storage_gb("24"), 24)
+
+    def test_out_of_range_values_are_pulled_in(self):
+        self.assertEqual(vs.clamp_storage_gb(1), vs.MIN_DATA_PARTITION_GB)
+        self.assertEqual(vs.clamp_storage_gb(9999), vs.MAX_DATA_PARTITION_GB)
+
+    def test_garbage_falls_back_to_the_default(self):
+        self.assertEqual(vs.clamp_storage_gb(None), vs.DEFAULT_DATA_PARTITION_GB)
+        self.assertEqual(vs.clamp_storage_gb("lots"), vs.DEFAULT_DATA_PARTITION_GB)
+
+
+class ResetAvdDataTests(unittest.TestCase):
+    def _avd(self, tmp):
+        avd = Path(tmp) / "x.avd"
+        (avd / "snapshots").mkdir(parents=True)
+        for name in ("userdata-qemu.img.qcow2", "encryptionkey.img.qcow2", "version_num.cache", "config.ini", "hardware-qemu.ini"):
+            (avd / name).write_text("x")
+        return avd
+
+    def test_removes_data_files_and_keeps_the_avd_definition(self):
+        from bridge import portable_sdk
+
+        with tempfile.TemporaryDirectory() as tmp:
+            avd = self._avd(tmp)
+            handled = portable_sdk.reset_avd_data(avd)
+            self.assertIn("userdata-qemu.img.qcow2", handled)
+            self.assertIn("version_num.cache", handled)
+            self.assertFalse((avd / "userdata-qemu.img.qcow2").exists())
+            self.assertFalse((avd / "snapshots").exists())
+            self.assertTrue((avd / "config.ini").exists())
+
+    def test_aside_moves_instead_of_deleting(self):
+        from bridge import portable_sdk
+
+        with tempfile.TemporaryDirectory() as tmp:
+            avd = self._avd(tmp)
+            aside = Path(tmp) / "old"
+            portable_sdk.reset_avd_data(avd, aside=aside)
+            self.assertTrue((aside / "userdata-qemu.img.qcow2").exists())
+            self.assertFalse((avd / "userdata-qemu.img.qcow2").exists())
+
+
 if __name__ == "__main__":
     unittest.main()

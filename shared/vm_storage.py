@@ -19,7 +19,18 @@ from dataclasses import dataclass
 from pathlib import Path
 
 DEFAULT_DATA_PARTITION_GB = 16
+MIN_DATA_PARTITION_GB = 8
+MAX_DATA_PARTITION_GB = 128
 DATA_PARTITION_KEY = "disk.dataPartition.size"
+
+def clamp_storage_gb(value) -> int:
+    """A user-supplied internal storage size as an int inside the supported range."""
+    try:
+        gb = int(value)
+    except (TypeError, ValueError):
+        return DEFAULT_DATA_PARTITION_GB
+    return max(MIN_DATA_PARTITION_GB, min(MAX_DATA_PARTITION_GB, gb))
+
 
 # Free-space thresholds for the warning states.
 CRITICAL_FREE_KB = 200 * 1024

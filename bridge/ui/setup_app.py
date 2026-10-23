@@ -28,8 +28,8 @@ setup_wizard.ensure_pyside6()
 
 from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
-    QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QProgressBar, QPlainTextEdit, QPushButton,
-    QSizePolicy, QVBoxLayout, QWidget,
+    QCheckBox, QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QProgressBar, QPlainTextEdit, QPushButton,
+    QSizePolicy, QSpinBox, QVBoxLayout, QWidget,
 )
 
 import winapi
@@ -37,6 +37,7 @@ from bridge.ui.widgets.card import Card
 from bridge.ui.widgets.gradient_divider import GradientDivider
 from bridge.ui.workers.log_stream import LogStreamRedirector
 from bridge.ui.workers.task_runner import run_in_background
+from shared import vm_storage
 from shared.qt_theme import Fonts, GREEN, RED, SPACING_LG, SPACING_MD, SPACING_SM, apply_theme
 
 BRIDGE_DIR = setup_wizard.BRIDGE_DIR
@@ -103,6 +104,40 @@ class SetupWindow(QMainWindow):
         apk_row.addWidget(self.browse_button)
         apk_layout.addLayout(apk_row)
         root.addWidget(apk_card)
+
+        vm_card = Card()
+        vm_layout = QVBoxLayout(vm_card)
+        vm_layout.setContentsMargins(SPACING_MD, SPACING_MD - 2, SPACING_MD, SPACING_MD - 2)
+        vm_heading = QLabel("Android VM")
+        vm_heading.setFont(Fonts.heading())
+        vm_layout.addWidget(vm_heading)
+
+        storage_row = QHBoxLayout()
+        storage_label = QLabel("Internal storage")
+        storage_row.addWidget(storage_label)
+        self.storage_spin = QSpinBox()
+        self.storage_spin.setRange(vm_storage.MIN_DATA_PARTITION_GB, vm_storage.MAX_DATA_PARTITION_GB)
+        self.storage_spin.setValue(vm_storage.DEFAULT_DATA_PARTITION_GB)
+        self.storage_spin.setSuffix(" GB")
+        self.storage_spin.setToolTip(
+            "The most the VM can ever hold. The file on your drive only grows as the VM fills up, "
+            "so a bigger number costs nothing until it's used. It can be changed later in Settings, "
+            "but that recreates the VM."
+        )
+        storage_row.addWidget(self.storage_spin)
+        storage_hint = QLabel("A maximum, not a reservation. Only what's filled is stored on your drive.")
+        storage_hint.setProperty("role", "dim")
+        storage_row.addWidget(storage_hint, stretch=1)
+        vm_layout.addLayout(storage_row)
+
+        self.lean_check = QCheckBox("Lean VM: remove apps iiSU doesn't need (keeps Files, Chrome, Play Store)")
+        self.lean_check.setChecked(True)
+        self.lean_check.setToolTip(
+            "Removes Maps, Photos, YouTube, Gmail and the other bundled apps, installs LeanKeyboard as the "
+            "keyboard, and checks the VM still starts. Uses less memory and disk. Untick for a stock VM."
+        )
+        vm_layout.addWidget(self.lean_check)
+        root.addWidget(vm_card)
 
         action_row = QHBoxLayout()
         self.start_button = QPushButton("Start Setup")
@@ -176,17 +211,22 @@ class SetupWindow(QMainWindow):
         self.running = True
         self.start_button.setEnabled(False)
         self.browse_button.setEnabled(False)
+        self.storage_spin.setEnabled(False)
+        self.lean_check.setEnabled(False)
         self._set_status("Running setup. This can take a long time on first run (several GB)...")
         self.progress.setRange(0, 0)
 
-        self._setup_signals = run_in_background(self._run_setup_thread, self._on_setup_finished, apk_path=self.apk_path)
+        self._setup_signals = run_in_background(
+            self._run_setup_thread, self._on_setup_finished,
+            apk_path=self.apk_path, storage_gb=self.storage_spin.value(), lean=self.lean_check.isChecked(),
+        )
 
-    def _run_setup_thread(self, apk_path: Path) -> Exception | None:
+    def _run_setup_thread(self, apk_path: Path, storage_gb: int, lean: bool) -> Exception | None:
         old_stdout = sys.stdout
         sys.stdout = self._log_stream
         error: Exception | None = None
         try:
-            setup_wizard.run_setup(apk_path, on_stage=self._on_stage)
+            setup_wizard.run_setup(apk_path, on_stage=self._on_stage, storage_gb=storage_gb, lean=lean)
         except Exception as e:  # noqa: BLE001; surfaced to the user below, not swallowed
             error = e
             print(f"\n[setup] FAILED: {e}\n")
@@ -209,6 +249,8 @@ class SetupWindow(QMainWindow):
         self.progress.setRange(0, 100)
         self.progress.setValue(100 if error is None else 0)
         self.browse_button.setEnabled(True)
+        self.storage_spin.setEnabled(True)
+        self.lean_check.setEnabled(True)
         self.start_button.setEnabled(True)
 
         if error is None:
