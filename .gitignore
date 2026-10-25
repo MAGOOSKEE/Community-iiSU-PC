@@ -41,6 +41,7 @@ __pycache__/
 Thumbs.db
 /bridge/bridge.log
 /bridge/stop.log
+/bridge/setup.log
 
 # Local/build artifacts
 /.claude/

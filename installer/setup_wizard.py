@@ -13,6 +13,7 @@ Usage:
     python setup_wizard.py
 """
 
+import contextlib
 import json
 import os
 import secrets
@@ -49,6 +50,52 @@ KEYSTORE_PATH = KEYSTORE_DIR / "iisu-pc.keystore"
 KEYSTORE_META_PATH = KEYSTORE_DIR / "keystore.json"
 KEY_ALIAS = "iisu-pc"
 WORK_DIR = INSTALLER_DIR / "_work"
+SETUP_LOG_PATH = BRIDGE_DIR / "setup.log"
+SETUP_LOG_MAX_BYTES = 1_000_000
+
+
+class _Tee:
+    """Writes to every stream it holds; a failing one never takes the others down."""
+
+    def __init__(self, *streams):
+        self._streams = streams
+
+    def write(self, text: str) -> int:
+        for stream in self._streams:
+            try:
+                stream.write(text)
+                stream.flush()
+            except (OSError, ValueError):
+                pass
+        return len(text)
+
+    def flush(self) -> None:
+        for stream in self._streams:
+            try:
+                stream.flush()
+            except (OSError, ValueError):
+                pass
+
+
+@contextlib.contextmanager
+def session_log(path: Path = SETUP_LOG_PATH):
+    """Everything printed while active also goes to bridge/setup.log, flushed as it's
+    written, so a Setup that dies partway (a closed window, a crash) still leaves what
+    it got through. Each run appends; the file restarts once it passes a megabyte."""
+    try:
+        mode = "w" if path.is_file() and path.stat().st_size > SETUP_LOG_MAX_BYTES else "a"
+        log_file = open(path, mode, encoding="utf-8", errors="replace")
+    except OSError:
+        yield  # no log is better than no setup
+        return
+    log_file.write("\n" + "=" * 70 + "\n")
+    previous = sys.stdout
+    sys.stdout = _Tee(previous, log_file)
+    try:
+        yield
+    finally:
+        sys.stdout = previous
+        log_file.close()
 
 DEFAULT_AVD_NAME = "iisuwin"
 DEFAULT_DISPLAY = {"width": 1920, "height": 1080, "density": 240, "refresh_rate": 144}
@@ -1040,7 +1087,8 @@ def main() -> None:
         print("Drop your own copy of the iiSU APK into that folder (any filename, .apk extension)")
         print("and run this again. This tool patches your copy, it doesn't come with one.")
         sys.exit(1)
-    run_setup(apk_path)
+    with session_log():
+        run_setup(apk_path)
 
 
 if __name__ == "__main__":

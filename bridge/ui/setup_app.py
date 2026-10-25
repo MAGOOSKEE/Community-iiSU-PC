@@ -226,11 +226,13 @@ class SetupWindow(QMainWindow):
         sys.stdout = self._log_stream
         error: Exception | None = None
         try:
-            setup_wizard.run_setup(apk_path, on_stage=self._on_stage, storage_gb=storage_gb, lean=lean)
-        except Exception as e:  # noqa: BLE001; surfaced to the user below, not swallowed
-            error = e
-            print(f"\n[setup] FAILED: {e}\n")
-            print(traceback.format_exc())
+            with setup_wizard.session_log():
+                try:
+                    setup_wizard.run_setup(apk_path, on_stage=self._on_stage, storage_gb=storage_gb, lean=lean)
+                except Exception as e:  # noqa: BLE001; surfaced to the user below, not swallowed
+                    error = e
+                    print(f"\n[setup] FAILED: {e}\n")
+                    print(traceback.format_exc())
         finally:
             sys.stdout = old_stdout
         return error
