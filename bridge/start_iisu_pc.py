@@ -581,6 +581,13 @@ def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: b
         new_parts = compute_boot_fingerprint_parts(config)
         old_parts = load_saved_boot_fingerprint_parts()
         reasons = describe_boot_fingerprint_diff(old_parts, new_parts)
+        # A headless run never uses quick resume: a snapshot taken with a window
+        # failed to load windowless (and a headless run can't save one), so a later
+        # windowed resume would bring back the state from before it, losing whatever
+        # the headless session wrote. Cold booting here and again on the next normal
+        # start (the fingerprint is cleared below) keeps the disk the one truth.
+        if headless:
+            reasons = ["headless start"]
         force_cold_boot = bool(reasons)
         if force_cold_boot:
             print(f"[start] Starting {avd_name} (cold boot: {', '.join(reasons)})...")
@@ -593,7 +600,10 @@ def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: b
         if pid is None:
             sys.exit(1)
         state["emulator_pid"] = pid
-        save_boot_fingerprint(compute_boot_fingerprint(config), new_parts)
+        if headless:
+            clear_boot_fingerprint()  # the next normal start cold boots, see above
+        else:
+            save_boot_fingerprint(compute_boot_fingerprint(config), new_parts)
         print(f"[start] {avd_name} is up{' (headless, no window)' if headless else ''}.")
 
     print("[start] Syncing your ROM library into the AVD...")

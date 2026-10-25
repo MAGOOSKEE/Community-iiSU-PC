@@ -103,6 +103,39 @@ class HeadlessStartSequenceTests(unittest.TestCase):
         popen.assert_called_once()
 
 
+class HeadlessSnapshotTests(unittest.TestCase):
+    """A headless run must not resume or leave behind a quick-resume snapshot: a windowed resume
+    afterwards would bring back the state from before the headless session."""
+
+    def _start(self, headless: bool):
+        with patch.object(start_iisu_pc, "is_avd_running", return_value=False), \
+             patch.object(start_iisu_pc, "compute_boot_fingerprint_parts", return_value={"a": "1"}), \
+             patch.object(start_iisu_pc, "load_saved_boot_fingerprint_parts", return_value={"a": "1"}), \
+             patch.object(start_iisu_pc, "compute_boot_fingerprint", return_value="fp"), \
+             patch.object(start_iisu_pc, "start_avd", return_value=4242) as start_avd, \
+             patch.object(start_iisu_pc, "save_boot_fingerprint") as save, \
+             patch.object(start_iisu_pc, "clear_boot_fingerprint") as clear, \
+             patch.object(start_iisu_pc, "sync_rom_library"), \
+             patch.object(start_iisu_pc, "save_state"), \
+             patch.object(start_iisu_pc, "is_port_open", return_value=True), \
+             patch.object(start_iisu_pc, "launch_iisu"), \
+             patch.object(start_iisu_pc, "show_iisu_window"):
+            start_iisu_pc._run_start_sequence({}, "iisuwin", 7737, False, {}, headless)
+        return start_avd, save, clear
+
+    def test_headless_always_cold_boots_and_clears_the_resume_state(self):
+        start_avd, save, clear = self._start(headless=True)
+        self.assertIs(start_avd.call_args.kwargs["force_cold_boot"], True)
+        save.assert_not_called()
+        clear.assert_called_once()
+
+    def test_a_normal_start_with_nothing_changed_still_resumes(self):
+        start_avd, save, clear = self._start(headless=False)
+        self.assertIs(start_avd.call_args.kwargs["force_cold_boot"], False)
+        save.assert_called_once()
+        clear.assert_not_called()
+
+
 class HeadlessLaunchTests(unittest.TestCase):
     def _emulator_args(self, headless: bool) -> list[str]:
         """The command line _launch_once builds, without starting anything."""
