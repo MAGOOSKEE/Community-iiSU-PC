@@ -154,9 +154,8 @@ class EmulatorsPage(PageBase):
         reply = QMessageBox.question(
             self,
             "Restore default emulators?",
-            "This replaces every mapping in this list with Community-iiSU-PC's built-in defaults "
-            "(shared/emulator_defaults.py). Any custom or edited mappings you've added "
-            "will be lost. Save afterward to keep the change.",
+            "Replaces every mapping with the built-in defaults. Custom or edited mappings "
+            "are lost. Save afterward to keep the change.",
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
@@ -186,10 +185,8 @@ class EmulatorsPage(PageBase):
             QMessageBox.information(
                 self,
                 "Can't edit here",
-                "This entry maps a different executable per ROM file extension "
-                "(see shared/emulator_defaults.py), editing it as one flat "
-                "executable/flags pair isn't supported here. Edit config.json "
-                "directly if you need to change it.",
+                "This entry maps a different executable per ROM file extension, so it "
+                "can't be edited as a single executable/flags pair here. Edit config.json instead.",
             )
             return
         dialog = EmulatorDialog(self, "Edit emulator mapping", prefix=item.text(0), exe_names=item.text(1), pre_args=item.text(2))
@@ -214,13 +211,13 @@ class EmulatorsPage(PageBase):
         prefix = selected[0].text(0)
         profile = self.window.config_data.get("emulators", {}).get(prefix)
         if profile is None:
-            QMessageBox.critical(self, "Can't test", "This mapping hasn't been saved yet. Click Save first, then try again.")
+            QMessageBox.critical(self, "Can't test", "This mapping isn't saved yet. Save first, then try again.")
             return
 
         rom_filename = None
         if "by_extension" in profile:
             rom_path_str, _filter = QFileDialog.getOpenFileName(
-                self, "Pick a ROM to test this mapping against (it resolves per file extension)"
+                self, "Pick a ROM to test against (this mapping resolves per file extension)"
             )
             if not rom_path_str:
                 return
@@ -231,7 +228,7 @@ class EmulatorsPage(PageBase):
             QMessageBox.critical(
                 self,
                 "No match",
-                f"'{prefix}'" + (f" with '{rom_filename}'" if rom_filename else "") + " doesn't resolve to any configured executable.",
+                f"'{prefix}'" + (f" with '{rom_filename}'" if rom_filename else "") + " doesn't match any configured executable.",
             )
             return
 
@@ -241,7 +238,7 @@ class EmulatorsPage(PageBase):
         lines = [
             f"Looking for: {', '.join(resolved['exe_names'])}",
             f"Launch flags: {' '.join(resolved['pre_args']) or '(none)'}",
-            f"Found: {executable}" if executable else f"NOT found under any of your {len(search_roots)} search folder(s).",
+            f"Found: {executable}" if executable else f"Not found in your {len(search_roots)} search folder(s).",
         ]
         if rom_filename:
             roms_dir = Path(self.window.roms_page.get_roms_dir())

@@ -25,11 +25,10 @@ from shared.qt_theme import Fonts, GREEN, RED, TEXT_DIM
 from shared.vm_backend import BACKEND_AVD, resolve_backend
 
 RESIZE_WARNING = (
-    "Recreating the VM replaces its internal storage with an empty one at the new size, then reinstalls iiSU "
-    "and puts back what the backup holds (title art and media). What it cannot bring back: iiSU's own settings, "
-    "favorites and play history (Android keeps those where no backup can reach), the folder access you granted "
-    "iiSU (you'll pick your ROM folder again), and anything else you installed in the VM. The old storage is "
-    "kept on your drive until you delete it below, so a bad result can be undone by hand."
+    "Recreating replaces the VM's storage with an empty one at the new size, reinstalls iiSU and restores "
+    "the backup (title art and media). Not restored: iiSU's settings, favorites and play history, its folder "
+    "access (pick your ROM folder again), and anything else you installed in the VM. The old storage stays "
+    "on your drive until you delete it below."
 )
 
 
@@ -63,7 +62,7 @@ class StoragePage(PageBase):
         self._busy = False
         self.progress.connect(self._show_progress)
 
-        self.add_header("Storage", "What is using the Android VM's internal storage, and how to change its size.")
+        self.add_header("Storage", "What uses the VM's internal storage, and how to change its size.")
 
         # == Inside the VM ==
         inside = Card()
@@ -103,8 +102,8 @@ class StoragePage(PageBase):
         self.drive_label.setWordWrap(True)
         drive_layout.addWidget(self.drive_label)
         drive_note = QLabel(
-            "The VM's storage file grows as the VM fills up and never shrinks when files are deleted inside "
-            "it, so deleting things in the VM doesn't give drive space back. Recreating the VM below does."
+            "The storage file grows as the VM fills and never shrinks, so deleting files in the VM doesn't "
+            "free drive space. Recreating the VM does."
         )
         drive_note.setWordWrap(True)
         drive_note.setStyleSheet(f"color: {TEXT_DIM};")
@@ -216,22 +215,22 @@ class StoragePage(PageBase):
         self._host = svc.host_info(self._avd_name())
         info = self._host
         configured = f"{info.configured_gb:g} GB" if info.configured_gb else "unknown"
-        text = f"The VM's storage file is {format_size(info.data_bytes)} on your drive, set up to hold up to {configured}."
+        text = f"Storage file: {format_size(info.data_bytes)} on your drive, up to {configured}."
         if self._usage is not None:
             held = info.data_bytes - self._usage.used_kb * 1024
             if held > 512 * 1024 * 1024:
-                text += f"\nAbout {format_size(held)} of that is space Android has freed but the file still holds."
+                text += f"\nAbout {format_size(held)} is freed space the file still holds."
         if info.old_copies:
-            text += f"\nOld copies from earlier resizes: {len(info.old_copies)}, using {format_size(info.old_copies_bytes)}."
+            text += f"\nOld copies: {len(info.old_copies)}, using {format_size(info.old_copies_bytes)}."
         self.drive_label.setText(text)
         self._update_buttons()
 
     def refresh(self) -> None:
         if not self._is_avd_backend():
-            self.summary_label.setText("This page is for the Android Emulator VM. Waydroid manages its own storage.")
+            self.summary_label.setText("Waydroid manages its own storage.")
             return
         if not self._vm_running():
-            self.summary_label.setText("Open Community-iiSU-PC to see what is using the VM's storage.")
+            self.summary_label.setText("Start the VM to see what uses its storage.")
             self.bar.set_segments([])
             self._fill_legend([])
             self.top_apps_label.setText("")
@@ -252,7 +251,7 @@ class StoragePage(PageBase):
             names = ", ".join(f"{name} ({bd.format_kb(kb)})" for name, kb in breakdown.top_apps[:5] if kb > 0)
             self.top_apps_label.setText(f"Largest apps: {names}")
         else:
-            self.top_apps_label.setText("Per-app sizes weren't available this time, so apps are counted under Android system.")
+            self.top_apps_label.setText("Per-app sizes unavailable. Apps are counted under Android system.")
 
     def _fill_legend(self, segments: list[bd.Segment], total_kb: int = 0) -> None:
         while self.legend.count():
@@ -278,8 +277,8 @@ class StoragePage(PageBase):
         listing = "\n".join(f"- {copy.path.name} ({format_size(copy.size_bytes)})" for copy in self._host.old_copies)
         reply = QMessageBox.question(
             self, "Delete old copies",
-            f"Permanently delete these old VM copies?\n\n{listing}\n\nThey are the storage the VM had before an earlier "
-            "resize. Once deleted they can't be brought back.",
+            f"Permanently delete these old VM copies?\n\n{listing}\n\nThey hold the storage from before earlier resizes. "
+            "This can't be undone.",
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
@@ -304,20 +303,20 @@ class StoragePage(PageBase):
         if not self._vm_running():
             QMessageBox.information(
                 self, "Recreate VM",
-                "Open Community-iiSU-PC first. The VM has to be running so iiSU's title art and media can be backed up before anything changes.",
+                "Start the VM first, so iiSU's title art and media can be backed up before anything changes.",
             )
             return
         used_gb = self._usage.used_kb / 1024 / 1024 if self._usage else 0
         if self._usage and new_gb < used_gb * 1.2:
             QMessageBox.warning(
                 self, "Recreate VM",
-                f"{used_gb:.1f} GB is in use right now, so {new_gb} GB would be nearly full from the start. Pick at least {int(used_gb * 1.2) + 1} GB.",
+                f"{used_gb:.1f} GB is in use, so {new_gb} GB would start nearly full. Pick at least {int(used_gb * 1.2) + 1} GB.",
             )
             return
         reply = QMessageBox.warning(
             self, "Recreate the VM?",
-            f"Recreate the Android VM with {new_gb} GB of internal storage?\n\n{RESIZE_WARNING}\n\n"
-            "Next you'll choose where to save the backup. Nothing changes until it has been saved and checked.",
+            f"Recreate the VM with {new_gb} GB of internal storage?\n\n{RESIZE_WARNING}\n\n"
+            "You'll choose where to save the backup next. Nothing changes until it's saved and checked.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Cancel,
         )
         if reply != QMessageBox.StandardButton.Yes:
@@ -340,11 +339,11 @@ class StoragePage(PageBase):
         self._reload_host()
         lines = [f"The VM now has {result.new_gb} GB of internal storage."]
         if result.restore_error:
-            lines.append(f"Restoring iiSU's data failed: {result.restore_error}. Use Backup & Restore > Restore iiSU Data with your backup file.")
+            lines.append(f"Restoring iiSU's data failed: {result.restore_error}. Use Backup & Restore > Restore iiSU Data with your backup.")
         elif result.restore_outcome:
             lines.append("iiSU's title art and media were restored.")
-        lines.append("Open Community-iiSU-PC, and if iiSU asks for your ROM folder, pick it again.")
+        lines.append("Start the VM. If iiSU asks for your ROM folder, pick it again.")
         if result.old_copy:
-            lines.append(f"The old storage is kept in {result.old_copy.name}. Delete it here once you're happy.")
+            lines.append(f"Old storage kept in {result.old_copy.name}. Delete it here when you're happy.")
         self._set_status(lines[0], GREEN)
         QMessageBox.information(self, "Recreate VM", "\n\n".join(lines))

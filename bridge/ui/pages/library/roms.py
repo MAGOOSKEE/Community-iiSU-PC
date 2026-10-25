@@ -32,10 +32,10 @@ class RomsPage(PageBase):
 
         self.add_header(
             "ROM Directory",
-            "Where your games live, and where Community-iiSU-PC looks for your PC emulators.",
+            "Where your games live and where PC emulators are searched for.",
         )
 
-        self.body_layout.addWidget(QLabel("Root ROM folder (contains one subfolder per console):"))
+        self.body_layout.addWidget(QLabel("ROM folder (one subfolder per console):"))
         roms_row = QWidget()
         roms_row_layout = QHBoxLayout(roms_row)
         roms_row_layout.setContentsMargins(0, 0, 0, 0)
@@ -134,7 +134,7 @@ class RomsPage(PageBase):
             self.roms_status_label.setStyleSheet(f"color: {GREEN};")
         else:
             prefix = f"{len(recognized)} recognized, " if recognized else ""
-            self.roms_status_label.setText(f"{prefix}{len(unrecognized)} won't be seen by iiSU (rename these): {', '.join(unrecognized)}")
+            self.roms_status_label.setText(f"{prefix}{len(unrecognized)} not recognized by iiSU (rename): {', '.join(unrecognized)}")
             self.roms_status_label.setStyleSheet(f"color: {RED};")
 
     def _browse_roms_dir(self) -> None:

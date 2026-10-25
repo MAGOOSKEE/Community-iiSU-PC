@@ -111,8 +111,8 @@ class HomePage(PageBase):
         center_layout.addWidget(self.status_row)
 
         self.setup_intro_label = QLabel(
-            "Community-iiSU-PC hasn't been set up yet. Setup installs a self-contained Android VM "
-            "and patches your copy of iiSU to hand off game launches to real PC emulators."
+            "Not set up yet. Setup installs a self-contained Android VM and patches your copy "
+            "of iiSU to hand game launches to PC emulators."
         )
         self.setup_intro_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self.setup_intro_label.setWordWrap(True)
@@ -236,21 +236,20 @@ class HomePage(PageBase):
         if reasons:
             self.resume_reason_label.setText(f"Next start: cold boot ({', '.join(reasons)})")
         else:
-            self.resume_reason_label.setText("Next start: quick resume (nothing relevant has changed)")
+            self.resume_reason_label.setText("Next start: quick resume")
 
     def _clear_resume_state(self) -> None:
         reply = QMessageBox.question(
             self,
             "Clear Resume State",
-            "This forces the next start to do a full cold boot instead of a quick resume.\n\n"
-            "Use this if the Android VM seems stuck in a bad state after resuming. It doesn't "
-            "affect your settings, ROM library, or the VM itself.",
+            "Forces the next start to cold boot instead of resuming.\n\n"
+            "Use it if the VM is stuck after a resume. Your settings, ROMs and the VM are unaffected.",
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
         start_iisu_pc.clear_boot_fingerprint()
         self._refresh_resume_reason()
-        QMessageBox.information(self, "Clear Resume State", "Done. The next start will be a full cold boot.")
+        QMessageBox.information(self, "Clear Resume State", "Done. The next start will cold boot.")
 
     def _refresh_primary_button(self) -> None:
         if not self.window.configured:
@@ -450,9 +449,9 @@ class HomePage(PageBase):
             reply = QMessageBox.question(
                 self.window,
                 "Community-iiSU-PC is still running",
-                "The Android VM and/or launch bridge are still running in the background.\n\n"
-                "Closing this window will NOT stop them, use Stop first if you want to shut "
-                "everything down.\n\nClose this window anyway?",
+                "The VM or bridge is still running in the background.\n\n"
+                "Closing this window won't stop it. Use Stop first to shut everything down.\n\n"
+                "Close anyway?",
             )
             return reply == QMessageBox.StandardButton.Yes
         return True

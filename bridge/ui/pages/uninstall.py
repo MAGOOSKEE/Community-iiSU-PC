@@ -41,9 +41,8 @@ class UninstallPage(PageBase):
         title.setStyleSheet(f"color: {RED};")
         self.body_layout.addWidget(title)
         subtitle = QLabel(
-            "Removes the Android VM, its SDK, your bridge config, the signing keystore, and\n"
-            "the desktop shortcut. Does NOT touch your ROM library, your PC emulators, or the\n"
-            "iiSU APK you supplied."
+            "Removes the Android VM, its SDK, your bridge config, the signing keystore and the\n"
+            "desktop shortcut. Your ROMs, PC emulators and iiSU APK are not touched."
         )
         subtitle.setStyleSheet(f"color: {TEXT_DIM};")
         self.body_layout.addWidget(subtitle)
@@ -121,7 +120,7 @@ class UninstallPage(PageBase):
                 size_text = ""
             self.tree.addTopLevelItem(QTreeWidgetItem([str(path), size_text]))
         if not existing:
-            self.total_label.setText("Nothing to remove. This already looks like a clean slate.")
+            self.total_label.setText("Nothing to remove.")
             self.uninstall_button.setEnabled(False)
         else:
             self.total_label.setText(f"~{total / 1e9:.2f} GB will be reclaimed.")
@@ -134,9 +133,9 @@ class UninstallPage(PageBase):
         reply = QMessageBox.warning(
             self,
             "Remove everything?",
-            f"This will permanently remove {existing_count} item(s), the Android VM, its SDK, "
-            "your bridge config, the signing keystore, and the desktop shortcut.\n\n"
-            "This cannot be undone. Continue?",
+            f"Permanently remove {existing_count} item(s): the Android VM, its SDK, your bridge "
+            "config, the signing keystore and the desktop shortcut.\n\n"
+            "This can't be undone. Continue?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
         if reply != QMessageBox.StandardButton.Yes:

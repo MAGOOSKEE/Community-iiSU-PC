@@ -43,14 +43,14 @@ class EmulatorDownloadDialog(QDialog):
 
         self.backend, self.backend_info = detect_backend()
         if self.backend == "flatpak":
-            backend_desc = "Downloads and installs emulators via Flatpak (Flathub user mode, no root password required)."
+            backend_desc = "Installs via Flatpak (Flathub user mode, no root password needed)."
         elif self.backend == "winget":
-            backend_desc = "Downloads and installs emulators via Windows Package Manager (winget)."
+            backend_desc = "Installs via Windows Package Manager (winget)."
         else:
             backend_desc = self.backend_info
 
         description = QLabel(
-            "Select the main emulators you want Community-iiSU-PC to download and install.\n" + backend_desc
+            "Select the emulators to download and install.\n" + backend_desc
         )
         description.setWordWrap(True)
         description.setProperty("role", "dim")
@@ -188,7 +188,7 @@ class EmulatorDownloadDialog(QDialog):
         self.progress_bar.setValue(total)
 
         if success_count == total:
-            self.status_label.setText(f"Successfully installed all {total} selected emulator(s)!")
+            self.status_label.setText(f"Installed all {total} selected emulator(s).")
             self.status_label.setStyleSheet(f"color: {GREEN};")
         else:
             self.status_label.setText(f"Installed {success_count} of {total} emulator(s). Check the log for details.")

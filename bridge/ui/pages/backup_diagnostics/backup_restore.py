@@ -20,7 +20,7 @@ class BackupRestorePage(PageBase):
         super().__init__(parent, scrollable_body=True)
         self.window = window
 
-        self.add_header("Backup & Restore", "Create a portable backup of iiSU-PC configuration, or restore one later.")
+        self.add_header("Backup & Restore", "Back up or restore iiSU-PC configuration.")
 
         card = Card()
         card_layout = QVBoxLayout(card)
@@ -28,9 +28,8 @@ class BackupRestorePage(PageBase):
         heading.setFont(Fonts.heading())
         card_layout.addWidget(heading)
         note = QLabel(
-            "Backs up detected iiSU-PC configuration such as Windows app mappings "
-            "and bridge settings. ROMs, Android VM storage, caches, logs, executables, "
-            "and Steam game files are intentionally excluded."
+            "Backs up configuration such as Windows app mappings and bridge settings. "
+            "Excludes ROMs, VM storage, caches, logs, executables and Steam game files."
         )
         note.setWordWrap(True)
         note.setStyleSheet(f"color: {TEXT_DIM};")
@@ -55,12 +54,11 @@ class BackupRestorePage(PageBase):
         data_heading.setFont(Fonts.heading())
         data_layout.addWidget(data_heading)
         data_note = QLabel(
-            "Backs up the artwork and media files iiSU keeps in the running Android VM, so a reinstall or "
-            "a rebuilt VM doesn't make it download them all again. The VM has to be running. Restoring "
-            "replaces files with the same names, leaves everything else alone, and switches iiSU off while "
-            "it copies; Stop and Open Community-iiSU-PC afterwards so iiSU reloads it. Not included: your "
-            "ROMs, and iiSU's private in-app data (favorites, play history, settings), which Android "
-            "keeps where no backup can reach it."
+            "Backs up the artwork and media iiSU keeps in the running VM, so a reinstall or rebuilt VM "
+            "doesn't re-download them. The VM must be running. Restore replaces same-named files, leaves "
+            "the rest, and switches iiSU off while copying; Stop and Open afterwards to reload. Not "
+            "included: ROMs, and iiSU's private data (favorites, play history, settings), which Android "
+            "keeps out of reach."
         )
         data_note.setWordWrap(True)
         data_note.setStyleSheet(f"color: {TEXT_DIM};")
@@ -79,7 +77,7 @@ class BackupRestorePage(PageBase):
         self.body_layout.addWidget(data_card)
         self._android_signals = None
 
-        self.status_label = QLabel("Ready. Restore always creates a safety copy of files it replaces.")
+        self.status_label = QLabel("Ready. Restore saves a safety copy of any file it replaces.")
         self.status_label.setWordWrap(True)
         self.status_label.setStyleSheet(f"color: {TEXT_DIM};")
         self.body_layout.addWidget(self.status_label)
@@ -88,7 +86,7 @@ class BackupRestorePage(PageBase):
     def _create_backup(self) -> None:
         files = svc.backup_candidates()
         if not files:
-            QMessageBox.warning(self, "Backup & Restore", "No supported iiSU-PC configuration files were found to back up.")
+            QMessageBox.warning(self, "Backup & Restore", "No configuration files found to back up.")
             return
 
         path, _filter = QFileDialog.getSaveFileName(
@@ -103,7 +101,7 @@ class BackupRestorePage(PageBase):
             QMessageBox.critical(self, "Backup & Restore", str(e))
             return
 
-        self.status_label.setText(f"Backup created: {path} ({len(files)} configuration file(s))")
+        self.status_label.setText(f"Backup created: {path} ({len(files)} file(s))")
         QMessageBox.information(self, "Backup Complete", f"Backed up {len(files)} configuration file(s).\n\n{path}")
 
     def _restore_backup(self) -> None:
@@ -122,7 +120,7 @@ class BackupRestorePage(PageBase):
             self,
             "Restore Backup",
             f"Restore these configuration files?\n\n{shown}\n\n"
-            "Existing files will be copied to a timestamped safety folder first.",
+            "Existing files are copied to a timestamped safety folder first.",
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
@@ -135,7 +133,7 @@ class BackupRestorePage(PageBase):
             f"Restored {restored} configuration file(s).\n\n"
             f"Safety copies created: {safety_count}\n"
             + (f"{safety_dir}\n\n" if safety_count else "\n")
-            + "Restart the Manager/bridge before relying on restored settings.",
+            + "Restart the Manager and bridge to apply them.",
         )
 
     # == iiSU data inside the VM ==
@@ -152,7 +150,7 @@ class BackupRestorePage(PageBase):
         )
         if not path:
             return
-        self._set_android_busy(True, "Backing up iiSU data from the VM, this can take a while for a big library...")
+        self._set_android_busy(True, "Backing up iiSU data. Large libraries take a while...")
         self._android_signals = run_in_background(
             android_svc.create_backup, lambda result: self._on_android_backup_done(path, result), self._on_android_error, Path(path)
         )
@@ -174,8 +172,8 @@ class BackupRestorePage(PageBase):
         reply = QMessageBox.question(
             self,
             "Restore iiSU Data",
-            f"Copy these back into the running Android VM?\n\n{shown}\n\n"
-            "Files with the same names are replaced. iiSU will be stopped while this runs.",
+            f"Copy these back into the running VM?\n\n{shown}\n\n"
+            "Same-named files are replaced. iiSU is stopped while this runs.",
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
@@ -185,7 +183,7 @@ class BackupRestorePage(PageBase):
     def _on_android_restore_done(self, outcomes: dict) -> None:
         summary = "; ".join(f"{label}: {outcome}" for label, outcome in outcomes.items())
         self._set_android_busy(False, f"iiSU data restore finished ({summary}). Stop and Open Community-iiSU-PC to reload it.")
-        QMessageBox.information(self, "Restore Complete", f"{summary}\n\nStop and Open Community-iiSU-PC so iiSU reloads its data.")
+        QMessageBox.information(self, "Restore Complete", f"{summary}\n\nStop and Open Community-iiSU-PC to reload iiSU's data.")
 
     def _on_android_error(self, message: str) -> None:
         self._set_android_busy(False, f"iiSU data backup/restore failed: {message}")

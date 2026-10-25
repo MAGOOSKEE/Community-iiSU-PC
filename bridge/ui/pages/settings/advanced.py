@@ -28,7 +28,7 @@ class AdvancedPage(PageBase):
         super().__init__(parent, scrollable_body=True)
         self.window = window
 
-        self.add_header("Advanced", "Bridge port, window matching, and hotkeys, rarely need to change these.")
+        self.add_header("Advanced", "Bridge port, window matching and hotkeys. Rarely needed.")
 
         self.body_layout.addWidget(QLabel("iiSU window title match:"))
         self.window_title_edit = QLineEdit()
@@ -47,7 +47,7 @@ class AdvancedPage(PageBase):
         self._hotkey_layout.setContentsMargins(0, 0, 0, 0)
         self.body_layout.addWidget(self._hotkey_container)
 
-        self.body_layout.addWidget(QLabel("Controller quit chord (press all selected buttons together on any pad):"))
+        self.body_layout.addWidget(QLabel("Controller quit chord (hold all selected buttons at once):"))
         chord_row = QWidget()
         chord_grid = QGridLayout(chord_row)
         chord_grid.setContentsMargins(0, 0, 0, 0)
@@ -57,27 +57,25 @@ class AdvancedPage(PageBase):
             self._chord_checks[name] = check
             chord_grid.addWidget(check, index // 7, index % 7)
         self.body_layout.addWidget(chord_row)
-        chord_note = QLabel("Runs the same action as tapping the quit key above. Leave every box unchecked to disable it.")
+        chord_note = QLabel("Same action as the quit key. Leave all unchecked to disable.")
         chord_note.setStyleSheet(f"color: {TEXT_DIM};")
         self.body_layout.addWidget(chord_note)
 
         restart_note = QLabel(
-            "Port and hotkey changes need the bridge restarted to take effect (ROM\n"
-            "directory, search folders, and emulator mappings apply on the very next\n"
-            "game launch, no restart needed)."
+            "Port and hotkey changes need a bridge restart.\n"
+            "Everything else applies on the next game launch."
         )
         restart_note.setStyleSheet(f"color: {TEXT_DIM};")
         self.body_layout.addWidget(restart_note)
 
-        self.show_overlay_check = QCheckBox("Show the fullscreen loading overlay during boot and game hand-off")
+        self.show_overlay_check = QCheckBox("Show the loading overlay during boot and game launch")
         self.body_layout.addWidget(self.show_overlay_check)
 
-        self.debug_console_check = QCheckBox("Show console windows for the AVD and bridge (debugging)")
+        self.debug_console_check = QCheckBox("Show AVD and bridge console windows (debugging)")
         self.body_layout.addWidget(self.debug_console_check)
         debug_note = QLabel(
-            "Console windows are off by default, logging to emulator.log/bridge.log/stop.log instead.\n"
-            "Turning them on always hides the overlay too, since it would just cover them up, and trades\n"
-            "away that run's log file since a process can't sensibly have both. Takes effect on the next Start."
+            "Off by default: output goes to emulator.log, bridge.log and stop.log.\n"
+            "When on, the overlay is hidden and those logs aren't written. Applies on the next Start."
         )
         debug_note.setStyleSheet(f"color: {TEXT_DIM};")
         self.body_layout.addWidget(debug_note)
@@ -95,10 +93,9 @@ class AdvancedPage(PageBase):
         steam_row.addStretch(1)
         self.body_layout.addLayout(steam_row)
         self.steam_note = QLabel(
-            "Adds Community-iiSU-PC as a non-Steam game so you can start it from Steam's library, Big "
-            "Picture, or a Steam Deck's Game Mode. Close Steam first, it rewrites this list when it exits. "
-            "The shortcut starts the VM and bridge and then ends, so Steam shows it as stopped right away "
-            "while iiSU keeps running."
+            "Adds Community-iiSU-PC as a non-Steam game, for Steam's library, Big Picture or Game Mode. "
+            "Close Steam first, it rewrites this list on exit. The shortcut starts the VM and bridge, then "
+            "ends, so Steam shows it stopped while iiSU keeps running."
         )
         self.steam_note.setWordWrap(True)
         self.steam_note.setStyleSheet(f"color: {TEXT_DIM};")
@@ -117,13 +114,13 @@ class AdvancedPage(PageBase):
             if item.widget():
                 item.widget().deleteLater()
         self._quit_hotkey_editor = HotkeyEditor(
-            "Quit key (tap to force-quit the running emulator and return to iiSU):",
+            "Quit key (force-quits the running emulator, back to iiSU):",
             config.get("quit_hotkey", {"modifiers": [], "key": "escape"}),
             default_key="escape",
         )
         self._hotkey_layout.addWidget(self._quit_hotkey_editor)
         self._shutdown_hotkey_editor = HotkeyEditor(
-            "Optional separate full-shutdown hotkey (leave blank for none):",
+            "Full-shutdown hotkey (optional):",
             config.get("shutdown_hotkey") or {"modifiers": [], "key": ""},
             default_key="",
         )
@@ -179,8 +176,8 @@ class AdvancedPage(PageBase):
         summary = "\n".join(f"{words[outcome]}: {path}" for path, outcome in results)
         QMessageBox.information(
             self, "Add to Steam",
-            f"{summary}\n\nStart Steam and look for \"{steam.SHORTCUT_NAME}\" in your library. "
-            "The previous shortcut list was kept as a .bak file next to it.",
+            f"{summary}\n\nLook for \"{steam.SHORTCUT_NAME}\" in Steam's library. "
+            "The old shortcut list was saved as a .bak file.",
         )
 
     def _remove_from_steam(self) -> None:

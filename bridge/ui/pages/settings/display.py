@@ -39,7 +39,7 @@ class DisplayPage(PageBase):
         super().__init__(parent, scrollable_body=True)
         self.window = window
 
-        self.add_header("Display", "The emulated device's actual hardware profile, applying it cold-boots the AVD.")
+        self.add_header("Display", "The VM's hardware profile. Applying it cold-boots the VM.")
 
         columns = QHBoxLayout()
         settings_col = QVBoxLayout()
@@ -82,7 +82,7 @@ class DisplayPage(PageBase):
         refresh_row.addStretch(1)
         grid.addLayout(refresh_row, 3, 1)
 
-        gpu_note = QLabel("GPU rendering and other emulator launch options live on the Emulator page.")
+        gpu_note = QLabel("GPU and other launch options are on the Emulator page.")
         gpu_note.setStyleSheet(f"color: {TEXT_DIM};")
         grid.addWidget(gpu_note, 4, 0, 1, 2)
 
@@ -104,9 +104,8 @@ class DisplayPage(PageBase):
         self.body_layout.addLayout(columns)
 
         note = QLabel(
-            "Only affects iiSU's own UI smoothness inside the AVD. Actual gameplay runs\n"
-            "in a separate native Windows emulator process, which already uses your\n"
-            "monitor's real refresh rate with no setup needed."
+            "Only affects iiSU's own UI inside the VM. Games run in a native PC emulator\n"
+            "at your monitor's real refresh rate."
         )
         note.setStyleSheet(f"color: {TEXT_DIM};")
         self.body_layout.addWidget(note)

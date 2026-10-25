@@ -307,7 +307,7 @@ class MediaLibraryPage(PageBase):
                 QMessageBox.critical(
                     self,
                     "Media Library",
-                    "Soundbite preview failed.\n\nThe saved original is still intact and will continue to be used by iiSU.\n\n"
+                    "Soundbite preview failed.\n\nThe saved original is intact and iiSU keeps using it.\n\n"
                     f"{exc}",
                 )
                 return
@@ -422,7 +422,7 @@ class MediaLibraryPage(PageBase):
                 self,
                 "Restore All Media",
                 "Reinstall every saved media asset through MediaBridge?\n\n"
-                "This intentionally replaces the corresponding iiSU media slots with the saved copies.",
+                "This replaces the matching iiSU media slots with the saved copies.",
             )
             if reply != QMessageBox.StandardButton.Yes:
                 return

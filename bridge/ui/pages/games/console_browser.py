@@ -43,8 +43,8 @@ class ConsoleBrowserPage(PageBase):
 
         self.add_header(
             "Console Games",
-            "Every game detected in your ROM library, grouped the same way syncing to the AVD does, "
-            "a multi-disc game backed by an .m3u/.cue shows up here as one entry, not one per disc.",
+            "Every game in your ROM library, grouped as it syncs to the VM. A multi-disc "
+            "game backed by an .m3u/.cue shows as one entry.",
         )
 
         search_row = QWidget()
@@ -85,8 +85,8 @@ class ConsoleBrowserPage(PageBase):
         self.body_layout.addWidget(action_row)
 
         note = QLabel(
-            "Multi-disc playlists sync as one entry by default, right-click a selection for the "
-            "\"Keep Discs Separate\"/\"Merge Discs Together\" options (details in the project README)."
+            "Multi-disc playlists sync as one entry. Right-click a selection for "
+            "\"Keep Discs Separate\" or \"Merge Discs Together\"."
         )
         note.setWordWrap(True)
         note.setStyleSheet(f"color: {TEXT_DIM};")

@@ -36,10 +36,9 @@ class RedirectorInstallDialog(QDialog):
         layout.setSpacing(SPACING_SM)
 
         description = QLabel(
-            "Installs a placeholder app for each of the emulators below into the "
-            "running AVD, purely so iiSU recognizes that console's emulator as "
-            "installed. The real launch is still handled by the PC-side emulator "
-            "configured in the Emulators tab, these apps do nothing themselves."
+            "Installs a placeholder app per emulator below into the running VM, so iiSU "
+            "sees that console's emulator as installed. Games still launch in the PC emulator "
+            "set in the Emulators tab; these apps do nothing themselves."
         )
         description.setWordWrap(True)
         description.setProperty("role", "dim")
@@ -47,7 +46,7 @@ class RedirectorInstallDialog(QDialog):
 
         self.replace_checkbox = QCheckBox(
             "Replace apps already installed under these package names\n"
-            "(only do this if you're sure it's an old redirector, not a real app)"
+            "(only if you're sure they're old redirectors, not real apps)"
         )
         layout.addWidget(self.replace_checkbox)
 
@@ -87,7 +86,7 @@ class RedirectorInstallDialog(QDialog):
     def _run_installs(self, replace_existing: bool) -> None:
         devices = subprocess.run(["adb", "devices"], capture_output=True, text=True, creationflags=subprocess_creationflags())
         if not vm_device_connected(devices.stdout):
-            self._log_stream.write("No running AVD found, start it from Home first, then try again.\n")
+            self._log_stream.write("No running VM found. Start it from Home first.\n")
             return
 
         for package, label in all_stub_packages():

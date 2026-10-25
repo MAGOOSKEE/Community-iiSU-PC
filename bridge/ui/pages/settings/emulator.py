@@ -49,11 +49,11 @@ class EmulatorPage(PageBase):
 
         self.add_header(
             "Emulator",
-            "Named launch profiles for the Android emulator. Pick one, Save, then Open to test it.",
+            "Launch profiles for the Android emulator. Pick one, Save, then Open.",
         )
 
         self.waydroid_note = QLabel(
-            "This install runs on Waydroid, which has no emulator launch options. Profiles are saved but unused."
+            "Waydroid has no emulator launch options. Profiles are saved but unused."
         )
         self.waydroid_note.setStyleSheet(f"color: {TEXT_DIM};")
         self.waydroid_note.setWordWrap(True)
@@ -143,10 +143,9 @@ class EmulatorPage(PageBase):
         self.body_layout.addLayout(grid)
 
         note = QLabel(
-            "Testing audio problems: duplicate a profile, change one thing (try \"Speakers only\", then\n"
-            "\"No audio at all\" to confirm audio is the cause, then a different GPU rendering mode),\n"
-            "Save, Stop, Open. A profile change cold-boots the VM once. The Display page's GPU option\n"
-            "moved here."
+            "To debug audio: duplicate a profile and change one thing (\"Speakers only\",\n"
+            "\"No audio at all\", or another GPU mode), then Save, Stop, Open.\n"
+            "A profile change cold-boots the VM once."
         )
         note.setStyleSheet(f"color: {TEXT_DIM};")
         self.body_layout.addWidget(note)

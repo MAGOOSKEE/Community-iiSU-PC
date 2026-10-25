@@ -73,9 +73,8 @@ class UpdatesPage(PageBase):
         actions_layout.addLayout(actions_top)
 
         auto_updates_note = QLabel(
-            "Off is recommended for customized installations. When enabled, startup checks apply "
-            "an available update automatically (fast-forwarding a Git checkout, or downloading a "
-            "newer release) and restart Community-iiSU-PC Manager to run it."
+            "Recommended off for customized installs. When on, startup applies an available update "
+            "automatically (fast-forwards a Git checkout, or downloads the release) and restarts the Manager."
         )
         auto_updates_note.setWordWrap(True)
         auto_updates_note.setStyleSheet(f"color: {TEXT_DIM};")
@@ -111,8 +110,8 @@ class UpdatesPage(PageBase):
         self.body_layout.addWidget(actions_card)
 
         note = QLabel(
-            "Installing downloads the update, applies it to this install, and restarts "
-            "Community-iiSU-PC Manager to run the new code. Stop Community-iiSU-PC first if it's running."
+            "Installing downloads and applies the update, then restarts the Manager. "
+            "Stop Community-iiSU-PC first if it's running."
         )
         note.setWordWrap(True)
         note.setStyleSheet(f"color: {TEXT_DIM};")
@@ -126,10 +125,9 @@ class UpdatesPage(PageBase):
         iisu_layout.addLayout(iisu_top)
 
         iisu_note = QLabel(
-            "iiSU itself is a separate, third-party app with no auto-update channel here: checking "
-            "only compares versions against its official GitHub releases, nothing downloads on its own. "
-            "Updating re-patches and reinstalls it on the AVD, this stops iiSU (and any running game) "
-            "if it's currently open."
+            "iiSU is a separate third-party app. Checking only compares versions against its GitHub "
+            "releases and downloads nothing. Updating re-patches and reinstalls it in the VM, stopping "
+            "iiSU and any running game."
         )
         iisu_note.setWordWrap(True)
         iisu_note.setStyleSheet(f"color: {TEXT_DIM};")
@@ -148,16 +146,16 @@ class UpdatesPage(PageBase):
         iisu_manual_button = QPushButton("Use a Different APK...")
         iisu_manual_button.setObjectName("ghost")
         iisu_manual_button.setToolTip(
-            "Patch and install any APK you point at directly, bypassing the version check above. "
-            "For an official pre-release shared before it's on the releases page, for example."
+            "Patch and install any APK directly, skipping the version check. "
+            "For a pre-release that isn't on the releases page yet."
         )
         iisu_manual_button.clicked.connect(self._pick_manual_iisu_apk)
         iisu_actions.addWidget(iisu_manual_button)
         iisu_compat_button = QPushButton("Check an APK...")
         iisu_compat_button.setObjectName("ghost")
         iisu_compat_button.setToolTip(
-            "Inspect an iiSU APK and report whether this tool can patch it, without installing "
-            "anything. Takes about a minute. Worth doing on a new pre-release before updating to it."
+            "Check whether this tool can patch an iiSU APK, without installing anything. "
+            "Takes about a minute. Worth doing on a new pre-release first."
         )
         iisu_compat_button.clicked.connect(self._check_apk_compatibility)
         iisu_actions.addWidget(iisu_compat_button)
@@ -233,14 +231,14 @@ class UpdatesPage(PageBase):
             QMessageBox.warning(
                 self,
                 "Community-iiSU-PC is running",
-                "Stop Community-iiSU-PC before installing an update, an update in progress "
-                "can conflict with files a running session still has open.",
+                "Stop Community-iiSU-PC before installing an update. A running session can "
+                "conflict with the files being replaced.",
             )
             return
         reply = QMessageBox.question(
             self,
             "Install Update",
-            "This downloads and applies the update, then restarts Community-iiSU-PC Manager. Continue?",
+            "This downloads and applies the update, then restarts the Manager. Continue?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -296,8 +294,8 @@ class UpdatesPage(PageBase):
         reply = QMessageBox.question(
             self,
             "Update iiSU",
-            "This re-patches and reinstalls iiSU on the AVD. It stops iiSU (and any running game) if "
-            "it's currently open, and can take a few minutes. Continue?",
+            "This re-patches and reinstalls iiSU in the VM, stopping iiSU and any running game. "
+            "It can take a few minutes. Continue?",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No,
         )

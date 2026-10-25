@@ -77,8 +77,8 @@ class SetupWindow(QMainWindow):
         root.addWidget(title)
 
         subtitle = QLabel(
-            "Patches your own copy of iiSU to hand off game launches to real PC\n"
-            "emulators, and sets up a self-contained Android VM to run it in."
+            "Patches your copy of iiSU to hand game launches to PC emulators,\n"
+            "and sets up a self-contained Android VM to run it in."
         )
         subtitle.setFont(Fonts.body())
         subtitle.setProperty("role", "dim")
@@ -120,12 +120,12 @@ class SetupWindow(QMainWindow):
         self.storage_spin.setValue(vm_storage.DEFAULT_DATA_PARTITION_GB)
         self.storage_spin.setSuffix(" GB")
         self.storage_spin.setToolTip(
-            "The most the VM can ever hold. The file on your drive only grows as the VM fills up, "
-            "so a bigger number costs nothing until it's used. It can be changed later in Settings, "
+            "The most the VM can hold. The file on your drive only grows as the VM fills, "
+            "so a bigger number costs nothing until used. Changeable later in Settings, "
             "but that recreates the VM."
         )
         storage_row.addWidget(self.storage_spin)
-        storage_hint = QLabel("A maximum, not a reservation. Only what's filled is stored on your drive.")
+        storage_hint = QLabel("A maximum, not a reservation.")
         storage_hint.setProperty("role", "dim")
         storage_row.addWidget(storage_hint, stretch=1)
         vm_layout.addLayout(storage_row)
@@ -133,8 +133,8 @@ class SetupWindow(QMainWindow):
         self.lean_check = QCheckBox("Lean VM: remove apps iiSU doesn't need (keeps Files, Chrome, Play Store)")
         self.lean_check.setChecked(True)
         self.lean_check.setToolTip(
-            "Removes Maps, Photos, YouTube, Gmail and the other bundled apps, installs LeanKeyboard as the "
-            "keyboard, and checks the VM still starts. Uses less memory and disk. Untick for a stock VM."
+            "Removes Maps, Photos, YouTube, Gmail and other bundled apps, installs LeanKeyboard, "
+            "and checks the VM still boots. Uses less memory and disk. Untick for a stock VM."
         )
         vm_layout.addWidget(self.lean_check)
         root.addWidget(vm_card)
@@ -213,7 +213,7 @@ class SetupWindow(QMainWindow):
         self.browse_button.setEnabled(False)
         self.storage_spin.setEnabled(False)
         self.lean_check.setEnabled(False)
-        self._set_status("Running setup. This can take a long time on first run (several GB)...")
+        self._set_status("Running setup. The first run can take a while (several GB)...")
         self.progress.setRange(0, 0)
 
         self._setup_signals = run_in_background(
@@ -278,7 +278,7 @@ class SetupWindow(QMainWindow):
         answer = QMessageBox.question(
             self, "Install Waydroid?",
             f"{error}\n\nInstall it now? This runs:\n\n    {plan.display}\n\n"
-            "as administrator (you'll get a permission prompt), then Setup continues.",
+            "as administrator (expect a permission prompt), then Setup continues.",
         )
         if answer != QMessageBox.StandardButton.Yes:
             QMessageBox.critical(self, "Setup failed", f"{error}\n\nSee the log for details.")
@@ -326,14 +326,13 @@ class SetupWindow(QMainWindow):
             self._offer_fix(
                 message, title="Enable Windows Hypervisor Platform?",
                 confirm=(
-                    "Enable Windows Hypervisor Platform now? This asks Windows for admin "
-                    "permission and won't take effect until you restart your PC, re-run Setup.bat "
-                    "after restarting."
+                    "Enable Windows Hypervisor Platform now? This needs admin permission and "
+                    "takes effect after you restart your PC. Then re-run Setup.bat."
                 ),
                 enable=setup_wizard.enable_hypervisor_platform,
                 enabling_message=(
-                    "Windows is enabling Hypervisor Platform now (you may see a UAC prompt). "
-                    "Restart your PC once it's done, then re-run Setup.bat."
+                    "Enabling Hypervisor Platform (you may see a UAC prompt). "
+                    "Restart your PC when it's done, then re-run Setup.bat."
                 ),
                 manual_hint='Try enabling "Windows Hypervisor Platform" yourself via "Turn Windows features on or off".',
             )
@@ -341,16 +340,15 @@ class SetupWindow(QMainWindow):
             self._offer_fix(
                 message, title="Add yourself to the kvm group?",
                 confirm=(
-                    "Add your account to the `kvm` group now? This asks for permission "
-                    "graphically and won't take effect until you log out and back in, re-run "
-                    "Setup.sh after that."
+                    "Add your account to the `kvm` group now? This asks for permission and "
+                    "takes effect after you log out and back in. Then re-run Setup.sh."
                 ),
                 enable=setup_wizard.enable_kvm_access,
                 enabling_message=(
-                    "You may see a permission prompt. Log out and back in once it's done, "
+                    "You may see a permission prompt. Log out and back in when it's done, "
                     "then re-run Setup.sh."
                 ),
-                manual_hint="Run this yourself in a terminal: sudo usermod -aG kvm $USER, then log out and back in.",
+                manual_hint="Run in a terminal: sudo usermod -aG kvm $USER, then log out and back in.",
             )
         else:
             QMessageBox.critical(self, "Setup failed", f"{message}\n\nSee the log for details.")

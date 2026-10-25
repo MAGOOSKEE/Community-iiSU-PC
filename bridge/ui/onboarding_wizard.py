@@ -224,7 +224,7 @@ class WelcomeStep(QWidget):
         heading.setFont(Fonts.heading())
         layout.addWidget(heading)
 
-        subtitle = QLabel("A few quick questions and you'll be ready to play, no manual\nconfig.json editing needed afterward.")
+        subtitle = QLabel("A few quick questions, then you're ready to play.")
         subtitle.setProperty("role", "dim")
         layout.addWidget(subtitle)
         layout.addSpacing(SPACING_MD)
@@ -242,7 +242,7 @@ class WelcomeStep(QWidget):
             layout.addLayout(row)
 
         layout.addSpacing(SPACING_MD)
-        footer = QLabel("Takes under a minute. Anything here can be changed again later from\nthe Manager's Configure button.")
+        footer = QLabel("Takes under a minute. Everything can be changed later in the Manager.")
         footer.setProperty("role", "dim")
         layout.addWidget(footer)
         layout.addStretch()
@@ -258,7 +258,7 @@ class RomsStep(QWidget):
         heading.setFont(Fonts.heading())
         layout.addWidget(heading)
 
-        subtitle = QLabel("Pick the root folder that contains one subfolder per console (e.g. psx/, snes/, gc/).")
+        subtitle = QLabel("Pick the folder that holds one subfolder per console (e.g. psx/, snes/, gc/).")
         subtitle.setWordWrap(True)
         subtitle.setProperty("role", "dim")
         layout.addWidget(subtitle)
@@ -295,7 +295,7 @@ class RomsStep(QWidget):
             return
         path = Path(raw)
         if not path.is_dir():
-            self.status_label.setText("This folder doesn't exist yet. Create it or pick a different one.")
+            self.status_label.setText("This folder doesn't exist. Create it or pick another.")
             self.status_label.setStyleSheet(f"color: {RED};")
             return
 
@@ -307,7 +307,7 @@ class RomsStep(QWidget):
             (recognized if resolve_console_shortname(child.name, exact, by_compact) else unrecognized).append(child.name)
 
         if not recognized and not unrecognized:
-            self.status_label.setText("This folder is empty, that's fine, add ROMs to it anytime.")
+            self.status_label.setText("Empty folder. Add ROMs anytime.")
             self.status_label.setStyleSheet("")
             self.status_label.setProperty("role", "dim")
         elif not unrecognized:
@@ -315,7 +315,7 @@ class RomsStep(QWidget):
             self.status_label.setStyleSheet(f"color: {GREEN};")
         else:
             prefix = f"✓ {len(recognized)} recognized, " if recognized else ""
-            self.status_label.setText(f"{prefix}✗ {len(unrecognized)} won't be seen by iiSU (rename these): {', '.join(unrecognized)}")
+            self.status_label.setText(f"{prefix}✗ {len(unrecognized)} not recognized by iiSU (rename): {', '.join(unrecognized)}")
             self.status_label.setStyleSheet(f"color: {RED};")
 
     def validate(self) -> tuple[bool, str]:
@@ -323,7 +323,7 @@ class RomsStep(QWidget):
         if not raw:
             return False, "Pick a ROM folder to continue."
         if not Path(raw).is_dir():
-            return False, "That folder doesn't exist yet, create it or pick a different one."
+            return False, "That folder doesn't exist. Create it or pick another."
         return True, ""
 
 
@@ -341,9 +341,8 @@ class EmulatorFoldersStep(QWidget):
         layout.addWidget(heading)
 
         subtitle = QLabel(
-            "Community-iiSU-PC searches these folders for the emulators it knows about "
-            "(DuckStation, Dolphin, RetroArch, and more), install those yourself first "
-            "if you haven't already, this project doesn't bundle them."
+            "Community-iiSU-PC searches these folders for known emulators (DuckStation, Dolphin, "
+            "RetroArch and more). Install them yourself first, they aren't bundled."
         )
         subtitle.setWordWrap(True)
         subtitle.setProperty("role", "dim")
@@ -410,7 +409,7 @@ class EmulatorFoldersStep(QWidget):
         self._running = True
         self.scan_button.setEnabled(False)
         self.status_label.setStyleSheet("")
-        self.status_label.setText("Scanning. This can take a few seconds for large folders like Program Files...")
+        self.status_label.setText("Scanning. Large folders like Program Files take a few seconds...")
         self._scan_signals = run_in_background(self._run_scan, self._on_scan_finished, roots=roots)
 
     def _run_scan(self, roots: list[str]) -> list[tuple[str, bool]]:
@@ -436,7 +435,7 @@ class EmulatorFoldersStep(QWidget):
         total = len(self.scan_results)
         lines = [f"Found {len(found_labels)} of {total} known emulators: {', '.join(found_labels) or '(none yet)'}"]
         if missing_labels:
-            lines.append(f"Not found yet: {', '.join(missing_labels)}, install any of these and Community-iiSU-PC will pick them up automatically.")
+            lines.append(f"Not found: {', '.join(missing_labels)}. Install them and they'll be picked up automatically.")
         self.status_label.setText("\n".join(lines))
         self.status_label.setStyleSheet(f"color: {GREEN};" if found_labels else "")
 
@@ -454,10 +453,9 @@ class EmulatorMappingsStep(QWidget):
         layout.addWidget(heading)
 
         subtitle = QLabel(
-            "Maps each console's Android package to the real PC emulator that runs it. "
-            "The defaults above already cover most installs, edit here only if you're "
-            "using an unusual fork with a different executable name (e.g. a build of "
-            "Azahar that ships as azahar.exe instead of citra-qt.exe)."
+            "Maps each console's Android package to the PC emulator that runs it. The defaults "
+            "cover most installs. Edit only for a fork with a different executable name "
+            "(e.g. Azahar as azahar.exe instead of citra-qt.exe)."
         )
         subtitle.setWordWrap(True)
         subtitle.setProperty("role", "dim")
@@ -513,10 +511,8 @@ class EmulatorMappingsStep(QWidget):
         if "by_extension" in self._original_emulators.get(prefix, {}):
             QMessageBox.information(
                 self, "Can't edit here",
-                "This entry maps a different executable per ROM file extension "
-                "(see shared/emulator_defaults.py), editing it as one flat "
-                "executable/flags pair isn't supported here. Edit config.json "
-                "directly if you need to change it.",
+                "This entry maps a different executable per ROM file extension, so it "
+                "can't be edited as a single executable/flags pair here. Edit config.json instead.",
             )
             return
         dialog = EmulatorDialog(self, "Edit emulator mapping", prefix=item.text(0), exe_names=item.text(1), pre_args=item.text(2))
@@ -563,7 +559,7 @@ class DisplayStep(QWidget):
         heading.setFont(Fonts.heading())
         layout.addWidget(heading)
 
-        subtitle = QLabel("iiSU's default is a portrait phone screen, this switches it to a\nreal desktop-shaped display. Pre-filled from your primary monitor.")
+        subtitle = QLabel("iiSU defaults to a portrait phone screen. This switches it to a desktop-shaped\ndisplay, pre-filled from your primary monitor.")
         subtitle.setProperty("role", "dim")
         layout.addWidget(subtitle)
 
@@ -625,8 +621,8 @@ class DisplayStep(QWidget):
         self.fullscreen_check = QCheckBox("Maximize the iiSU/AVD window automatically")
         layout.addWidget(self.fullscreen_check)
         note = QLabel(
-            "Only affects iiSU's own UI inside the VM. Actual gameplay runs in a\n"
-            "separate native emulator window at your monitor's real resolution already."
+            "Only affects iiSU's own UI inside the VM. Games run in a native emulator\n"
+            "window at your monitor's real resolution."
         )
         note.setProperty("role", "dim")
         layout.addWidget(note)
@@ -675,18 +671,18 @@ class HotkeysStep(QWidget):
         heading = QLabel("Hotkeys")
         heading.setFont(Fonts.heading())
         layout.addWidget(heading)
-        subtitle = QLabel("Used inside the VM to get back out of a game (both rebindable later too).")
+        subtitle = QLabel("Used in the VM to get out of a game. Both can be rebound later.")
         subtitle.setProperty("role", "dim")
         layout.addWidget(subtitle)
 
         self.quit_editor = HotkeyEditor("Quit to iiSU (force-quits the running game):", quit_hotkey, default_key="q")
         layout.addWidget(self.quit_editor)
-        self.shutdown_editor = HotkeyEditor("Full shutdown (closes iiSU and the VM entirely):", shutdown_hotkey, default_key="x")
+        self.shutdown_editor = HotkeyEditor("Full shutdown (closes iiSU and the VM):", shutdown_hotkey, default_key="x")
         layout.addWidget(self.shutdown_editor)
 
         note = QLabel(
-            "Also works with a controller: press Select+Start together on any pad for the same\n"
-            "quit action, no keyboard needed. Remappable later in Advanced."
+            "On a controller, press Select+Start together for the same quit action.\n"
+            "Remappable later in Advanced."
         )
         note.setProperty("role", "dim")
         layout.addWidget(note)
@@ -883,16 +879,15 @@ class OnboardingWizard(QMainWindow):
         results = self.folders_step.scan_results
         if results is None:
             return (
-                "You haven't scanned for installed PC emulators yet, go back to "
-                "\"Emulator Folders\" and click \"Scan for installed emulators\" to confirm "
-                "they'll actually be found before finishing."
+                "You haven't scanned for PC emulators yet. Go back to \"Emulator Folders\" "
+                "and click \"Scan for installed emulators\" before finishing."
             )
         missing = [label for label, ok in results if not ok]
         if not missing:
             return ""
         return (
-            f"Still not found: {', '.join(missing)}, games mapped to these won't launch until "
-            "they're installed and you rescan (back on \"Emulator Folders\")."
+            f"Still not found: {', '.join(missing)}. Games mapped to these won't launch until "
+            "they're installed and rescanned (\"Emulator Folders\")."
         )
 
     def _summary_lines(self) -> list[str]:
@@ -929,7 +924,7 @@ class OnboardingWizard(QMainWindow):
         if _hotkey_signature(self.hotkeys_step.shutdown_editor.read_hotkey()) != _hotkey_signature(self._original_shutdown_hotkey):
             lines.append(f"Shutdown hotkey: {self.hotkeys_step.shutdown_editor.describe()}")
 
-        return lines or ["Nothing changed from your existing configuration, it'll be kept as-is."]
+        return lines or ["Nothing changed. Your existing configuration is kept."]
 
     def _display_changed(self) -> bool:
         current = {
@@ -986,9 +981,9 @@ class OnboardingWizard(QMainWindow):
             self._write_avd_display_profile(config)
 
         self.finish_step.finish_status_label.setText(
-            "Saved. Start Community-iiSU-PC from the desktop shortcut or Manager's Home page "
-            "whenever you're ready. Double-check your ROM folder is reachable from inside the VM, "
-            "and rerun the scan on \"Emulator Folders\" if you're not sure your emulators were found."
+            "Saved. Start Community-iiSU-PC from the desktop shortcut or the Manager's Home page. "
+            "Check your ROM folder is reachable from inside the VM, and rescan \"Emulator Folders\" "
+            "if you're unsure your emulators were found."
         )
         self.finish_step.finish_status_label.setStyleSheet(f"color: {GREEN};")
         try:

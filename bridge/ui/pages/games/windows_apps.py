@@ -93,7 +93,7 @@ class WindowsAppsPage(PageBase):
         self.body_layout.addWidget(search_row)
 
         hint = QLabel(
-            "Steam import reads your installed Steam libraries locally. Steam artwork/box-art is not shown here."
+            "Steam import reads your local Steam libraries. Steam artwork isn't shown here."
         )
         hint.setWordWrap(True)
         hint.setStyleSheet(f"color: {TEXT_DIM};")
@@ -323,7 +323,7 @@ class WindowsAppsPage(PageBase):
             self,
             "Remove Windows Apps?",
             f"Remove {len(selected)} selected application(s) from iiSU-PC?\n\n"
-            "Their .pcgame placeholders will also be removed. This does not uninstall the applications themselves.",
+            "Their .pcgame placeholders are removed too. The applications themselves aren't uninstalled.",
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
@@ -469,7 +469,7 @@ class WindowsAppsPage(PageBase):
         QMessageBox.information(
             self,
             "Export complete",
-            "Windows Apps exported.\n\nSteam and URI entries are portable. Executable entries may need their paths updated on another PC.",
+            "Windows Apps exported.\n\nSteam and URI entries are portable. Executable paths may need updating on another PC.",
         )
 
     def _import_windows_apps_file(self) -> None:
@@ -541,8 +541,8 @@ class WindowsAppsPage(PageBase):
         reply = QMessageBox.question(
             self,
             "Auto-import Steam Games",
-            f"Add {len(missing)} installed Steam game(s) that are not currently in iiSU?\n\n{preview}\n\n"
-            "This creates the Windows Apps mappings and .pcgame placeholders.",
+            f"Add {len(missing)} installed Steam game(s) not yet in iiSU?\n\n{preview}\n\n"
+            "This creates their Windows Apps mappings and .pcgame placeholders.",
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
@@ -611,15 +611,14 @@ class WindowsAppsPage(PageBase):
         roms_dir = self.window.config_data.get("roms_dir", "")
         legacy_dir = svc.legacy_windows_stubs_dir(roms_dir)
         if legacy_dir is None:
-            QMessageBox.information(self, "Windows Apps", "No old placeholder folder found under your ROM directory, nothing to delete.")
+            QMessageBox.information(self, "Windows Apps", "No old placeholder folder found under your ROM directory.")
             return
         count = sum(1 for _ in legacy_dir.glob("*.pcgame"))
         reply = QMessageBox.question(
             self,
             "Delete Old Placeholder Folder",
-            f"Delete {legacy_dir}?\n\nIt holds {count} old .pcgame placeholder(s) left over from before Windows Apps "
-            f"placeholders moved to {svc.WINDOWS_STUBS_DIR}. Only do this once you've confirmed your Windows Apps "
-            "still work, this cannot be undone.",
+            f"Delete {legacy_dir}?\n\nIt holds {count} old .pcgame placeholder(s) from before they moved to "
+            f"{svc.WINDOWS_STUBS_DIR}. Only delete once your Windows Apps still work. This can't be undone.",
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
