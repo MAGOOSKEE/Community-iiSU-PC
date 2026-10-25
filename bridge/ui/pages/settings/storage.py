@@ -1,6 +1,6 @@
 """Settings > Storage: what is using the Android VM's internal storage (a
 colour-coded bar), how big its file is on your drive, cleaning up old copies,
-compacting it, and recreating the VM at a different size. Backed by
+and recreating the VM at a different size. Backed by
 bridge/services/vm_storage_service.py."""
 
 import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
@@ -10,7 +10,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QFileDialog, QGridLayout, QHBoxLayout, QLabel, QMessageBox, QPushButton, QSpinBox, QVBoxLayout, QWidget,
+    QFileDialog, QGridLayout, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
 from bridge.services import android_backup_service as backup_svc
@@ -142,12 +142,19 @@ class StoragePage(PageBase):
         size_layout.addLayout(size_row)
         self.body_layout.addWidget(size_card)
 
+        self.busy_bar = QProgressBar()
+        self.busy_bar.setRange(0, 0)  # indeterminate: a resize has no honest percentage
+        self.busy_bar.setTextVisible(False)
+        self.busy_bar.setFixedHeight(4)
+        self.busy_bar.hide()
+        self.body_layout.addWidget(self.busy_bar)
         self.status_label = QLabel("")
         self.status_label.setWordWrap(True)
         self.status_label.setStyleSheet(f"color: {TEXT_DIM};")
         self.body_layout.addWidget(self.status_label)
         self.body_layout.addStretch(1)
 
+        self._after_delete = None
         self._host = None
         self._usage: vm_storage.StorageUsage | None = None
         self._update_buttons()
@@ -172,6 +179,7 @@ class StoragePage(PageBase):
 
     def _set_busy(self, busy: bool) -> None:
         self._busy = busy
+        self.busy_bar.setVisible(busy)
         self._update_buttons()
 
     def _update_buttons(self) -> None:
@@ -295,6 +303,9 @@ class StoragePage(PageBase):
         self._set_busy(False)
         self._reload_host()
         self._set_status(f"Deleted old copies, freed {format_size(freed)}.", GREEN)
+        follow_up, self._after_delete = self._after_delete, None
+        if follow_up:
+            follow_up()
 
     # == Resize ==
 
@@ -342,8 +353,38 @@ class StoragePage(PageBase):
             lines.append(f"Restoring iiSU's data failed: {result.restore_error}. Use Backup & Restore > Restore iiSU Data with your backup.")
         elif result.restore_outcome:
             lines.append("iiSU's title art and media were restored.")
-        lines.append("Start the VM. If iiSU asks for your ROM folder, pick it again.")
-        if result.old_copy:
-            lines.append(f"Old storage kept in {result.old_copy.name}. Delete it here when you're happy.")
         self._set_status(lines[0], GREEN)
         QMessageBox.information(self, "Recreate VM", "\n\n".join(lines))
+        # The old storage is only needed to undo this by hand, and can be most of a
+        # drive's worth of space, so offer to drop it unless the restore had a problem.
+        if result.old_copy and result.old_copy.is_dir() and not result.restore_error:
+            self._offer_delete_old_storage(result.old_copy)
+        else:
+            self._offer_relink_rom_folder()
+
+    def _offer_delete_old_storage(self, old_copy: Path) -> None:
+        size = svc.folder_size(old_copy)
+        reply = QMessageBox.question(
+            self, "Delete the old storage?",
+            f"Free {format_size(size)} by deleting the old storage now?\n\n"
+            "It's only needed to undo this resize by hand. This can't be undone.",
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            self._set_status(f"Old storage kept in {old_copy.name}. Delete it here when you're happy.")
+            self._offer_relink_rom_folder()
+            return
+        self._after_delete = self._offer_relink_rom_folder
+        self._run(self._delete_work, self._on_old_copies_deleted, [svc.OldCopy(old_copy, size)])
+
+    def _offer_relink_rom_folder(self) -> None:
+        """Android drops iiSU's folder access when the VM is rebuilt, and that grant can
+        only be given from inside iiSU, so the most this can do is get the VM started."""
+        reply = QMessageBox.question(
+            self, "Re-link your ROM folder",
+            "Android doesn't keep iiSU's access to your ROM folder across a rebuild, and it can only "
+            "be granted from inside iiSU.\n\nStart the VM now? Then, if iiSU asks for your ROM folder, "
+            "pick it again.",
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            self.window.show_page("home")
+            self.window.home_page._start()
