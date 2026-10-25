@@ -510,9 +510,9 @@ def sync_rom_library() -> None:
 
 
 def main(headless: bool = False) -> None:
-    """headless=True boots the Android VM without its window (and without the
-    boot overlay, which would have nothing to cover), for running it in the
-    background or on a machine nobody is sitting at."""
+    """headless=True boots the Android VM without its window and starts neither
+    the boot overlay (nothing to cover) nor the launch bridge, for running it
+    in the background or on a machine nobody is sitting at."""
     winapi.ensure_linux_kwin_rules()
     try:
         config = load_config()
@@ -599,7 +599,11 @@ def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: b
     print("[start] Syncing your ROM library into the AVD...")
     sync_rom_library()
 
-    if is_port_open(port):
+    if headless:
+        # The bridge exists to hand game launches to PC emulators and manage the
+        # iiSU window, neither of which a windowless VM needs.
+        print("[start] Headless: not starting the launch bridge.")
+    elif is_port_open(port):
         # The bridge being up already doesn't mean iiSU itself is in the
         # state a fresh launch would leave it in, it could be minimized,
         # showing the Android home screen instead of iiSU (backed out at
@@ -657,7 +661,7 @@ def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: b
             print(f"[start] Bridge didn't come up in time, check {BRIDGE_LOG_PATH.name} for errors.")
 
     save_state(state)
-    if not IS_WINDOWS and config.get("iisu_fullscreen"):
+    if not IS_WINDOWS and config.get("iisu_fullscreen") and not headless:
         # The freshly-spawned bridge process above already re-applies
         # fullscreen as part of its own startup (launch_bridge.main()) on
         # both platforms, this is belt-and-suspenders for Linux
@@ -666,7 +670,10 @@ def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: b
         # call here costs nothing (show_iisu_window() is idempotent) and
         # closes a real "launched but not fullscreen" gap seen there.
         show_iisu_window(config)
-    print("[start] Ready. Launching a game in iiSU will now hand off to the real PC emulator.")
+    if headless:
+        print("[start] Ready (headless: the VM is up, the launch bridge is not running).")
+    else:
+        print("[start] Ready. Launching a game in iiSU will now hand off to the real PC emulator.")
 
 
 if __name__ == "__main__":

@@ -72,6 +72,37 @@ class QuickbootAutosaveRegressionTests(unittest.TestCase):
         self.assertIs(mock_autosave.call_args.kwargs["enabled"], True)
 
 
+class HeadlessStartSequenceTests(unittest.TestCase):
+    def _run(self, headless: bool, port_open: bool = False):
+        with patch.object(start_iisu_pc, "is_avd_running", return_value=True), \
+             patch.object(start_iisu_pc, "sync_rom_library"), \
+             patch.object(start_iisu_pc, "is_port_open", return_value=port_open), \
+             patch.object(start_iisu_pc, "save_state"), \
+             patch.object(start_iisu_pc, "launch_iisu") as launch_iisu, \
+             patch.object(start_iisu_pc, "show_iisu_window") as show_window, \
+             patch.object(start_iisu_pc.subprocess, "Popen") as popen, \
+             patch.object(start_iisu_pc.time, "sleep"), \
+             patch("builtins.open", unittest.mock.mock_open()):
+            start_iisu_pc._run_start_sequence({"iisu_fullscreen": True}, "iisuwin", 7737, False, {}, headless)
+        return popen, launch_iisu, show_window
+
+    def test_headless_does_not_start_the_bridge(self):
+        popen, launch_iisu, show_window = self._run(headless=True)
+        popen.assert_not_called()
+        launch_iisu.assert_not_called()
+        show_window.assert_not_called()
+
+    def test_headless_leaves_an_already_running_bridge_alone(self):
+        popen, launch_iisu, show_window = self._run(headless=True, port_open=True)
+        popen.assert_not_called()
+        launch_iisu.assert_not_called()
+        show_window.assert_not_called()
+
+    def test_a_normal_start_still_starts_the_bridge(self):
+        popen, _launch_iisu, _show_window = self._run(headless=False)
+        popen.assert_called_once()
+
+
 class HeadlessLaunchTests(unittest.TestCase):
     def _emulator_args(self, headless: bool) -> list[str]:
         """The command line _launch_once builds, without starting anything."""
