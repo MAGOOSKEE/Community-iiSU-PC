@@ -19,10 +19,27 @@ Runs iiSU (an Android emulation frontend) inside a hardware-accelerated Android 
 - Windows 10/11 (64-bit), or a 64-bit Linux distribution (KDE Plasma recommended, for fullscreen/window management support)
 - Your own copy of the iiSU APK
 - Whichever PC emulators you want to use (DuckStation, Dolphin, PCSX2, etc.); install these yourself, or use the Manager's built-in downloader (winget on Windows, Flatpak on Linux)
-- A few GB of free disk space and a decent internet connection (first run downloads the Android SDK + a system image)
+- About 15 GB of free disk space while Setup runs (see Disk space below) and a decent internet connection (first run downloads the Android SDK + a system image)
 - **CPU virtualization must be turned on.** Windows: enable it in your BIOS, and ensure Hyper-V or the Windows Hypervisor Platform and Virtual Machine Platform are enabled. Linux: KVM enabled and `/dev/kvm` accessible (usually means being in the `kvm` group).
 - **Linux Wayland sessions** additionally need Waydroid installed from your distro (`waydroid` on PATH), a kernel with binder support, and the `waydroid-container` service. If Waydroid isn't installed, the Setup window offers to install it from your distro's own repositories (apt, dnf, zypper or apk) through a polkit permission prompt, and only if you say yes (set `IISUPC_INSTALL_WAYDROID=1` to opt in for a headless run). Arch-based distros get pointed at the AUR instead, since it needs a helper run as a normal user. Setup also runs `waydroid init` for you (through a polkit prompt) if it hasn't been run, and tells you the exact command for anything else it can't do without root, such as a kernel without binder.
 - Python 3.11+ and a JDK on PATH (`java` and `keytool` need to work from a terminal), e.g. [Eclipse Temurin](https://adoptium.net/) or your distro's OpenJDK package. Windows users can skip this by using the installer above instead, which bundles both.
+
+### Disk space
+
+Measured on a default install (16 GB VM storage, Lean VM on), not counting your ROMs or PC emulators:
+
+| | Size |
+|---|---|
+| Free space needed while Setup runs | 15 GB (the downloaded SDK and the portable copy briefly coexist; about 4 GB is freed at the end) |
+| Android emulator | 1.0 GB |
+| Android system image | 2.3 GB |
+| VM storage file (fresh, with iiSU installed) | 2.1 GB |
+| Patched iiSU and Setup's working files | 0.9 GB |
+| **Finished install, VM never started** | **about 6.5 GB** |
+| Quick-resume snapshot, saved after the first run | +2.5 GB |
+| **After the first run** | **about 9 GB** |
+
+The VM storage file then grows as you use it: iiSU's downloaded artwork is about 1 MB per game (a 2,000-game library is about 2 GB). The 8 to 128 GB size you pick in Setup is a limit, not space taken up front, and the file never shrinks by itself (see Settings > Storage below). Resizing or recreating the VM keeps the old storage until you delete it, which can add several GB temporarily. Waydroid installs skip the SDK, system image and snapshot, and need far less.
 
 ## First-time setup
 
@@ -37,11 +54,11 @@ Once it's done, a short onboarding wizard walks you through your ROM directory, 
 
 Double-click the **desktop shortcut**, or run the Manager script for your platform (**`Community-iiSU-PC Manager.bat`** on Windows, **`./Community-iiSU-PC\ Manager.sh`** on Linux): one window, navigated with the sidebar:
 
-- **Home**: AVD/bridge status, Open/Stop, a running status line, and quick buttons to your ROMs folder and logs.
+- **Home**: AVD/bridge status, Open/Stop, a running status line, and quick buttons to your ROMs folder and logs. The ▾ next to Start has **Boot Headless (no window)**, which boots the VM without its window or the launch bridge.
 - **Library**: ROM Directory (your host ROM folder), Media Library (check/restore saved media), Android Storage (browse and manage the VM's shared storage over ADB).
 - **Games**: Console (every detected ROM, grouped by multi-disc playlist) and PC (native apps and URI launches, see below).
 - **Emulators**: PC emulator mappings and search folders, test a mapping without starting the AVD, and reinstall iiSU's redirector apps.
-- **Settings**: Display (the Android VM's resolution and DPI), Emulator (named launch profiles for the Android SDK emulator, see below), and Advanced (hotkeys and debugging options such as "Show console windows").
+- **Settings**: Display (the Android VM's resolution and DPI), Emulator (named launch profiles for the Android SDK emulator, see below), Storage (what uses the VM's storage, and resizing it, see below), and Advanced (hotkeys and debugging options such as "Show console windows").
 - **Backup & Diagnostics**: Backup & Restore (back up configuration to a ZIP or restore an earlier one, plus a separate backup of the artwork and media files iiSU keeps inside the running VM; iiSU's private in-app data such as favorites and play history can't be backed up) and Diagnostics (non-destructive checks of the install, Android VM/ADB, bridge, PC apps, Steam integration, logs; also where you check for and apply Community-iiSU-PC and iiSU updates).
 - **Credits**: who built this and how (see below).
 - **Uninstall**: below a divider at the bottom of the sidebar.
@@ -161,17 +178,21 @@ Maintainer-only, not needed to run or develop the project day to day: `installer
 - Run the Manager's **Backup & Diagnostics > Diagnostics** page first for a non-destructive check of the installation, configuration, Android VM/ADB, bridge, PC apps, Steam integration, and logs.
 - `bridge/manager_debug.log` and `bridge/bridge_debug.log` preserve Manager and launch-bridge diagnostics, including uncaught Python exceptions that might otherwise disappear when a console closes.
 - `installer/patch_iisu.py`'s patch is anchored on specific log strings in iiSU's code. If iiSU updates and changes them, the patch fails loudly instead of silently producing a broken build. The Media Library's MediaBridge hooks find iiSU's obfuscated helper classes by method signature at patch time; if that fails the patch still completes with a warning and media is installed without re-indexing.
-- `bridge/emulator.log`, `bridge/bridge.log`, and `bridge/stop.log` cover the AVD, the launch bridge, and shutdown respectively. Open the Manager's Home page (Logs button) to check them.
+- `bridge/emulator.log`, `bridge/bridge.log`, `bridge/stop.log` and `bridge/setup.log` cover the AVD, the launch bridge, shutdown and Setup respectively. Setup's log keeps what it printed even if the window is closed partway. Open the Manager's Home page (Logs button) to check them.
 - Re-running setup is safe: it skips anything already done and won't overwrite an existing `config.json`'s settings.
 - Community-iiSU-PC uses a quick resume when nothing relevant has changed since the last start, and only cold-boots (a bit slower) when your settings or ROM library have changed since then, or on the very first start.
 
+### A leaner Android VM
+
+Setup's **Lean VM** option (on by default, under **Android VM**) removes the Play image's bundled apps that iiSU doesn't need, for less memory and disk use: everything except Files (iiSU's folder picker), Chrome, the Play Store with Google Play services, and the core system. It also installs LeanKeyboard as the keyboard. Each step is checked across a reboot, a step that leaves the VM unhealthy is undone, and if the VM stops booting Setup rebuilds it and installs without the trim. Untick it for a stock VM. The full removal list is only applied to image builds it was verified on; other builds get just the user-facing apps.
+
 ### Seeing and changing the VM's storage
 
-**Settings > Storage** shows what is using the VM's internal storage as a colour-coded bar (iiSU's title art and media, iiSU itself, Google Play and Chrome, other apps, other files, Android itself, and free space), how big the VM's file is on your drive, and any old copies left by earlier resizes (with a button to delete them). The VM has to be running for the breakdown. **Recreate VM at this size** changes the internal storage size: it backs up iiSU's title art and media (and checks the backup) before touching anything, moves the old storage aside, builds a fresh VM at the new size, reinstalls iiSU and restores the backup, and puts the old VM back if the reinstall fails. iiSU's own settings and favorites, and the folder access you granted it, are not restored (you'll pick your ROM folder again). The storage file never shrinks when you delete things inside the VM, so recreating it is also the way to get drive space back.
+**Settings > Storage** shows what is using the VM's internal storage as a colour-coded bar (iiSU's title art and media, iiSU itself, Google Play and Chrome, other apps, other files, Android itself, and free space), how big the VM's file is on your drive, and any old copies left by earlier resizes (with a button to delete them). The VM has to be running for the breakdown. **Recreate VM at this size** changes the internal storage size: it backs up iiSU's title art and media (and checks the backup) before touching anything, moves the old storage aside, builds a fresh VM at the new size, reinstalls iiSU and restores the backup, and puts the old VM back if the reinstall fails. iiSU's own settings and favorites, and the folder access you granted it, are not restored (you'll pick your ROM folder again). The storage file never shrinks when you delete things inside the VM, so recreating it is also the way to get drive space back. When it finishes it offers to delete the old storage (it can be most of a drive's worth of space) and to start the VM, so you can pick your ROM folder again in iiSU.
 
 ### If the VM runs out of internal storage
 
-Symptom: iiSU crashes at startup or while scanning, and the system log shows `SQLiteFullException: database or disk is full` or `ENOSPC (No space left on device)`. Diagnostics shows **Android VM storage** as an error. The cause is the Android data partition, which AVDs created before v0.5.5 size at 6 GB. A Play-image Android plus iiSU's downloaded artwork (about 2 GB for a 2,000-game library) fills it. New installs get 16 GB by default, and Setup's **Android VM** card lets you choose 8 to 128 GB (a maximum: the file on your drive only grows as the VM fills). The same card's **Lean VM** option removes the bundled apps iiSU doesn't need (everything except Files, Chrome, the Play Store with its Google services, and the core system) and installs LeanKeyboard as the keyboard; it verifies the VM still boots and falls back to a normal install if not. Android can't grow an existing data partition, so an existing VM has to have its data image recreated:
+Symptom: iiSU crashes at startup or while scanning, and the system log shows `SQLiteFullException: database or disk is full` or `ENOSPC (No space left on device)`. Diagnostics shows **Android VM storage** as an error. The cause is the Android data partition, which AVDs created before v0.5.5 size at 6 GB. A Play-image Android plus iiSU's downloaded artwork (about 2 GB for a 2,000-game library) fills it. New installs get 16 GB by default, and Setup's **Android VM** card lets you choose 8 to 128 GB (a maximum: the file on your drive only grows as the VM fills). Android can't grow an existing data partition, so an existing VM has to have its data image recreated:
 
 1. **Back up** iiSU's artwork: Backup & Restore > Back Up iiSU Data. Note that iiSU's private in-app data (favorites, play history, settings) can't be backed up and will be reset.
 2. **Stop** Community-iiSU-PC.
