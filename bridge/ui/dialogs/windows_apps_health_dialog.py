@@ -12,12 +12,12 @@ from bridge.ui.widgets.card import Card
 from shared.qt_theme import Fonts, GREEN, TEXT_DIM
 
 _SECTIONS = [
-    ("missing_placeholders", "Missing placeholders", "Safe to repair automatically; the mapping itself is intact."),
-    ("orphan_placeholders", "Orphan placeholders", "A .pcgame file exists with no Windows Apps mapping. Left untouched."),
-    ("missing_executables", "Missing executables", "The configured EXE is missing or invalid. Update or remove the mapping manually."),
-    ("uninstalled_steam", "Steam games not installed", "The mapping is valid; Steam simply has no installed manifest right now. Left untouched."),
-    ("invalid_uris", "Invalid URIs", "The URI mapping needs to be edited or removed manually."),
-    ("invalid_entries", "Invalid/unknown entries", "The JSON entry is malformed or uses an unknown launch type."),
+    ("missing_placeholders", "Missing placeholders", "Safe to repair automatically."),
+    ("orphan_placeholders", "Orphan placeholders", "A .pcgame file has no mapping. Left untouched."),
+    ("missing_executables", "Missing executables", "The EXE is missing or invalid. Fix or remove the mapping."),
+    ("uninstalled_steam", "Steam games not installed", "Steam has no installed manifest for it right now. Left untouched."),
+    ("invalid_uris", "Invalid URIs", "Edit or remove the URI mapping."),
+    ("invalid_entries", "Invalid/unknown entries", "Malformed entry or unknown launch type."),
 ]
 
 
@@ -86,18 +86,18 @@ class WindowsAppsHealthDialog(QDialog):
             lines.append("")
         if self._findings["duplicate_steam_ids"]:
             lines.append(f"Duplicate Steam App IDs ({len(self._findings['duplicate_steam_ids'])})")
-            lines.append("Multiple mappings point to the same Steam App ID. Left untouched.")
+            lines.append("Several mappings share a Steam App ID. Left untouched.")
             for appid, names in self._findings["duplicate_steam_ids"]:
                 lines.append(f"  • {appid}: {', '.join(names)}")
             lines.append("")
         if not lines:
-            lines.append("No Windows Apps maintenance issues were found.")
+            lines.append("No issues found.")
         self.details.setPlainText("\n".join(lines))
 
     def _repair_safe(self) -> None:
         names = self._findings["missing_placeholders"]
         if not names:
-            self.details.appendPlainText("\nNothing to repair: no safely repairable placeholder issues were found.")
+            self.details.appendPlainText("\nNothing to repair.")
             return
         repaired = svc.repair_missing_placeholders(self._windows_dir, names)
         self._on_repaired()

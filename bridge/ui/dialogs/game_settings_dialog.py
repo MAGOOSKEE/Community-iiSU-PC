@@ -35,7 +35,7 @@ class GameSettingsDialog(QDialog):
         title = QLabel(rom_filename)
         title.setWordWrap(True)
         layout.addWidget(title)
-        note = QLabel("Applies only to this game, on its next launch. Leave a field empty to use the normal behavior.")
+        note = QLabel("Applies to this game on its next launch. Empty fields use the normal behavior.")
         note.setWordWrap(True)
         note.setStyleSheet(f"color: {TEXT_DIM};")
         layout.addWidget(note)
@@ -67,7 +67,7 @@ class GameSettingsDialog(QDialog):
         form.addRow("Environment variables:", self.env_edit)
 
         self.pre_launch_edit = QLineEdit(current["pre_launch"])
-        self.pre_launch_edit.setPlaceholderText("A program to run and wait for before the game starts")
+        self.pre_launch_edit.setPlaceholderText("Program to run (and wait for) before the game starts")
         form.addRow("Run before launch:", self.pre_launch_edit)
         layout.addLayout(form)
 
