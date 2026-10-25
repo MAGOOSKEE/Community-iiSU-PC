@@ -1,5 +1,7 @@
 """Unit tests for bridge/services/vm_storage_service.py (no VM needed)."""
 
+import os
+import stat
 import sys
 import tempfile
 import unittest
@@ -106,6 +108,17 @@ class OldCopyTests(unittest.TestCase):
             with self.assertRaises(svc.StorageError):
                 svc.delete_old_copy(elsewhere, "iisuwin", home)
             self.assertTrue(live.is_dir() and elsewhere.is_dir())
+
+    def test_delete_removes_read_only_files_too(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            old = home / "iisuwin.pre-resize-1" / "data" / "misc"
+            old.mkdir(parents=True)
+            stuck = old / "pstore.bin"
+            stuck.write_bytes(b"x")
+            os.chmod(stuck, stat.S_IREAD)
+            svc.delete_old_copy(home / "iisuwin.pre-resize-1", "iisuwin", home)
+            self.assertFalse((home / "iisuwin.pre-resize-1").exists())
 
     def test_delete_removes_an_old_copy(self):
         with tempfile.TemporaryDirectory() as tmp:

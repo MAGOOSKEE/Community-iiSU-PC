@@ -16,9 +16,12 @@ beside the AVD until the person deletes it.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
+import stat
 import subprocess
+import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -155,13 +158,27 @@ def host_info(avd_name: str, avd_home: Path = AVD_HOME) -> HostInfo:
     )
 
 
+def remove_tree(path: Path) -> None:
+    """shutil.rmtree that also removes read-only files: an Android data folder copied onto
+    Windows contains some (pstore.bin), and a plain rmtree stops at the first one."""
+
+    def make_writable(function, failed_path, _error) -> None:
+        os.chmod(failed_path, stat.S_IWRITE)
+        function(failed_path)
+
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=make_writable)
+    else:
+        shutil.rmtree(path, onerror=make_writable)
+
+
 def delete_old_copy(copy_path: Path, avd_name: str, avd_home: Path = AVD_HOME) -> None:
     """Deletes one old-copy folder. Refuses anything that isn't directly inside
     the AVD home with a name from is_old_copy_name, so a stray path can never
     take the live VM or anything else with it."""
     if copy_path.parent.resolve() != avd_home.resolve() or not is_old_copy_name(copy_path.name, avd_name):
         raise StorageError(f"{copy_path.name} isn't an old VM copy, so it was left alone.")
-    shutil.rmtree(copy_path)
+    remove_tree(copy_path)
 
 
 # == Recreating at a different size ==
@@ -249,7 +266,7 @@ def resize(
             if (aside / name).exists():
                 shutil.move(str(aside / name), str(directory / name))
         config_ini.write_bytes(original_config)
-        shutil.rmtree(aside, ignore_errors=True)
+        remove_tree(aside)
         raise ResizeError(f"The new VM couldn't be set up, so the old one was put back: {e}") from e
     return result
 
