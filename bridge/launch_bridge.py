@@ -64,6 +64,9 @@ from urllib.parse import unquote
 # during development against a git checkout. Explicit, not implicit, for
 # every bare import below.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+# The project root too: portable_sdk and the rest import the shared/ package, which
+# sits next to bridge/, not inside it, and a raw script launch only gets its own folder.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import game_overrides
 import portable_sdk  # noqa: F401; imported for its import-time PATH fix (adb), not used directly here

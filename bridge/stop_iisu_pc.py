@@ -40,6 +40,9 @@ from pathlib import Path
 # a real embeddable-Python install (see the identical, confirmed-live fix
 # in launch_bridge.py itself).
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+# The project root too: portable_sdk and the rest import the shared/ package, which
+# sits next to bridge/, not inside it, and a raw script launch only gets its own folder.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from portable_sdk import PORTABLE_AVD_HOME
 from shared import app_version

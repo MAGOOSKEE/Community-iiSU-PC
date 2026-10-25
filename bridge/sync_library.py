@@ -50,6 +50,10 @@ import tarfile
 import time
 from pathlib import Path, PurePosixPath
 
+# Run as a raw script this only has its own folder on sys.path; shared/ is one level up.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import portable_sdk  # noqa: F401; imported for its import-time PATH fix (adb), not used directly here
 from console_names import load_console_lookup, resolve_console_shortname
 from shared.platform_compat import subprocess_creationflags
