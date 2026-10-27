@@ -173,7 +173,9 @@ Maintainer-only, not needed to run or develop the project day to day: `installer
 
 ## Running tests
 
-`python -m unittest discover -s tests` (or `python3` on Linux) runs the unit tests covering the console/emulator routing logic (`shared/emulator_defaults.py`, `bridge/console_names.py`, `bridge/launch_bridge.py`'s `find_emulator_for_package`, `bridge/controller_bridge.py`, `bridge/emulator_downloader.py`). Stdlib-only, no AVD or adb needed. These only check the pure mapping/decision logic, not an actual end-to-end launch.
+`python -m unittest discover -s tests` (or `python3` on Linux), run from the repo root, runs the unit tests. They cover the pure logic: console and emulator routing and the executable and ROM lookup (`shared/emulator_defaults.py`, `bridge/emulator_lookup.py`, `bridge/console_names.py`), the hotkey tables, start and stop sequencing including Boot Headless and the resume snapshot, the Waydroid and portable SDK file handling, and the services behind the Manager's pages. No AVD or adb is needed.
+
+`tests/test_ui_smoke.py` also builds every Manager page offscreen against a temporary config and switches through all of them; it needs PySide6 and is skipped without it. None of this runs an actual end-to-end launch.
 
 ## If something breaks
 
