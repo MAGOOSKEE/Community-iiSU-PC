@@ -108,6 +108,7 @@ class HeadlessWithWaydroidTests(unittest.TestCase):
         config = {"vm_backend": "waydroid", "avd_name": "iisuwin", "bridge_port": 7737}
         with patch.object(start_iisu_pc, "load_config", return_value=config), \
              patch.object(start_iisu_pc, "resolve_backend", return_value=start_iisu_pc.BACKEND_WAYDROID), \
+             patch.object(start_iisu_pc, "supports_headless_boot", return_value=False), \
              patch.object(start_iisu_pc.winapi, "ensure_linux_kwin_rules"), \
              patch.object(start_iisu_pc, "_run_start_sequence") as sequence, \
              patch.object(start_iisu_pc.boot_overlay, "close"):

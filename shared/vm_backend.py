@@ -83,6 +83,12 @@ def resolve_backend(config: Mapping | None = None, env: Mapping[str, str] | None
     return preferred_backend(env, is_windows)
 
 
+def supports_headless_boot(config: Mapping | None = None, env: Mapping[str, str] | None = None, is_windows: bool = IS_WINDOWS) -> bool:
+    """Whether Boot Headless means anything for this install: an emulator has a
+    window to leave out, Waydroid is a container with its own session."""
+    return resolve_backend(config, env, is_windows) != BACKEND_WAYDROID
+
+
 def _device_lines(adb_devices_stdout: str):
     for line in adb_devices_stdout.splitlines():
         parts = line.split()
