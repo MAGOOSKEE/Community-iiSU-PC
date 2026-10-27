@@ -64,6 +64,7 @@ from portable_sdk import (
     EMULATOR_BIN,
     PORTABLE_AVD_HOME,
     PORTABLE_SDK,
+    clear_quickboot_snapshot,
     ensure_portable_sdk,
     patch_config_ini,
     set_quickboot_autosave,
@@ -129,10 +130,18 @@ FINGERPRINT_PART_LABELS = {
     "roms_dir": "the ROM library",
     "emulator_profile": "the emulator profile",
     "vm_backend": "the Android runtime",
+    "boot_mode": "the boot mode (window or headless)",
 }
 
+BOOT_MODE_WINDOWED = "windowed"
+BOOT_MODE_HEADLESS = "headless"
 
-def compute_boot_fingerprint_parts(config: dict) -> dict[str, str]:
+# What a fingerprint saved before a part existed counts as, so adding a part
+# doesn't force one pointless cold boot on everyone's next start.
+_LEGACY_PART_VALUES = {"boot_mode": BOOT_MODE_WINDOWED}
+
+
+def compute_boot_fingerprint_parts(config: dict, headless: bool = False) -> dict[str, str]:
     """Everything that would make a resumed (quickboot) AVD's state stale
     or wrong, hashed separately per part instead of as one combined blob,
     so a later comparison can say *what* changed rather than just *that*
@@ -148,11 +157,12 @@ def compute_boot_fingerprint_parts(config: dict) -> dict[str, str]:
         "roms_dir": _roms_signature(Path(config.get("roms_dir", ""))),
         "emulator_profile": emulator_profiles.fingerprint(emulator_profiles.active_profile(config)),
         "vm_backend": resolve_backend(config),
+        "boot_mode": BOOT_MODE_HEADLESS if headless else BOOT_MODE_WINDOWED,
     }
 
 
-def compute_boot_fingerprint(config: dict) -> str:
-    parts = compute_boot_fingerprint_parts(config)
+def compute_boot_fingerprint(config: dict, headless: bool = False) -> str:
+    parts = compute_boot_fingerprint_parts(config, headless)
     h = hashlib.sha256()
     for key in sorted(parts):
         h.update(f"{key}:{parts[key]}\n".encode("utf-8"))
@@ -165,7 +175,19 @@ def describe_boot_fingerprint_diff(old_parts: dict[str, str] | None, new_parts: 
     time this ever runs, or after a manual reset via clear_boot_fingerprint()."""
     if old_parts is None:
         return ["no saved resume state yet"]
-    return [f"{FINGERPRINT_PART_LABELS.get(key, key)} changed" for key in new_parts if old_parts.get(key) != new_parts[key]]
+    return [
+        f"{FINGERPRINT_PART_LABELS.get(key, key)} changed"
+        for key in new_parts
+        if old_parts.get(key, _LEGACY_PART_VALUES.get(key)) != new_parts[key]
+    ]
+
+
+def boot_mode_changed(old_parts: dict[str, str] | None, new_parts: dict[str, str]) -> bool:
+    """True when the previous start used the other boot mode (window or
+    headless). False when there is no previous start to compare with."""
+    if old_parts is None:
+        return False
+    return old_parts.get("boot_mode", BOOT_MODE_WINDOWED) != new_parts["boot_mode"]
 
 
 def load_saved_boot_fingerprint() -> str | None:
@@ -588,16 +610,22 @@ def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: b
     elif is_avd_running(avd_name):
         print(f"[start] {avd_name} is already running.")
     else:
-        new_parts = compute_boot_fingerprint_parts(config)
+        new_parts = compute_boot_fingerprint_parts(config, headless)
         old_parts = load_saved_boot_fingerprint_parts()
         reasons = describe_boot_fingerprint_diff(old_parts, new_parts)
         # A headless run never uses quick resume: a snapshot taken with a window
         # failed to load windowless (and a headless run can't save one), so a later
         # windowed resume would bring back the state from before it, losing whatever
-        # the headless session wrote. Cold booting here and again on the next normal
-        # start (the fingerprint is cleared below) keeps the disk the one truth.
+        # the headless session wrote. A snapshot also records how it was taken (host
+        # GPU or software rendering), so it cannot be resumed in the other mode at all.
+        # Every swap between the modes therefore cold boots and deletes the old snapshot,
+        # which keeps the disk the one truth even if the next boot is killed before it
+        # can save a fresh one.
         if headless:
             reasons = ["headless start"]
+        if headless or boot_mode_changed(old_parts, new_parts):
+            if clear_quickboot_snapshot(PORTABLE_AVD_HOME / f"{avd_name}.avd"):
+                print("[start] Removed the saved resume snapshot (the boot mode changed).")
         force_cold_boot = bool(reasons)
         if force_cold_boot:
             print(f"[start] Starting {avd_name} (cold boot: {', '.join(reasons)})...")
@@ -610,10 +638,9 @@ def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: b
         if pid is None:
             sys.exit(1)
         state["emulator_pid"] = pid
-        if headless:
-            clear_boot_fingerprint()  # the next normal start cold boots, see above
-        else:
-            save_boot_fingerprint(compute_boot_fingerprint(config), new_parts)
+        # Saved for both modes: the boot_mode part is what makes the next start in the
+        # other mode cold boot, so a headless run no longer needs to wipe the whole file.
+        save_boot_fingerprint(compute_boot_fingerprint(config, headless), new_parts)
         print(f"[start] {avd_name} is up{' (headless, no window)' if headless else ''}.")
 
     print("[start] Syncing your ROM library into the AVD...")

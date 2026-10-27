@@ -8,6 +8,7 @@ backed by anything real. No AVD or adb needed for either.
 """
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -41,6 +42,40 @@ class DescribeBootFingerprintDiffTests(unittest.TestCase):
         self.assertNotEqual(
             start_iisu_pc.compute_boot_fingerprint(cfg_a), start_iisu_pc.compute_boot_fingerprint(cfg_b)
         )
+
+
+class BootModeFingerprintTests(unittest.TestCase):
+    CONFIG = {"avd_name": "iisuwin", "display": {}, "emulators": {}, "usb_passthrough": [], "roms_dir": "C:/nonexistent"}
+
+    def test_the_boot_mode_is_part_of_the_fingerprint(self):
+        windowed = start_iisu_pc.compute_boot_fingerprint_parts(self.CONFIG)
+        headless = start_iisu_pc.compute_boot_fingerprint_parts(self.CONFIG, headless=True)
+        self.assertEqual(windowed["boot_mode"], "windowed")
+        self.assertEqual(headless["boot_mode"], "headless")
+        self.assertNotEqual(
+            start_iisu_pc.compute_boot_fingerprint(self.CONFIG), start_iisu_pc.compute_boot_fingerprint(self.CONFIG, headless=True)
+        )
+
+    def test_a_swap_in_either_direction_is_reported(self):
+        windowed = start_iisu_pc.compute_boot_fingerprint_parts(self.CONFIG)
+        headless = start_iisu_pc.compute_boot_fingerprint_parts(self.CONFIG, headless=True)
+        expected = ["the boot mode (window or headless) changed"]
+        self.assertEqual(start_iisu_pc.describe_boot_fingerprint_diff(windowed, headless), expected)
+        self.assertEqual(start_iisu_pc.describe_boot_fingerprint_diff(headless, windowed), expected)
+
+    def test_a_fingerprint_saved_before_the_part_existed_counts_as_windowed(self):
+        windowed = start_iisu_pc.compute_boot_fingerprint_parts(self.CONFIG)
+        old = {key: value for key, value in windowed.items() if key != "boot_mode"}
+        self.assertEqual(start_iisu_pc.describe_boot_fingerprint_diff(old, windowed), [])
+        self.assertFalse(start_iisu_pc.boot_mode_changed(old, windowed))
+
+    def test_boot_mode_changed(self):
+        windowed = start_iisu_pc.compute_boot_fingerprint_parts(self.CONFIG)
+        headless = start_iisu_pc.compute_boot_fingerprint_parts(self.CONFIG, headless=True)
+        self.assertTrue(start_iisu_pc.boot_mode_changed(windowed, headless))
+        self.assertTrue(start_iisu_pc.boot_mode_changed(headless, windowed))
+        self.assertFalse(start_iisu_pc.boot_mode_changed(headless, headless))
+        self.assertFalse(start_iisu_pc.boot_mode_changed(None, headless))
 
 
 class QuickbootAutosaveRegressionTests(unittest.TestCase):
@@ -117,36 +152,71 @@ class HeadlessWithWaydroidTests(unittest.TestCase):
 
 
 class HeadlessSnapshotTests(unittest.TestCase):
-    """A headless run must not resume or leave behind a quick-resume snapshot: a windowed resume
-    afterwards would bring back the state from before the headless session."""
+    """A snapshot is tied to how it was taken (host GPU or software rendering, with or without a
+    window) and to the disk it was taken from, so every swap between a windowed and a headless
+    start must cold boot and delete it, in both directions."""
 
-    def _start(self, headless: bool):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.avd_home = Path(self._tmp.name)
+        self.snapshot = self.avd_home / "iisuwin.avd" / "snapshots" / "default_boot"
+        self.snapshot.mkdir(parents=True)
+        (self.snapshot / "ram.bin").write_bytes(b"x")
+
+    def _start(self, headless: bool, previous_mode: str | None):
+        """previous_mode is the boot mode the saved fingerprint records, None for no saved fingerprint."""
+        def parts(config, headless=False):
+            return {"a": "1", "boot_mode": "headless" if headless else "windowed"}
+
+        saved = None if previous_mode is None else {"a": "1", "boot_mode": previous_mode}
         with patch.object(start_iisu_pc, "is_avd_running", return_value=False), \
-             patch.object(start_iisu_pc, "compute_boot_fingerprint_parts", return_value={"a": "1"}), \
-             patch.object(start_iisu_pc, "load_saved_boot_fingerprint_parts", return_value={"a": "1"}), \
-             patch.object(start_iisu_pc, "compute_boot_fingerprint", return_value="fp"), \
+             patch.object(start_iisu_pc, "PORTABLE_AVD_HOME", self.avd_home), \
+             patch.object(start_iisu_pc, "compute_boot_fingerprint_parts", side_effect=parts), \
+             patch.object(start_iisu_pc, "load_saved_boot_fingerprint_parts", return_value=saved), \
+             patch.object(start_iisu_pc, "compute_boot_fingerprint", return_value="fp") as fingerprint, \
              patch.object(start_iisu_pc, "start_avd", return_value=4242) as start_avd, \
              patch.object(start_iisu_pc, "save_boot_fingerprint") as save, \
-             patch.object(start_iisu_pc, "clear_boot_fingerprint") as clear, \
              patch.object(start_iisu_pc, "sync_rom_library"), \
              patch.object(start_iisu_pc, "save_state"), \
              patch.object(start_iisu_pc, "is_port_open", return_value=True), \
              patch.object(start_iisu_pc, "launch_iisu"), \
              patch.object(start_iisu_pc, "show_iisu_window"):
             start_iisu_pc._run_start_sequence({"vm_backend": "avd"}, "iisuwin", 7737, False, {}, headless)
-        return start_avd, save, clear
+        return start_avd, save, fingerprint
 
-    def test_headless_always_cold_boots_and_clears_the_resume_state(self):
-        start_avd, save, clear = self._start(headless=True)
+    def test_headless_always_cold_boots_and_deletes_the_snapshot(self):
+        start_avd, _, _ = self._start(headless=True, previous_mode="headless")
         self.assertIs(start_avd.call_args.kwargs["force_cold_boot"], True)
-        save.assert_not_called()
-        clear.assert_called_once()
+        self.assertFalse(self.snapshot.exists())
 
-    def test_a_normal_start_with_nothing_changed_still_resumes(self):
-        start_avd, save, clear = self._start(headless=False)
-        self.assertIs(start_avd.call_args.kwargs["force_cold_boot"], False)
+    def test_windowed_to_headless_deletes_the_snapshot(self):
+        start_avd, _, _ = self._start(headless=True, previous_mode="windowed")
+        self.assertIs(start_avd.call_args.kwargs["force_cold_boot"], True)
+        self.assertFalse(self.snapshot.exists())
+
+    def test_headless_to_windowed_cold_boots_and_deletes_a_leftover_snapshot(self):
+        start_avd, _, _ = self._start(headless=False, previous_mode="headless")
+        self.assertIs(start_avd.call_args.kwargs["force_cold_boot"], True)
+        self.assertFalse(self.snapshot.exists())
+
+    def test_a_headless_start_records_its_mode_for_the_next_start(self):
+        _, save, fingerprint = self._start(headless=True, previous_mode="windowed")
         save.assert_called_once()
-        clear.assert_not_called()
+        self.assertEqual(save.call_args.args[1]["boot_mode"], "headless")
+        self.assertIs(fingerprint.call_args.args[1], True)
+
+    def test_a_normal_start_after_a_normal_start_still_resumes_and_keeps_the_snapshot(self):
+        start_avd, save, _ = self._start(headless=False, previous_mode="windowed")
+        self.assertIs(start_avd.call_args.kwargs["force_cold_boot"], False)
+        self.assertTrue(self.snapshot.exists())
+        save.assert_called_once()
+        self.assertEqual(save.call_args.args[1]["boot_mode"], "windowed")
+
+    def test_a_first_ever_windowed_start_does_not_touch_the_snapshot(self):
+        start_avd, _, _ = self._start(headless=False, previous_mode=None)
+        self.assertIs(start_avd.call_args.kwargs["force_cold_boot"], True)
+        self.assertTrue(self.snapshot.exists())
 
 
 class HeadlessLaunchTests(unittest.TestCase):

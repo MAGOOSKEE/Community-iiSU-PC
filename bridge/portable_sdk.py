@@ -208,6 +208,21 @@ def set_quickboot_autosave(avd_dir: Path, enabled: bool) -> None:
     (avd_dir / "quickbootChoice.ini").write_text(f"saveOnExit = {value}\n", encoding="utf-8")
 
 
+def clear_quickboot_snapshot(avd_dir: Path) -> bool:
+    """Deletes the quickboot snapshot (snapshots/default_boot) so the next
+    boot cannot resume it. A snapshot is tied to the way it was taken (host
+    GPU or software rendering, with or without a window) and to the disk it
+    was taken from, so it is stale once a run in another mode has changed that
+    disk. The VM must be stopped. Returns whether anything was removed."""
+    import shutil
+
+    snapshot = avd_dir / "snapshots" / "default_boot"
+    if not snapshot.exists():
+        return False
+    shutil.rmtree(snapshot, ignore_errors=True)
+    return not snapshot.exists()
+
+
 def _read_image_sysdir(avd_dir: Path) -> str | None:
     config_ini = avd_dir / "config.ini"
     if not config_ini.is_file():
