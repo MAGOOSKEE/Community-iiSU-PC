@@ -5,7 +5,7 @@ immediately (a sign the pre_args/rom-ordering for that profile is wrong, the
 way xemu's bare trailing ROM path collided with its own persisted xemu.toml
 CD drive and died with exit code 1 within a second).
 
-Uses build_pc_launch_args() from bridge/launch_bridge.py, the exact function
+Uses build_pc_launch_args() from bridge/emulator_lookup.py, the exact function
 the real launch path calls, so a PASS here means the argv this tool built is
 identical to what a real launch would use, not a separate reimplementation
 that could disagree with it.
@@ -42,7 +42,7 @@ sys.path.insert(0, str(Path(__file__).parent / "bridge"))
 
 from bridge_config import ConfigMissingError, load_config
 from console_names import load_console_lookup, resolve_console_shortname
-from launch_bridge import build_pc_launch_args, core_dll_from_pre_args, find_executable
+from emulator_lookup import build_pc_launch_args, core_dll_from_pre_args, find_executable
 
 from shared.emulator_defaults import RETROARCH_BY_EXTENSION, RETROARCH_SAFETY_NET_EXTENSIONS, STANDALONE_DEFAULTS
 

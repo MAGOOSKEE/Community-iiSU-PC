@@ -153,6 +153,8 @@ bridge/
   updater.py               checks for (and, on a git checkout, applies) updates
   stop_iisu_pc.py          tears both back down
   launch_bridge.py         handles iiSU launches for PC emulators and native PC apps
+  emulator_lookup.py       finds the emulator and ROM for a launch and builds its command line
+  hotkey_keys.py           key and modifier tables for the quit and shutdown hotkeys
   controller_bridge.py     forwards controller input into the AVD (XInput on Windows, joydev on Linux)
   emulator_downloader.py   downloads PC emulators via winget (Windows) or Flatpak (Linux)
   portable_sdk.py          copies the SDK/AVD into a self-contained folder

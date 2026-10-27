@@ -19,7 +19,7 @@ there's no Android PCSX2 to begin with).
 
 RETROARCH_BY_EXTENSION: a *fallback* for consoles routed through a single
 shared com.retroarch stub, used only when iiSU doesn't report which core
-it actually launched with (see bridge/launch_bridge.py's
+it actually launched with (see bridge/emulator_lookup.py's
 find_emulator_for_package, the LIBRETRO intent extra is trusted first
 and unconditionally whenever it's present, since it identifies the
 console directly instead of guessing from the ROM's file extension, which
@@ -35,7 +35,7 @@ on this list to guess correctly from the extension alone.
 RetroArch itself is launched as retroarch.exe -L <core> -f <rom>, so
 pre_args includes -L and a core path relative to wherever retroarch.exe
 is found (standard "cores/xxx_libretro.dll" layout), this assumes the
-matching core is already installed there (launch_bridge.py's
+matching core is already installed there (emulator_lookup.py's
 ensure_retroarch_core downloads a missing one from the libretro buildbot
 automatically), same as RetroArch itself needs to be already installed
 for this to do anything.
@@ -85,7 +85,7 @@ STANDALONE_DEFAULTS = [
         # this Cemu build's -f/--fullscreen always consumes the next
         # token as its required on/off value, so a bare trailing rom path
         # (how every other emulator here takes its rom, see
-        # launch_bridge.py's `args = [exe, *pre_args, rom_path]`) gets
+        # emulator_lookup.py's build_pc_launch_args) gets
         # swallowed as that value instead. Needs an explicit value, and the
         # rom path needs its own --game flag rather than relying on
         # position.
@@ -145,7 +145,7 @@ STANDALONE_DEFAULTS = [
         # of me.magnum.melonds, "me.magnum.melondualds".startswith("me.magnum.melonds")
         # is False (they diverge after "melond"), so without this as its
         # own entry a melonDualDS install would never match the prefix
-        # lookup in launch_bridge.find_emulator_for_package at all.
+        # lookup in emulator_lookup.find_emulator_for_package at all.
         "package": "me.magnum.melondualds",
         "app_label": "melonDS",
         "exe_names": ["melonDS.exe"],
@@ -175,7 +175,7 @@ STANDALONE_DEFAULTS = [
         # confirmed live, the boot target has to come *before* these
         # flags or RPCS3 parses neither flag as having a boot target at
         # all ("Missing command-line arguments! Cannot run no-gui mode
-        # without boot target."). See launch_bridge.py's rom_before_args
+        # without boot target."). See emulator_lookup.py's rom_before_args
         # handling.
         "rom_before_args": True,
     },
@@ -421,7 +421,7 @@ def all_emulator_exe_names() -> list[tuple[str, list[str]]]:
     """(app_label, exe_names) for every standalone emulator plus RetroArch
     itself, one per unique label, for UIs that want to check which of
     these are actually installed under a set of search folders (see
-    bridge/launch_bridge.py's find_executable, which this is meant to be
+    bridge/emulator_lookup.py's find_executable, which this is meant to be
     used with for a result that matches what a real launch would find)."""
     seen = {}
     for entry in STANDALONE_DEFAULTS:

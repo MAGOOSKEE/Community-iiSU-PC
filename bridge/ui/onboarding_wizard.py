@@ -58,10 +58,10 @@ MODIFIER_NAMES = ["ctrl", "alt", "shift", "win"]
 
 STEP_TITLES = ["Welcome", "ROM Directory", "Emulator Folders", "Emulator Mappings", "Display", "Hotkeys", "Finish"]
 
-# Qt.Key -> the exact lowercase name bridge/launch_bridge.py's NAMED_KEY_VK
+# Qt.Key -> the exact lowercase name bridge/hotkey_keys.py's NAMED_KEY_VK
 # expects, anything not listed here falls back to the pressed character
 # itself, which already covers every plain letter/digit key. Must stay in
-# sync with launch_bridge.py's table so the *stored* format can't drift.
+# sync with hotkey_keys.py's table so the *stored* format can't drift.
 _NAMED_KEYS = {
     Qt.Key.Key_Escape: "escape", Qt.Key.Key_Tab: "tab", Qt.Key.Key_Return: "return",
     Qt.Key.Key_Enter: "return", Qt.Key.Key_Space: "space",
