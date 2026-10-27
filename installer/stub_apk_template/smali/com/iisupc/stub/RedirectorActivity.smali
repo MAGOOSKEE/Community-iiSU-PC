@@ -2,7 +2,7 @@
 .super Landroid/app/Activity;
 .source "RedirectorActivity.smali"
 
-# Never actually reached in normal operation -- the patched LaunchBridge
+# Never actually reached in normal operation, the patched LaunchBridge
 # intercepts the ROM-launch Intent before Android would start this
 # Activity at all. It exists purely so iiSU's own "is this emulator
 # installed" check finds a real, installed package to resolve to (see

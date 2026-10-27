@@ -27,7 +27,7 @@ APKTOOL_JAR = PROJECT_ROOT / "installer" / "tools" / "apktool.jar"
 OUTPUT_DIR = PROJECT_ROOT / "runtime" / "jre"
 
 # java.base is implied by jlink but named explicitly anyway so the
-# --add-modules list here matches what a human re-running this by hand
+# add-modules list here matches what a human re-running this by hand
 # would naturally type, rather than relying on an undocumented default.
 EXTRA_MODULES = ["java.base"]
 

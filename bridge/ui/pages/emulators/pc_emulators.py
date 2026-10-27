@@ -57,7 +57,7 @@ class EmulatorsPage(PageBase):
         btn_row_layout.addWidget(add_button)
         btn_row_layout.addStretch(1)
         # Same convention as Console Games: left-click selection never
-        # surfaces Edit/Remove/Test as buttons, only this status hint --
+        # surfaces Edit/Remove/Test as buttons, only this status hint;
         # the actions themselves live in the right-click menu.
         self.selection_hint = QLabel("")
         self.selection_hint.setStyleSheet(f"color: {TEXT_DIM};")

@@ -51,7 +51,7 @@ class HomePage(PageBase):
         self._setup_process = None
         self._hidden_for_setup = False
 
-        # Painted behind everything else on this page -- created before any
+        # Painted behind everything else on this page, created before any
         # body_layout.addWidget() call below so it sits at the bottom of the
         # sibling stacking order, and never added to body_layout itself
         # since it's positioned manually (see resizeEvent), not managed by
@@ -161,7 +161,7 @@ class HomePage(PageBase):
         self.body_layout.addWidget(center_col, 0, Qt.AlignmentFlag.AlignHCenter)
         self.body_layout.addStretch(1)
 
-        # Collapsed by default -- the log drawer, not a permanently visible
+        # Collapsed by default: the log drawer, not a permanently visible
         # console. _run_guarded's redirector keeps appending to it whether
         # it's shown or not, so opening it mid-run shows history, not just
         # new output.
@@ -297,7 +297,7 @@ class HomePage(PageBase):
             return
         self._set_busy(True)
         self.stage_label.setText("Starting (headless)..." if headless else "Starting...")
-        self._append_log("\n--- Start (headless, no window) ---\n" if headless else "\n--- Start ---\n")
+        self._append_log("\n=== Start (headless, no window) ===\n" if headless else "\n=== Start ===\n")
         self._guarded_signals = run_in_background(
             self._run_guarded, self._on_guarded_done, self._on_guarded_error, lambda: start_iisu_pc.main(headless=headless)
         )
@@ -310,7 +310,7 @@ class HomePage(PageBase):
             return
         self._set_busy(True)
         self.stage_label.setText("Stopping...")
-        self._append_log("\n--- Stop ---\n")
+        self._append_log("\n=== Stop ===\n")
         self._guarded_signals = run_in_background(self._run_guarded, self._on_guarded_done, self._on_guarded_error, stop_iisu_pc.main)
 
     def _run_guarded(self, func) -> None:

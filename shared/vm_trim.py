@@ -9,7 +9,7 @@ only costs RAM, boot time, and, because Play keeps updating them, data space.
 
 How it works, and why it is done this way:
 
-- Apps are removed for user 0 with `pm uninstall --user 0`. The files stay in
+- Apps are removed for user 0 with `pm uninstall`. The files stay in
   the read-only system image, so nothing about the image is modified or
   redistributed (Google's image license forbids that), and every removal can be
   undone with `cmd package install-existing`.

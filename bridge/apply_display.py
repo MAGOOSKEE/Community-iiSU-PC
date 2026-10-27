@@ -22,8 +22,8 @@ genuinely native resolution with no letterboxing.
 Edits the *portable* AVD copy under android-sdk-portable/avd-home/ (see
 portable_sdk.py), that's the one every real launch actually uses since
 the portable-SDK migration, not ~/.android/avd/ (only ever a one-time copy
-source). Restarts everything via stop_iisu_pc.main() + start_iisu_pc.main()
--- the same stop/start the control panel's own buttons use, rather than
+source). Restarts everything via stop_iisu_pc.main() + start_iisu_pc.main(),
+the same stop/start the control panel's own buttons use, rather than
 the `android emulator start/stop` CLI wrapper, which start_iisu_pc.py's own
 docstring documents as hanging indefinitely once the AVD is actually up.
 start_iisu_pc.main() also starts the launch bridge and brings iiSU to the

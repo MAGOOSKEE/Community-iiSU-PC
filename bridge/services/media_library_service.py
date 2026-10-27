@@ -177,7 +177,7 @@ def mediabridge_install_file(game: dict, asset: dict, local_file: Path) -> tuple
     try:
         # adb shell ultimately passes this through Android's shell. Build one
         # explicitly quoted command so values containing spaces, URI punctuation,
-        # percent escapes, etc. remain one --es value.
+        # percent escapes, etc. remain one string extra value.
         extras = (
             ("tab_id", game.get("tab_id")),
             ("rom_id", game.get("rom_id")),
