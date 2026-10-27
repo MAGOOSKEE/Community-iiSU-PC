@@ -31,7 +31,6 @@ NAV_ITEMS = [
     ("home", "home", "Home"),
     ("library", "video_library", "Library"),
     ("games", "sports_esports", "Games"),
-    ("emulators", "desktop_windows", "Emulators"),
     ("settings", "settings", "Settings"),
     ("backup_diagnostics", "build", "Backup & Diagnostics"),
     ("updates", "system_update", "Updates"),
@@ -51,12 +50,10 @@ NAV_GROUPS: dict[str, list[tuple[str, str]]] = {
         ("games_console", "Console"),
         ("windows_apps", "PC"),
     ],
-    "emulators": [
-        ("emulators", "PC Emulators"),
-    ],
     "settings": [
         ("settings", "Display"),
-        ("emulator", "Emulator"),
+        ("emulator", "VM Profiles"),
+        ("emulators", "PC Emulators"),
         ("storage", "Storage"),
         ("advanced", "Advanced"),
     ],
@@ -67,7 +64,7 @@ NAV_GROUPS: dict[str, list[tuple[str, str]]] = {
 }
 
 # Top-level nav entries that need a real install before they're useful.
-LOCKED_NAV = {"library", "games", "emulators", "settings", "backup_diagnostics"}
+LOCKED_NAV = {"library", "games", "settings", "backup_diagnostics"}
 
 
 class Sidebar(QWidget):

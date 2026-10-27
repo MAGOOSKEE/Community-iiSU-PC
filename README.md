@@ -54,11 +54,10 @@ Once it's done, a short onboarding wizard walks you through your ROM directory, 
 
 Double-click the **desktop shortcut**, or run the Manager script for your platform (**`Community-iiSU-PC Manager.bat`** on Windows, **`./Community-iiSU-PC\ Manager.sh`** on Linux): one window, navigated with the sidebar:
 
-- **Home**: AVD/bridge status, Open/Stop, a running status line, and quick buttons to your ROMs folder and logs. The ▾ next to Start has **Boot Headless (no window)**, which boots the VM without its window or the launch bridge. A headless boot always cold boots, ignores and clears the saved resume state, and renders in software with audio off so the windowless emulator doesn't crash. It isn't available with Waydroid, which has no window to leave out: the menu item is greyed out and a headless start request just starts normally.
+- **Home**: AVD/bridge status, Open/Stop, a running status line and a log drawer. The ▾ next to Start also has shortcuts to your ROMs and logs folders, Recreate Shortcut and Clear Resume State. Its **Boot Headless (no window)** boots the VM without its window or the launch bridge. A headless boot always cold boots, ignores and clears the saved resume state, and renders in software with audio off so the windowless emulator doesn't crash. It isn't available with Waydroid, which has no window to leave out: the menu item is greyed out and a headless start request just starts normally.
 - **Library**: ROM Directory (your host ROM folder), Media Library (check/restore saved media), Android Storage (browse and manage the VM's shared storage over ADB).
 - **Games**: Console (every detected ROM, grouped by multi-disc playlist) and PC (native apps and URI launches, see below).
-- **Emulators**: PC emulator mappings and search folders, test a mapping without starting the AVD, and reinstall iiSU's redirector apps.
-- **Settings**: Display (the Android VM's resolution and DPI), Emulator (named launch profiles for the Android SDK emulator, see below), Storage (what uses the VM's storage, and resizing it, see below), and Advanced (hotkeys and debugging options such as "Show console windows").
+- **Settings**: Display (the Android VM's resolution and DPI), VM Profiles (named launch profiles for the Android SDK emulator, see below), PC Emulators (which PC emulator each console launches, plus downloading emulators and reinstalling iiSU's redirector apps), Storage (what uses the VM's storage, and resizing it, see below), and Advanced (AVD name, bridge port, hotkeys and debugging options such as "Show console windows").
 - **Backup & Diagnostics**: Backup & Restore (back up configuration to a ZIP or restore an earlier one, plus a separate backup of the artwork and media files iiSU keeps inside the running VM; iiSU's private in-app data such as favorites and play history can't be backed up) and Diagnostics (non-destructive checks of the install, Android VM/ADB, bridge, PC apps, Steam integration, logs; also where you check for and apply Community-iiSU-PC and iiSU updates).
 - **Credits**: who built this and how (see below).
 - **Uninstall**: below a divider at the bottom of the sidebar.
@@ -67,7 +66,7 @@ On startup, Community-iiSU-PC re-syncs your ROM library into the VM automaticall
 
 ### Emulator profiles
 
-Settings > **Emulator** holds named launch configurations for the Android SDK emulator: GPU rendering (`auto`, `host`, `swiftshader_indirect`, `angle_indirect`), hardware acceleration, CPU cores, RAM, audio (default, speakers only, or no audio), extra emulator flags, and environment variables. Pick a profile, Save, Stop, Open to test it; a profile change cold-boots the VM once. Presets cover the usual suspects, and Duplicate lets you A/B one change at a time. To chase down audio problems: duplicate your profile, try "Speakers only", then "No audio at all" to confirm audio is the cause, then try other GPU modes. Profiles only change launch options on the AVD that Setup created, not which Android system image it runs. (They don't apply on Waydroid.)
+Settings > **VM Profiles** holds named launch configurations for the Android SDK emulator: GPU rendering (`auto`, `host`, `swiftshader_indirect`, `angle_indirect`), hardware acceleration, CPU cores, RAM, audio (default, speakers only, or no audio), extra emulator flags, and environment variables. Pick a profile, Save, Stop, Open to test it; a profile change cold-boots the VM once. Presets cover the usual suspects, and Duplicate lets you A/B one change at a time. To chase down audio problems: duplicate your profile, try "Speakers only", then "No audio at all" to confirm audio is the cause, then try other GPU modes. Profiles only change launch options on the AVD that Setup created, not which Android system image it runs. (They don't apply on Waydroid.)
 
 ### Steam and Steam Deck
 
@@ -108,7 +107,7 @@ Open the Manager's **Uninstall** page for a preview of exactly what will be remo
 
 `installer/patch_iisu.py` decompiles your iiSU APK, redirects its ROM-launch code to a small injected class that sends the launch request to `bridge/launch_bridge.py` over a local socket, then rebuilds and signs it. The bridge matches normal ROM requests to a PC emulator (configured in `bridge/config.json`). PC app/game requests are instead matched against `bridge/windows_apps.json` and launched directly as native executables or registered URI/protocol targets.
 
-iiSU also needs to think a real emulator is installed for each console before it'll treat it as playable. Setup installs a placeholder "redirector" app for each one (`installer/stub_apk.py`) that does nothing itself, since the patched launch never reaches it. The Manager's Emulators page has an "Install Redirector Apps..." button to re-run this any time.
+iiSU also needs to think a real emulator is installed for each console before it'll treat it as playable. Setup installs a placeholder "redirector" app for each one (`installer/stub_apk.py`) that does nothing itself, since the patched launch never reaches it. The Manager's PC Emulators page (under Settings) has an "Install Redirector Apps..." button to re-run this any time.
 
 ## Project layout
 

@@ -12,6 +12,7 @@ import os
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -97,6 +98,68 @@ class ManagerWindowSmokeTests(unittest.TestCase):
         for subs in NAV_GROUPS.values():
             for sub_key, _label in subs:
                 self.assertIn(sub_key, window.subpages)
+
+    def test_no_nav_group_holds_a_single_page(self):
+        from bridge.ui.sidebar import NAV_GROUPS, NAV_ITEMS
+
+        for key, subs in NAV_GROUPS.items():
+            self.assertGreaterEqual(len(subs), 2, f"{key} is a group with one page")
+        top_level = [key for key, _icon, _label in NAV_ITEMS]
+        self.assertNotIn("emulators", top_level)
+        self.assertIn(("emulators", "PC Emulators"), NAV_GROUPS["settings"])
+
+    def test_a_freshly_opened_window_has_nothing_to_save(self):
+        # A complete config, as Save would have written it: the minimal fixture lacks
+        # defaults every real config has, which alone would read as unsaved edits.
+        self.config_path.write_text(json.dumps(self.config), encoding="utf-8")
+        complete = self._window()._gather_settings(silent=True)
+        self.config_path.write_text(json.dumps(complete), encoding="utf-8")
+        window = self._window()
+        self.assertFalse(window._is_settings_dirty())
+
+    def test_edits_on_the_merged_fields_reach_the_saved_settings(self):
+        self.config_path.write_text(json.dumps(self.config), encoding="utf-8")
+        window = self._window()
+        window.advanced_page.avd_name_edit.setText("myavd")
+        window.display_page.refresh_edit.setText("120")
+        window.display_page.width_edit.setText("1600")
+        window.display_page.height_edit.setText("900")
+        settings = window._gather_settings(silent=True)
+        self.assertEqual(settings["avd_name"], "myavd")
+        self.assertEqual(settings["display"]["refresh_rate"], 120)
+        self.assertEqual((settings["display"]["width"], settings["display"]["height"]), (1600, 900))
+        self.assertTrue(window._is_settings_dirty())
+
+    def test_a_refresh_rate_preset_fills_the_same_field(self):
+        self.config_path.write_text(json.dumps(self.config), encoding="utf-8")
+        window = self._window()
+        combo = window.display_page.refresh_edit.parent()
+        combo.setCurrentIndex(combo.findText("144"))
+        self.assertEqual(window.display_page.refresh_edit.text(), "144")
+        self.assertEqual(window.display_page.get_display()["refresh_rate"], 144)
+
+    def test_the_resolution_menu_follows_the_typed_size(self):
+        self.config_path.write_text(json.dumps(self.config), encoding="utf-8")
+        window = self._window()
+        page = window.display_page
+        combo = page.resolution_combo
+        self.assertEqual(combo.currentIndex(), -1, "1080 x 1920 is not one of the presets")
+        page.width_edit.setText("1600")
+        page.height_edit.setText("900")
+        self.assertEqual(combo.currentText(), "1600 x 900")
+        page.width_edit.setText("1234")
+        self.assertEqual(combo.currentIndex(), -1)
+        combo.setCurrentIndex(combo.findText("2560 x 1440"))
+        self.assertEqual((page.width_edit.text(), page.height_edit.text()), ("2560", "1440"))
+
+    def test_the_avd_name_is_hidden_on_waydroid(self):
+        import bridge.ui.pages.settings.advanced as advanced
+
+        self.config_path.write_text(json.dumps(self.config), encoding="utf-8")
+        with unittest.mock.patch.object(advanced, "resolve_backend", return_value=advanced.BACKEND_WAYDROID):
+            window = self._window()
+        self.assertTrue(window.advanced_page.avd_name_edit.isHidden())
+        self.assertTrue(window.advanced_page.avd_name_label.isHidden())
 
     def test_an_install_without_a_config_still_opens_and_locks_the_settings(self):
         from bridge.ui.sidebar import LOCKED_NAV

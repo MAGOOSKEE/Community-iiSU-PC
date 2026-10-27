@@ -4,6 +4,7 @@ anticipated this reuse)."""
 
 import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QGridLayout,
@@ -20,6 +21,7 @@ from bridge.ui.onboarding_wizard import HotkeyEditor
 from bridge.ui.pages.base import PageBase
 from controller_bridge import BUTTON_DISPLAY_NAMES, BUTTON_NAME_TO_BIT, DEFAULT_QUIT_CHORD
 from shared.qt_theme import TEXT_DIM
+from shared.vm_backend import BACKEND_WAYDROID, resolve_backend
 
 
 class AdvancedPage(PageBase):
@@ -27,17 +29,26 @@ class AdvancedPage(PageBase):
         super().__init__(parent, scrollable_body=True)
         self.window = window
 
-        self.add_header("Advanced", "Bridge port, window matching and hotkeys. Rarely needed.")
+        self.add_header("Advanced", "Names, port and hotkeys. Rarely needed.")
 
-        self.body_layout.addWidget(QLabel("iiSU window title match:"))
+        names = QGridLayout()
+        names.addWidget(QLabel("iiSU window title match:"), 0, 0)
         self.window_title_edit = QLineEdit()
         self.window_title_edit.setFixedWidth(320)
-        self.body_layout.addWidget(self.window_title_edit)
+        names.addWidget(self.window_title_edit, 0, 1)
 
-        self.body_layout.addWidget(QLabel("Bridge listen port:"))
+        names.addWidget(QLabel("Bridge listen port:"), 1, 0)
         self.port_edit = QLineEdit()
         self.port_edit.setFixedWidth(80)
-        self.body_layout.addWidget(self.port_edit)
+        names.addWidget(self.port_edit, 1, 1, Qt.AlignmentFlag.AlignLeft)
+
+        self.avd_name_label = QLabel("AVD name:")
+        names.addWidget(self.avd_name_label, 2, 0)
+        self.avd_name_edit = QLineEdit()
+        self.avd_name_edit.setFixedWidth(200)
+        names.addWidget(self.avd_name_edit, 2, 1, Qt.AlignmentFlag.AlignLeft)
+        names.setColumnStretch(2, 1)
+        self.body_layout.addLayout(names)
 
         self._quit_hotkey_editor: HotkeyEditor | None = None
         self._shutdown_hotkey_editor: HotkeyEditor | None = None
@@ -107,6 +118,11 @@ class AdvancedPage(PageBase):
         config = self.window.config_data
         self.window_title_edit.setText(config.get("iisu_window_title", ""))
         self.port_edit.setText(str(config.get("bridge_port", 7737)))
+        self.avd_name_edit.setText(config.get("avd_name", "iisuwin"))
+        # Waydroid has no AVD to name.
+        is_waydroid = resolve_backend(config) == BACKEND_WAYDROID
+        self.avd_name_label.setVisible(not is_waydroid)
+        self.avd_name_edit.setVisible(not is_waydroid)
 
         while self._hotkey_layout.count():
             item = self._hotkey_layout.takeAt(0)
@@ -136,6 +152,9 @@ class AdvancedPage(PageBase):
 
     def get_window_title(self) -> str:
         return self.window_title_edit.text().strip()
+
+    def get_avd_name(self) -> str:
+        return self.avd_name_edit.text().strip() or "iisuwin"
 
     def get_port(self) -> int | None:
         try:

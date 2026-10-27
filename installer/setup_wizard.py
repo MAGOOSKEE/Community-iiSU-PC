@@ -866,7 +866,7 @@ def write_bridge_config(avd_name: str, backend: str = BACKEND_AVD, storage_gb: i
     The "emulators" map is seeded from shared/emulator_defaults.py the
     same way, via setdefault: a brand-new config gets the full curated
     set, but re-running this never overwrites emulator mappings someone
-    has since customized on the Manager's Emulators page."""
+    has since customized on the Manager's PC Emulators page."""
     sys.path.insert(0, str(PROJECT_ROOT))
     from shared.emulator_defaults import build_emulators_map
 
@@ -881,7 +881,7 @@ def write_bridge_config(avd_name: str, backend: str = BACKEND_AVD, storage_gb: i
             # installed, user-local, and Flatpak-installed emulators
             # (Flatpak is the primary install path the emulator downloader
             # uses on Linux). All of this is still editable afterward from
-            # the Manager's ROM Directory / Emulators pages.
+            # the Manager's ROM Directory / PC Emulators pages.
             home = Path.home()
             if (home / "roms").is_dir():
                 config["roms_dir"] = str(home / "roms")

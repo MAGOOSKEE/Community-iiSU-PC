@@ -36,7 +36,7 @@ class RedirectorInstallDialog(QDialog):
         description = QLabel(
             "Installs a placeholder app per emulator below into the running VM, so iiSU "
             "sees that console's emulator as installed. Games still launch in the PC emulator "
-            "set in the Emulators tab; these apps do nothing themselves."
+            "set on the PC Emulators page; these apps do nothing themselves."
         )
         description.setWordWrap(True)
         description.setProperty("role", "dim")
