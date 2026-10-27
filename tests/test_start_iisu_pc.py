@@ -83,7 +83,7 @@ class HeadlessStartSequenceTests(unittest.TestCase):
              patch.object(start_iisu_pc.subprocess, "Popen") as popen, \
              patch.object(start_iisu_pc.time, "sleep"), \
              patch("builtins.open", unittest.mock.mock_open()):
-            start_iisu_pc._run_start_sequence({"iisu_fullscreen": True}, "iisuwin", 7737, False, {}, headless)
+            start_iisu_pc._run_start_sequence({"iisu_fullscreen": True, "vm_backend": "avd"}, "iisuwin", 7737, False, {}, headless)
         return popen, launch_iisu, show_window
 
     def test_headless_does_not_start_the_bridge(self):
@@ -103,6 +103,18 @@ class HeadlessStartSequenceTests(unittest.TestCase):
         popen.assert_called_once()
 
 
+class HeadlessWithWaydroidTests(unittest.TestCase):
+    def test_headless_is_ignored_for_waydroid(self):
+        config = {"vm_backend": "waydroid", "avd_name": "iisuwin", "bridge_port": 7737}
+        with patch.object(start_iisu_pc, "load_config", return_value=config), \
+             patch.object(start_iisu_pc, "resolve_backend", return_value=start_iisu_pc.BACKEND_WAYDROID), \
+             patch.object(start_iisu_pc.winapi, "ensure_linux_kwin_rules"), \
+             patch.object(start_iisu_pc, "_run_start_sequence") as sequence, \
+             patch.object(start_iisu_pc.boot_overlay, "close"):
+            start_iisu_pc.main(headless=True)
+        self.assertIs(sequence.call_args.args[-1], False)
+
+
 class HeadlessSnapshotTests(unittest.TestCase):
     """A headless run must not resume or leave behind a quick-resume snapshot: a windowed resume
     afterwards would bring back the state from before the headless session."""
@@ -120,7 +132,7 @@ class HeadlessSnapshotTests(unittest.TestCase):
              patch.object(start_iisu_pc, "is_port_open", return_value=True), \
              patch.object(start_iisu_pc, "launch_iisu"), \
              patch.object(start_iisu_pc, "show_iisu_window"):
-            start_iisu_pc._run_start_sequence({}, "iisuwin", 7737, False, {}, headless)
+            start_iisu_pc._run_start_sequence({"vm_backend": "avd"}, "iisuwin", 7737, False, {}, headless)
         return start_avd, save, clear
 
     def test_headless_always_cold_boots_and_clears_the_resume_state(self):
@@ -151,6 +163,16 @@ class HeadlessLaunchTests(unittest.TestCase):
 
     def test_a_normal_start_keeps_the_window(self):
         self.assertNotIn("-no-window", self._emulator_args(headless=False))
+
+    def test_headless_uses_software_rendering_and_no_audio(self):
+        args = self._emulator_args(headless=True)
+        self.assertEqual(args[args.index("-gpu") + 1], "swiftshader_indirect")
+        self.assertIn("-no-audio", args)
+
+    def test_a_normal_start_keeps_the_profile_gpu_and_audio(self):
+        args = self._emulator_args(headless=False)
+        self.assertEqual(args[args.index("-gpu") + 1], "auto")
+        self.assertNotIn("-no-audio", args)
 
     def test_start_avd_passes_headless_through_every_attempt(self):
         with patch.object(start_iisu_pc, "find_system_emulator_exe", return_value=Path("C:/fake/emulator.exe")), \

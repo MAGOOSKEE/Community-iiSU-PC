@@ -345,6 +345,13 @@ def _launch_once(
     # reasoning as Setup's own first boot). -no-boot-anim/-fixed-scale are
     # kept Linux-only rather than changed for existing Windows installs too,
     # since neither was something Windows behavior needed fixing.
+    if headless:
+        # With no window the emulator can't use the host GPU and falls back to software
+        # rendering anyway; stating it (and dropping audio) avoids the flaky "fail fast
+        # exception" crash of qemu-system-x86_64-headless.exe seen with -gpu auto while
+        # iiSU was running (2 of 3 runs crashed, none of 4 with these flags). A background
+        # VM has no use for sound. Only this launch's command line changes, not the profile.
+        profile = {**profile, "gpu_mode": "swiftshader_indirect", "audio": "none"}
     args = [
         str(emulator_exe), "-avd", avd_name,
         *emulator_profiles.build_emulator_args(profile, IS_WINDOWS, kvm_present=Path("/dev/kvm").exists()),
@@ -521,6 +528,10 @@ def main(headless: bool = False) -> None:
         print(f"[start] {e}")
         sys.exit(1)
     print(f"[start] {app_version.banner('start', f'backend {resolve_backend(config)}')}")
+    if headless and resolve_backend(config) == BACKEND_WAYDROID:
+        # Waydroid is a container with its own session, not an emulator with a window to leave out.
+        print("[start] Boot Headless isn't available with Waydroid, starting normally.")
+        headless = False
 
     # Automatic project updates are opt-in. Customized installations can
     # therefore start safely without upstream files silently replacing local

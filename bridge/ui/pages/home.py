@@ -33,6 +33,7 @@ from bridge.ui.widgets.card import Card
 from bridge.ui.widgets.gradient_background import GradientBlobBackground
 from bridge.ui.widgets.status_dot import StatusDot
 from shared.platform_compat import open_uri
+from shared.vm_backend import BACKEND_WAYDROID, resolve_backend
 from bridge.ui.workers.log_stream import LogStreamRedirector
 from bridge.ui.workers.task_runner import run_in_background
 from bridge_config import CONFIG_PATH
@@ -201,7 +202,10 @@ class HomePage(PageBase):
         menu = QMenu(self)
         boot_headless = menu.addAction("Boot Headless (no window)", self._start_headless)
         # Only meaningful when nothing is running yet.
-        boot_headless.setEnabled(self.window.configured and not self.busy and not (self.window.last_bridge_up or self.window.last_avd_up))
+        boot_headless.setEnabled(
+            self.window.configured and not self.busy and not (self.window.last_bridge_up or self.window.last_avd_up)
+            and resolve_backend(self.window.config_data) != BACKEND_WAYDROID  # nothing to hide windowless in a container
+        )
         menu.addSeparator()
         menu.addAction("ROMs Folder", self._open_roms_folder)
         menu.addAction("Open Logs Folder", self._open_logs)
