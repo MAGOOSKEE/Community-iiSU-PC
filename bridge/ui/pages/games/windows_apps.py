@@ -109,7 +109,7 @@ class WindowsAppsPage(PageBase):
         action_row_layout.addWidget(more_button)
         action_row_layout.addStretch(1)
         # Edit/Remove Selected/Test used to duplicate the right-click menu
-        # below as always-visible buttons -- same convention as every other
+        # below as always-visible buttons, same convention as every other
         # list page now: those actions live only in the context menu, this
         # is just a status hint.
         self.selection_hint = QLabel("")

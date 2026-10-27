@@ -202,11 +202,11 @@ def warn_missing_linux_extras() -> None:
 
 
 def _pip_install(package: str) -> subprocess.CompletedProcess:
-    """Runs `pip install --quiet <package>`, retrying with
-    --break-system-packages if the first attempt fails specifically
+    """Runs a quiet `pip install <package>`, retrying with
+    pip's break-system-packages option if the first attempt fails specifically
     because of PEP 668 (Debian/Ubuntu/Fedora and most current distros
     mark their system Python as "externally managed" and refuse a bare
-    pip install outside a venv). --break-system-packages is pip's own
+    pip install outside a venv). That option is pip's own
     documented escape hatch for exactly this case; safe here since
     PySide6/Pillow are self-contained wheels, not something that
     conflicts with apt-managed system packages. Not attempted on the

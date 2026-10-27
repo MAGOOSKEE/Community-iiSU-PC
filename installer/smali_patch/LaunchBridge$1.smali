@@ -79,7 +79,7 @@
     goto :goto_0
 
     # Every non-null Intent extra is sent over as "EXTRA:key=value", via
-    # String.valueOf() rather than a String-only instanceof check -- some
+    # String.valueOf() rather than a String-only instanceof check, some
     # emulator front-ends (e.g. GameNative's Steam launch, which sends its
     # app_id as a plain int extra, not a String) would otherwise be
     # silently dropped here and never reach the bridge at all.

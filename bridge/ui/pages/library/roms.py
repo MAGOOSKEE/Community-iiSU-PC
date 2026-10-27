@@ -66,7 +66,7 @@ class RomsPage(PageBase):
         add_button.clicked.connect(self._add_search_root)
         btn_row_layout.addWidget(add_button)
         btn_row_layout.addStretch(1)
-        # Remove selected lives only in the right-click menu -- same
+        # Remove selected lives only in the right-click menu, same
         # convention as every other selection-driven list in the app.
         self.selection_hint = QLabel("")
         self.selection_hint.setStyleSheet(f"color: {TEXT_DIM};")

@@ -11,7 +11,7 @@ Two install shapes, two different checks:
     No special-casing between dev and master is needed, whatever branch
     is actually checked out is the one this fetches and fast-forwards,
     so a dev checkout updates from dev and a master checkout updates from
-    master automatically. --ff-only is what makes this safe to run
+    master automatically. The fast-forward-only pull is what makes this safe to run
     unattended before every single start: it only ever applies a clean,
     already-merged update, and refuses outright (never merges, rebases,
     or clobbers) the moment there's any local commit or edit it would
@@ -170,7 +170,7 @@ def check_release_update() -> tuple[str, bool]:
     try:
         # Not /releases/latest: that endpoint only ever considers
         # non-prerelease releases, and this project's releases are all
-        # tagged --prerelease during alpha, it would 404 forever
+        # tagged as a prerelease during alpha, it would 404 forever
         # otherwise (confirmed live). /releases lists every release,
         # newest first, prerelease or not, so [0] is the one actually
         # meant to be "latest" for this project right now.

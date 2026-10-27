@@ -23,8 +23,8 @@ it actually launched with (see bridge/emulator_lookup.py's
 find_emulator_for_package, the LIBRETRO intent extra is trusted first
 and unconditionally whenever it's present, since it identifies the
 console directly instead of guessing from the ROM's file extension, which
-can be ambiguous, .chd is chdman's container for both PS1 and Dreamcast
--- or just plain missing for a console never explicitly added to this
+can be ambiguous, .chd is chdman's container for both PS1 and Dreamcast,
+or just plain missing for a console never explicitly added to this
 list at all, e.g. an arcade/MAME core resolved from a .zip). Only
 extensions that don't collide with another entry in this same map are
 included here, for the same reason Saturn and MAME/arcade are left out
@@ -58,7 +58,7 @@ STANDALONE_DEFAULTS = [
         "package": "org.dolphinemu.dolphinemu",
         "app_label": "Dolphin",
         "exe_names": ["Dolphin.exe", "DolphinQt2.exe"],
-        # Dolphin has no dedicated --fullscreen flag, confirmed live: -b alone
+        # Dolphin has no dedicated fullscreen flag, confirmed live: -b alone
         # leaves it in a normal titled window. -C lets a CLI launch override
         # a config value for just this run without touching the user's saved
         # Dolphin.ini, Display.Fullscreen=True is the one that actually
@@ -81,13 +81,13 @@ STANDALONE_DEFAULTS = [
         "app_label": "Cemu",
         "exe_names": ["Cemu.exe"],
         # Confirmed live: bare "-f" errors out with a parameter-parse dialog
-        # ("the argument '<rom path>' for option '--fullscreen' is invalid"),
-        # this Cemu build's -f/--fullscreen always consumes the next
+        # (the argument '<rom path>' is invalid for the fullscreen option),
+        # this Cemu build's -f fullscreen option always consumes the next
         # token as its required on/off value, so a bare trailing rom path
         # (how every other emulator here takes its rom, see
         # emulator_lookup.py's build_pc_launch_args) gets
         # swallowed as that value instead. Needs an explicit value, and the
-        # rom path needs its own --game flag rather than relying on
+        # rom path needs its own game flag rather than relying on
         # position.
         "pre_args": ["-f", "true", "--game"],
     },
@@ -134,7 +134,7 @@ STANDALONE_DEFAULTS = [
         "package": "me.magnum.melonds",
         "app_label": "melonDS",
         "exe_names": ["melonDS.exe"],
-        # Confirmed live via -f/--fullscreen (verified with a screenshot,
+        # Confirmed live via the -f fullscreen flag (verified with a screenshot,
         # covers the whole screen).
         "pre_args": ["-f"],
     },
@@ -157,7 +157,7 @@ STANDALONE_DEFAULTS = [
         "package": "com.flycast.emulator",
         "app_label": "Flycast",
         "exe_names": ["flycast.exe"],
-        # Flycast has no dedicated fullscreen CLI flag at all (its --help
+        # Flycast has no dedicated fullscreen CLI flag at all (its help output
         # only lists -config section:key=value and -help), it's a transient
         # override of the same emu.cfg key its own [window] fullscreen
         # setting uses. Confirmed live via screenshot, no OS window border.
@@ -171,7 +171,7 @@ STANDALONE_DEFAULTS = [
         "exe_names": ["rpcs3.exe"],
         "pre_args": ["--no-gui", "--fullscreen"],
         # RPCS3's actual CLI order is the opposite of every other
-        # emulator here: "rpcs3.exe <game_path> --no-gui --fullscreen",
+        # emulator here: the game path first, then its no-gui and fullscreen flags,
         # confirmed live, the boot target has to come *before* these
         # flags or RPCS3 parses neither flag as having a boot target at
         # all ("Missing command-line arguments! Cannot run no-gui mode

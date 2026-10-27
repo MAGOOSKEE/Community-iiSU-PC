@@ -52,7 +52,7 @@ from urllib.parse import unquote
 
 # The embeddable Python runtime this app ships with (installer/
 # build_embedded_python.py) does NOT auto-add a launched script's own
-# directory to sys.path the way a normal Python install does -- confirmed
+# directory to sys.path the way a normal Python install does, confirmed
 # live: this exact bare import failed with ModuleNotFoundError on a real
 # installed copy, since start_iisu_pc.py launches this file as a raw
 # script path (subprocess.Popen([sys.executable, str(BRIDGE_SCRIPT)]),

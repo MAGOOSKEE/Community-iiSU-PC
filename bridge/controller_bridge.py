@@ -294,7 +294,7 @@ if _xinput is not None:
     _xinput.XInputGetState.restype = ctypes.c_uint32
 
 
-# --- Linux gamepad support (joydev API, /dev/input/js*) ---------------
+# Linux gamepad support (joydev API, /dev/input/js*)
 #
 # No XInput on Linux, so this reads the kernel's joystick device API
 # directly (older but far simpler than raw evdev for this purpose: it

@@ -32,7 +32,7 @@ from pathlib import Path
 
 # The embeddable Python runtime this app ships with does not auto-add a
 # launched script's own directory to sys.path the way a normal Python
-# install does -- this script is launched as a raw script path by both
+# install does. This script is launched as a raw script path by both
 # uninstall.py's own Stop (in-process, unaffected) and, more importantly,
 # launch_bridge.py's quit-hotkey/quit-chord handling
 # (subprocess.Popen([sys.executable, str(STOP_SCRIPT)]), not "-m"), where

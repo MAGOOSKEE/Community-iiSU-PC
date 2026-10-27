@@ -93,7 +93,7 @@ class AndroidStoragePage(PageBase):
             button.clicked.connect(handler)
             buttons_layout.addWidget(button)
         buttons_layout.addStretch(1)
-        # Download/Edit Text/Rename/Delete act on the current selection --
+        # Download/Edit Text/Rename/Delete act on the current selection,
         # same convention as Console Games and Emulators: no always-visible
         # buttons for those, just this hint plus the right-click menu.
         self.selection_hint = QLabel("")

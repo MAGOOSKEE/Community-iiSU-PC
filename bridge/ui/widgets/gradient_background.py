@@ -1,5 +1,5 @@
 """Slow-drifting soft gradient blobs, painted behind a page's real
-content -- unlike bridge/ui/boot_overlay_app.py's single rotating linear
+content. Unlike bridge/ui/boot_overlay_app.py's single rotating linear
 sweep (subtle by design there, since that screen is only up for a few
 seconds), this is meant to sit visible for extended periods, so the
 motion needs to actually read as motion rather than needing a screenshot
@@ -19,7 +19,7 @@ from PySide6.QtWidgets import QWidget
 from shared.qt_theme import BG, GRADIENT_STOPS
 
 # (color, radius fraction of the widget's diagonal, drift amplitude
-# fraction, angular speed, phase) -- speeds are irrational-ish relative
+# fraction, angular speed, phase); speeds are irrational-ish relative
 # to each other so the blobs never fall into a repeating lockstep pattern.
 _BLOBS = [
     {"color": GRADIENT_STOPS[0], "radius": 0.42, "amp": 0.30, "speed": 0.021, "phase": 0.0},
