@@ -5,6 +5,7 @@ aspect-ratio canvas."""
 
 import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
+from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -21,8 +22,6 @@ from PySide6.QtWidgets import (
 import winapi
 from bridge.ui.pages.base import PageBase
 from bridge.ui.widgets.display_preview import DisplayPreview
-from shared.qt_theme import TEXT_DIM
-from shared.vm_backend import BACKEND_WAYDROID, resolve_backend
 
 RESOLUTION_PRESETS = ["1280 x 720", "1600 x 900", "1920 x 1080", "2560 x 1440", "3840 x 2160"]
 REFRESH_RATE_PRESETS = ["60", "90", "120", "144", "165", "240"]
@@ -39,52 +38,49 @@ class DisplayPage(PageBase):
         super().__init__(parent, scrollable_body=True)
         self.window = window
 
-        self.add_header("Display", "The VM's hardware profile. Applying it cold-boots the VM.")
+        self.add_header(
+            "Display",
+            "The VM's hardware profile; applying it cold-boots the VM. It only affects iiSU's own UI, "
+            "games run at your monitor's real refresh rate.",
+        )
 
         columns = QHBoxLayout()
         settings_col = QVBoxLayout()
         grid = QGridLayout()
 
         grid.addWidget(QLabel("Resolution:"), 0, 0)
+        resolution_row = QHBoxLayout()
         self.resolution_combo = QComboBox()
         self.resolution_combo.addItems(RESOLUTION_PRESETS)
         self.resolution_combo.setCurrentIndex(-1)
         self.resolution_combo.currentTextChanged.connect(self._apply_resolution_preset)
-        grid.addWidget(self.resolution_combo, 0, 1)
-
-        grid.addWidget(QLabel("or exactly:"), 1, 0)
-        exact_row = QHBoxLayout()
+        resolution_row.addWidget(self.resolution_combo)
         self.width_edit = QLineEdit()
         self.width_edit.setFixedWidth(60)
-        exact_row.addWidget(self.width_edit)
-        exact_row.addWidget(QLabel("x"))
+        resolution_row.addWidget(self.width_edit)
+        resolution_row.addWidget(QLabel("x"))
         self.height_edit = QLineEdit()
         self.height_edit.setFixedWidth(60)
-        exact_row.addWidget(self.height_edit)
-        exact_row.addStretch(1)
-        grid.addLayout(exact_row, 1, 1)
+        resolution_row.addWidget(self.height_edit)
+        resolution_row.addStretch(1)
+        grid.addLayout(resolution_row, 0, 1)
 
-        grid.addWidget(QLabel("Density (dpi):"), 2, 0)
+        grid.addWidget(QLabel("Density (dpi):"), 1, 0)
         self.density_edit = QLineEdit()
         self.density_edit.setFixedWidth(70)
-        grid.addWidget(self.density_edit, 2, 1)
+        grid.addWidget(self.density_edit, 1, 1)
 
-        grid.addWidget(QLabel("Refresh rate (Hz):"), 3, 0)
-        refresh_row = QHBoxLayout()
-        self.refresh_edit = QLineEdit()
-        self.refresh_edit.setFixedWidth(50)
-        refresh_row.addWidget(self.refresh_edit)
+        grid.addWidget(QLabel("Refresh rate (Hz):"), 2, 0)
+        # One editable box with the usual rates in its menu, in place of a
+        # field plus a separate preset menu. Its line edit keeps the
+        # refresh_edit name the rest of this page reads and writes.
         refresh_combo = QComboBox()
+        refresh_combo.setEditable(True)
+        refresh_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         refresh_combo.addItems(REFRESH_RATE_PRESETS)
-        refresh_combo.setCurrentIndex(-1)
-        refresh_combo.currentTextChanged.connect(lambda text: self.refresh_edit.setText(text) if text else None)
-        refresh_row.addWidget(refresh_combo)
-        refresh_row.addStretch(1)
-        grid.addLayout(refresh_row, 3, 1)
-
-        gpu_note = QLabel("GPU and other launch options are on the Emulator page.")
-        gpu_note.setStyleSheet(f"color: {TEXT_DIM};")
-        grid.addWidget(gpu_note, 4, 0, 1, 2)
+        refresh_combo.setFixedWidth(90)
+        self.refresh_edit = refresh_combo.lineEdit()
+        grid.addWidget(refresh_combo, 2, 1, Qt.AlignmentFlag.AlignLeft)
 
         settings_col.addLayout(grid)
         redetect_button = QPushButton("Auto-detect from primary monitor")
@@ -103,21 +99,8 @@ class DisplayPage(PageBase):
         columns.addLayout(preview_col)
         self.body_layout.addLayout(columns)
 
-        note = QLabel(
-            "Only affects iiSU's own UI inside the VM. Games run in a native PC emulator\n"
-            "at your monitor's real refresh rate."
-        )
-        note.setStyleSheet(f"color: {TEXT_DIM};")
-        self.body_layout.addWidget(note)
-
         self.fullscreen_check = QCheckBox("Maximize the iiSU/AVD window automatically")
         self.body_layout.addWidget(self.fullscreen_check)
-
-        self.avd_name_label = QLabel("AVD name:")
-        self.body_layout.addWidget(self.avd_name_label)
-        self.avd_name_edit = QLineEdit()
-        self.avd_name_edit.setFixedWidth(200)
-        self.body_layout.addWidget(self.avd_name_edit)
         self.body_layout.addStretch(1)
 
         self.width_edit.textChanged.connect(self._redraw_preview)
@@ -132,11 +115,6 @@ class DisplayPage(PageBase):
         self.density_edit.setText(str(display.get("density", 240)))
         self.refresh_edit.setText(str(display.get("refresh_rate", 60)))
         self.fullscreen_check.setChecked(bool(self.window.config_data.get("iisu_fullscreen", True)))
-        self.avd_name_edit.setText(self.window.config_data.get("avd_name", "iisuwin"))
-        # Waydroid has no AVD to name.
-        is_waydroid = resolve_backend(self.window.config_data) == BACKEND_WAYDROID
-        self.avd_name_label.setVisible(not is_waydroid)
-        self.avd_name_edit.setVisible(not is_waydroid)
         self._redraw_preview()
 
     def get_display(self) -> dict | None:
@@ -146,7 +124,7 @@ class DisplayPage(PageBase):
                 "height": int(self.height_edit.text()),
                 "density": int(self.density_edit.text()),
                 "refresh_rate": int(self.refresh_edit.text()),
-                # Moved to the Emulator page's profiles; carried through
+                # Moved to the VM Profiles page; carried through
                 # untouched so an older config.json keeps its value.
                 "gpu_mode": self.window.config_data.get("display", {}).get("gpu_mode", "auto"),
             }
@@ -156,9 +134,6 @@ class DisplayPage(PageBase):
     def get_fullscreen(self) -> bool:
         return self.fullscreen_check.isChecked()
 
-    def get_avd_name(self) -> str:
-        return self.avd_name_edit.text().strip() or "iisuwin"
-
     def _apply_resolution_preset(self, text: str) -> None:
         if "x" not in text:
             return
@@ -166,7 +141,17 @@ class DisplayPage(PageBase):
         self.width_edit.setText(width)
         self.height_edit.setText(height)
 
+    def _sync_resolution_preset(self) -> None:
+        """Shows the preset that matches the typed width and height, or none."""
+        text = f"{self.width_edit.text().strip()} x {self.height_edit.text().strip()}"
+        index = self.resolution_combo.findText(text)
+        if index != self.resolution_combo.currentIndex():
+            self.resolution_combo.blockSignals(True)
+            self.resolution_combo.setCurrentIndex(index)
+            self.resolution_combo.blockSignals(False)
+
     def _redraw_preview(self, *_args) -> None:
+        self._sync_resolution_preset()
         try:
             width, height = int(self.width_edit.text()), int(self.height_edit.text())
         except ValueError:

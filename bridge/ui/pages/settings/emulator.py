@@ -48,7 +48,7 @@ class EmulatorPage(PageBase):
         self._loading = False
 
         self.add_header(
-            "Emulator",
+            "VM Profiles",
             "Launch profiles for the Android emulator. Pick one, Save, then Open.",
         )
 

@@ -208,7 +208,7 @@ class ManagerWindow(QMainWindow):
                 self.config_data = load_config()
                 # In-memory only until Save: gives every install an explicit
                 # profiles block (synthesized from the old display.gpu_mode),
-                # so the Emulator page isn't "dirty" the moment it opens.
+                # so the VM Profiles page isn't "dirty" the moment it opens.
                 active, profiles = emulator_profiles.get_profiles(self.config_data)
                 self.config_data = emulator_profiles.with_profiles(self.config_data, active, profiles)
                 self.configured = True
@@ -260,6 +260,7 @@ class ManagerWindow(QMainWindow):
                 QMessageBox.critical(self, "Invalid port", "Bridge listen port must be a number.")
                 return None
             settings["bridge_port"] = port
+            settings["avd_name"] = self.advanced_page.get_avd_name()
             settings["iisu_window_title"] = self.advanced_page.get_window_title()
             settings["quit_hotkey"] = self.advanced_page.get_quit_hotkey()
             settings["shutdown_hotkey"] = self.advanced_page.get_shutdown_hotkey()
@@ -279,7 +280,6 @@ class ManagerWindow(QMainWindow):
                 return None
             settings["display"] = display
             settings["iisu_fullscreen"] = self.display_page.get_fullscreen()
-            settings["avd_name"] = self.display_page.get_avd_name()
 
         return settings
 

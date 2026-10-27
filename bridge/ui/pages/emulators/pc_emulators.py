@@ -34,7 +34,7 @@ class EmulatorsPage(PageBase):
         super().__init__(parent, scrollable_body=False)
         self.window = window
 
-        self.add_header("Emulators", "Maps the Android package name iiSU tries to launch to a real PC emulator.")
+        self.add_header("PC Emulators", "Maps the Android package name iiSU tries to launch to a real PC emulator.")
 
         self.tree = QTreeWidget()
         self.tree.setHeaderLabels(["Package prefix", "Executable name(s)", "Launch flags"])
