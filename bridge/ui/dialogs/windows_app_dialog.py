@@ -1,7 +1,7 @@
 """Add/edit a single Windows app mapping (executable, Steam game, or
-custom URI), replaces manager.py's _windows_app_dialog() Toplevel.
+custom URI).
 
-Simplified from the original in one respect: Steam Game selection is a
+Steam Game selection is a
 "Choose from installed library..." button opening SteamLibraryDialog
 rather than an inline live-search list with fetched box-art thumbnails,
 same end result (an App ID gets filled in), without the extra async

@@ -1,12 +1,8 @@
-"""Non-UI logic behind the Backup & Restore page, ports manager.py's
-_backup_restore_candidates/_create_manager_backup/_restore_manager_backup/
-_backup_safe_member. Raises BackupServiceError instead of showing a
+"""Non-UI logic behind the Backup & Restore page. Raises BackupServiceError instead of showing a
 messagebox; the caller decides how to present that.
 
-manager_debug.log entries the original wrote around backup/restore are not
-reproduced here, that whole debug-log tee is Tk-Manager-specific
-infrastructure the Qt app doesn't have yet (see Diagnostics page, which
-already reports "Not found yet" for it)."""
+No manager_debug.log entries are written around backup/restore (the
+Diagnostics page reports "Not found yet" for that log)."""
 
 from __future__ import annotations
 

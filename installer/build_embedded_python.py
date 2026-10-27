@@ -5,7 +5,7 @@ release on a build machine with internet access; the *installed* app
 never needs Python pre-installed, only this runtime.
 
 Downloads python.org's official embeddable zip (not a full installer,
-no venv/tkinter/idle, ~15MB), enables `import site` in its `._pth` file
+no venv/idle, ~15MB), enables `import site` in its `._pth` file
 (disabled by default in the embeddable distribution, which would
 otherwise make pip-installed packages unimportable), bootstraps pip via
 the standard get-pip.py, then pip-installs this project's two runtime

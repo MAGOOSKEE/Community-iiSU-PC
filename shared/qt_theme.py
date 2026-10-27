@@ -1,13 +1,8 @@
 """
-Shared dark-UI theme for Community-iiSU-PC's PySide6 front ends (replaces
-shared/theme.py's tkinter/ttk version during the Qt rewrite, see
-C:\\Users\\Jaemin\\.claude\\plans\\robust-giggling-thompson.md).
+Shared dark-UI theme for Community-iiSU-PC's PySide6 front ends.
 
-Same palette and font roles as the tkinter theme (this is a brand carried
-forward, not reinvented), but executed with what Qt actually has and Tk
-didn't: real rounded corners, a native gradient brush instead of a strip of
-1px canvas lines, and a stylesheet Qt fully owns end to end (including
-dropdown popups, which stayed native/unstyled under ttk on Windows).
+It uses what Qt offers: real rounded corners, a native gradient brush, and a
+stylesheet Qt fully owns end to end (including dropdown popups).
 
 The palette echoes iiSU's own in-app look (dark background, tile-style
 panels, its cyan-to-purple gradient), colors and layout only, not any of
@@ -27,8 +22,7 @@ GREEN = "#4fd67a"
 RED = "#ff6161"
 GRAY = "#5a5a60"
 
-# Previously scattered as literals through bridge/manager.py under the Tk
-# UI; centralized here now that the rewrite touches every call site anyway.
+# Shared by every input widget.
 INPUT_BG = "#0e0e10"
 LOG_TEXT = "#c9c9ce"
 ACCENT_BG = "#3a3a40"
@@ -37,8 +31,8 @@ DIRTY_BG = "#c98a2b"
 DIRTY_BG_HOVER = "#d99a3b"
 DIRTY_TEXT = "#1a1206"
 
-# 8/16/24px spacing scale used consistently by PageBase/Card, rather than
-# each page hand-tuning its own padding the way the Tk pages did.
+# 8/16/24px spacing scale used consistently by PageBase/Card, so no page
+# hand-tunes its own padding.
 SPACING_SM = 8
 SPACING_MD = 16
 SPACING_LG = 24
@@ -371,8 +365,7 @@ QPushButton#SubnavPill:checked {{
 
 def apply_theme(app) -> None:
     """Applies the palette, stylesheet, and default body font to a
-    QApplication, called once at each entry point's startup, mirroring
-    the tkinter theme's apply_ttk_styles(style) call."""
+    QApplication, called once at each entry point's startup."""
     app.setStyle("Fusion")
     app.setPalette(build_palette())
     app.setStyleSheet(STYLESHEET)

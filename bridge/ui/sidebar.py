@@ -1,10 +1,7 @@
-"""Left navigation rail, replaces manager.py's hand-built tk.Label nav
-buttons (_build_sidebar/_add_nav_button) with real QPushButtons, which get
-checked-state styling, keyboard focus, and hover for free instead of the
-three bind()s per button the Tk version needed.
+"""Left navigation rail of real QPushButtons, which get checked-state
+styling, keyboard focus, and hover for free.
 
-NAV_ITEMS/NAV_GROUPS/DANGER_NAV_ITEMS are the same pure data manager.py
-already had, only the widgets reading them changed toolkit."""
+NAV_ITEMS/NAV_GROUPS/DANGER_NAV_ITEMS are the pure data the widgets read."""
 
 import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
@@ -140,7 +137,7 @@ class Sidebar(QWidget):
     def build_subnav(self, group_key: str, on_pill: QWidget) -> None:
         """Populates a caller-owned pill row for one group, the pills
         themselves live in the page area (next to that group's content),
-        not the sidebar rail, matching manager.py's segmented sub-nav."""
+        not the sidebar rail."""
         layout = on_pill.layout() or QHBoxLayout(on_pill)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(6)

@@ -1,5 +1,4 @@
-"""Add/edit a single package-prefix -> emulator mapping. Replaces
-bridge/emulator_dialogs.py's tkinter EmulatorDialog(simpledialog.Dialog)."""
+"""Add/edit a single package-prefix -> emulator mapping."""
 
 from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLabel, QLineEdit, QVBoxLayout
 

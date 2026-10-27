@@ -4,8 +4,6 @@ resolves each console to something our patched LaunchBridge recognizes
 (see that module's docstring for why a stub is needed at all). The AVD
 needs to already be running, Start it from Home first if this can't
 reach it.
-
-Replaces bridge/emulator_dialogs.py's tkinter RedirectorInstallDialog.
 """
 
 import subprocess

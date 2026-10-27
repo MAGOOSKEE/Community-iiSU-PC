@@ -1,6 +1,5 @@
-"""A subtle opacity cross-fade for QStackedWidget page switches, a
-capability Tk's page-swap (a plain .tkraise(), no cross-fade Tk can do at
-all) never had. Understated on purpose: ~180ms, not a slide or a bounce."""
+"""A subtle opacity cross-fade for QStackedWidget page switches.
+Understated on purpose: ~180ms, not a slide or a bounce."""
 
 from PySide6.QtCore import QEasingCurve, QPropertyAnimation
 from PySide6.QtWidgets import QGraphicsOpacityEffect, QWidget

@@ -1,8 +1,6 @@
-"""Home page: status card, Start/Stop, quick actions, and the live log,
-ports manager.py's _build_home_page and everything it drives (~lines
-641-977 of the original). Threading collapses from thread+queue.Queue+
-polling timer down to run_in_background() + a Signal-based log redirector,
-since Qt already marshals cross-thread signal delivery on its own, see
+"""Home page: status card, Start/Stop, quick actions, and the live log.
+Threading uses run_in_background() + a Signal-based log redirector, since
+Qt already marshals cross-thread signal delivery on its own, see
 bridge/ui/workers/{task_runner,log_stream}.py's docstrings."""
 
 import os
@@ -47,8 +45,7 @@ class HomePage(PageBase):
         super().__init__(parent, scrollable_body=False)
         # `window` is the owning ManagerWindow: home needs its shared
         # config_data/configured state and a couple of cross-page actions
-        # (rebuilding settings pages after Setup finishes), the same
-        # coupling manager.py had by simply being one big class.
+        # (rebuilding settings pages after Setup finishes).
         self.window = window
         self.busy = False
         self._setup_process = None
@@ -447,8 +444,7 @@ class HomePage(PageBase):
 
     def confirm_close(self) -> bool:
         """True if it's OK to close the main window, warns first when the
-        VM/bridge are still running in the background, matching manager.py's
-        _on_close."""
+        VM/bridge are still running in the background."""
         if self.window.last_avd_up or self.window.last_bridge_up:
             reply = QMessageBox.question(
                 self.window,

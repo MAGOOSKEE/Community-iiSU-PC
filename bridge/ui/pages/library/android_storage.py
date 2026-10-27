@@ -1,6 +1,5 @@
 """Android Storage page, browse/transfer files on the Android VM's
-shared storage over ADB. Ports manager.py's _build_android_storage_page
-and its supporting methods. Backed by
+shared storage over ADB. Backed by
 bridge/services/android_storage_service.py."""
 
 import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path

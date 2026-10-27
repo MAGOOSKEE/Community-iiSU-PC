@@ -1,7 +1,5 @@
 """
-The Qt rewrite of Community-iiSU-PC's GUI (see
-C:\\Users\\Jaemin\\.claude\\plans\\robust-giggling-thompson.md), replacing
-the flat, non-package bridge/*.py tkinter front ends.
+The Qt GUI of Community-iiSU-PC: the Manager, Setup and the overlays.
 
 Puts the project root, bridge/, and installer/ on sys.path once here,
 the same bare-import convention the old flat scripts already relied on

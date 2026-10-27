@@ -1,13 +1,10 @@
-"""Windows Apps page, ports manager.py's _build_windows_apps_page and its
-supporting methods. Backed entirely by bridge/services/windows_apps_service.py
-(extracted first, see that module's docstring); this file is "wire a
-service call to a signal/slot" per the Qt rewrite plan.
+"""Windows Apps page. Backed entirely by bridge/services/windows_apps_service.py;
+this file is "wire a service call to a signal/slot".
 
-Not carried over from the Tk version, deliberately deferred rather than
-half-built: drag-and-drop (Tk's own tkinterdnd2 path already degraded
-gracefully without it), inline Steam search with fetched box-art
-thumbnails (WindowsAppDialog uses a simple picker dialog instead), and the
-Refresh Artwork feature. All cosmetic, none block using the page."""
+Not implemented, deliberately deferred rather than half-built: drag-and-drop,
+inline Steam search with fetched box-art thumbnails (WindowsAppDialog uses a
+simple picker dialog instead), and a Refresh Artwork feature. All cosmetic,
+none block using the page."""
 
 import json
 import os

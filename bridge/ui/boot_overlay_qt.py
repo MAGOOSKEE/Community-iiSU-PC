@@ -1,17 +1,14 @@
 """
-Qt replacement for bridge/boot_overlay.py, kept as a drop-in with the exact
-same three-function API (show/close/notify_error) so nothing calling it
-(start_iisu_pc.py, launch_bridge.py, manager.py) needs to change at all
-once this replaces the original, only what runs *inside* the spawned
-process changes, from PowerShell+WinForms to PySide6
-(bridge/ui/boot_overlay_app.py and tray_notify_app.py).
+The boot/hand-off overlay API used by start_iisu_pc.py, launch_bridge.py and
+the Manager: show, close and notify_error. The overlay itself runs in a
+spawned PySide6 process (bridge/ui/boot_overlay_app.py and
+tray_notify_app.py).
 
-Still a separate OS process, not an in-process QWidget, and for the same
-reason as before: start_iisu_pc.py is a synchronous script that may not be
-running inside any QApplication at all, and manager.py calls this from
-background threads, an in-process widget would reintroduce the "second
-GUI root from a non-owning thread" problem a separate process avoids
-entirely, Tk or Qt.
+It is a separate OS process, not an in-process QWidget, because
+start_iisu_pc.py is a synchronous script that may not be running inside any
+QApplication at all, and the Manager calls this from background threads, an
+in-process widget would reintroduce the "second GUI root from a non-owning
+thread" problem a separate process avoids.
 """
 
 import random
@@ -115,8 +112,8 @@ def show(context: str) -> subprocess.Popen | None:
 
 def notify_error(title: str, message: str) -> None:
     """Best-effort Windows tray balloon notification, the bridge
-    normally runs with no visible window at all (see manager.py's
-    debug_show_console_windows), so a launch failure (no emulator mapped,
+    normally runs with no visible window at all (see the
+    debug_show_console_windows setting), so a launch failure (no emulator mapped,
     executable/rom not found, or an emulator exiting with a non-zero
     code) would otherwise be visible only in a log file nobody's looking
     at. Fire-and-forget and detached, same reasoning as show()'s overlay:

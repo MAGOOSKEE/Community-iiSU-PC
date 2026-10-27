@@ -3,7 +3,7 @@ Loads bridge/config.json for the other bridge/ scripts.
 
 config.json is created by installer/setup_wizard.py during first-time
 setup, it doesn't exist until Setup.bat has been run once. Centralizing
-the load here means every entry point (manager.py's Home page and
+the load here means every entry point (the Manager's Home page and
 settings pages, launch_bridge.py, apply_display.py) reports that as a
 clear, actionable message instead of each raising its own raw
 FileNotFoundError.

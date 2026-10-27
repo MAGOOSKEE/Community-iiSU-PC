@@ -7,7 +7,7 @@ whole time, since the AVD's window isn't made fullscreen until well into
 this sequence and would otherwise leave raw desktop visible around it.
 
 This is the single entry point meant for day-to-day use, it's what runs
-when you click Open (or Stop -> Open again) on manager.py's Home page,
+when you click Open (or Stop -> Open again) on the Manager's Home page,
 instead of manually starting the emulator and the bridge as separate
 steps.
 

@@ -1,5 +1,4 @@
-"""Console Games page, ports manager.py's _build_games_console_page.
-Backed entirely by sync_library.py (already non-GUI and tested) and
+"""Console Games page. Backed entirely by sync_library.py (already non-GUI and tested) and
 console_names.py, no new service module needed, this page just wires
 those straight to a tree."""
 

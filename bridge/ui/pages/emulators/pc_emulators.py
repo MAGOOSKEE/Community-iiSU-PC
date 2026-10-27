@@ -1,7 +1,5 @@
-"""PC Emulators settings page, ports manager.py's _build_emulators_page
-and its supporting methods (~lines 1071-1193). The package-prefix mapping
-list becomes a QTreeWidget (Tk's ttk.Treeview equivalent); per the layout
-rule in pages/base.py, it's placed directly in the page's own layout with
+"""PC Emulators settings page. The package-prefix mapping list is a
+QTreeWidget; per the layout rule in pages/base.py, it's placed directly in the page's own layout with
 an Expanding size policy rather than inside a QScrollArea."""
 
 from pathlib import Path

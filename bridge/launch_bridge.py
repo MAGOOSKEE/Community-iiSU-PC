@@ -33,7 +33,7 @@ For each request, this:
 All configuration (ROM directory, emulator search paths, package->emulator
 mappings, quit hotkey, display settings) lives in config.json next to this
 script. Window-management helpers live in winapi.py, shared with
-apply_display.py and manager.py. One Python stdlib script, no dependencies.
+apply_display.py and the Manager. One Python stdlib script, no dependencies.
 """
 
 import ctypes
@@ -130,7 +130,7 @@ MOD_NOREPEAT = 0x4000
 # don't apply here since polling needs each modifier's actual key code.
 MODIFIER_VK = {"ctrl": 0x11, "alt": 0x12, "shift": 0x10, "win": 0x5B}
 # Named (non-single-character) keys quit_hotkey's "key" can be set to,
-# via manager.py's key-capture UI (Tk keysym, lowercased), anything not
+# via the Manager's key-capture UI (lowercase key names), anything not
 # listed here falls back to ord(key.upper()[0]), which already covers
 # every plain letter/digit key (the only kind this config supported before
 # Escape became the default).
@@ -449,9 +449,9 @@ def find_executable(names: list[str], search_roots: list[Path], cache: dict) -> 
     got moved/reinstalled elsewhere).
 
     The cache key includes search_roots itself (not just the exe names),
-    so editing search_roots in manager.py naturally invalidates the old
+    so editing search_roots in the Manager naturally invalidates the old
     entry instead of it staying wrong until the previously-found file
-    happens to disappear, manager.py documents that path changes apply
+    happens to disappear, the Manager documents that path changes apply
     on the very next launch with no restart needed, and a stale cache hit
     would quietly break that."""
     cache_key = "|".join(names) + "::" + "|".join(str(r) for r in search_roots)
@@ -482,7 +482,7 @@ def find_executable(names: list[str], search_roots: list[Path], cache: dict) -> 
 
 def find_rom(rom_filename: str, roms_dir: Path, cache: dict) -> Path | None:
     """Same caching approach as find_executable, keyed on roms_dir too so
-    changing it in manager.py doesn't risk returning a stale path."""
+    changing it in the Manager doesn't risk returning a stale path."""
     cache_key = f"{rom_filename}::{roms_dir}"
     cached = cache["roms"].get(cache_key)
     if cached and Path(cached).is_file():
@@ -1470,7 +1470,7 @@ def handle_request(raw_intent: str) -> None:
     print(f"[bridge] received: {raw_intent}")
 
     # Reloaded fresh per request (not once at startup) so edits made in
-    # manager.py take effect on the very next launch without restarting
+    # the Manager take effect on the very next launch without restarting
     # the bridge process.
     try:
         config = load_config()
@@ -1725,7 +1725,7 @@ def recover_from_request_exception(config: dict) -> None:
 
 def main() -> None:
     # Install bridge-specific crash logging only when this module is actually
-    # running the bridge. manager.py imports helpers from launch_bridge and
+    # running the bridge. The Manager imports helpers from launch_bridge and
     # must retain its own sys/threading exception hooks.
     sys.excepthook = _log_uncaught_exception
     if hasattr(threading, "excepthook"):

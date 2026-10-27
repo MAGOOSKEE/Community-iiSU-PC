@@ -1,7 +1,5 @@
 """
-GUI front-end for installer/setup_wizard.py. Replaces installer/setup_gui.py's
-tkinter SetupApp during the Qt rewrite (see
-C:\\Users\\Jaemin\\.claude\\plans\\robust-giggling-thompson.md).
+GUI front-end for installer/setup_wizard.py.
 
 Lets you pick your iiSU APK, then runs the whole first-time setup (SDK/AVD
 bootstrap, patching, install) on a background thread while streaming its

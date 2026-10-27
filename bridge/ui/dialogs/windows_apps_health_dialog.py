@@ -1,7 +1,6 @@
-"""Windows Apps Health Check, replaces manager.py's _windows_apps_cleanup()
-Toplevel. Shows scan_windows_apps_health()'s findings and offers to repair
-the safely-automatable ones (missing placeholders only, everything else
-needs a human decision, same as the original)."""
+"""Windows Apps Health Check. Shows scan_windows_apps_health()'s findings and
+offers to repair the safely-automatable ones (missing placeholders only,
+everything else needs a human decision)."""
 
 from pathlib import Path
 

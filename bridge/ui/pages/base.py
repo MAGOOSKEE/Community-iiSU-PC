@@ -1,11 +1,10 @@
 """Common page scaffolding: the title/subtitle/gradient-divider header every
 page repeats, plus the one layout rule worth baking in from day one.
 
-That rule, from a real Tk bug this project already hit once: wrapping a
-page that contains a wide, self-scrolling list (a Treeview/table) inside an
-outer vertical-scroll wrapper stretched the whole window instead of
-scrolling, and produced doubled scrollbars. QScrollArea has the exact same
-failure mode around a QTableView/QTreeView. So: a page containing a table/
+That rule: wrapping a page that contains a wide, self-scrolling list (a
+table/tree) inside an outer vertical-scroll wrapper stretches the whole
+window instead of scrolling, and produces doubled scrollbars. QScrollArea
+has that failure mode around a QTableView/QTreeView. So: a page containing a table/
 tree/list gets that widget's size policy set to Expanding and placed
 directly in the page's own top-level layout, never nested inside a
 QScrollArea. Only a page with no internally-scrolling widget should pass

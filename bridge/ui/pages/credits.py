@@ -1,5 +1,4 @@
-"""Credits page, ports manager.py's _build_credits_page and its avatar-
-loading helpers. No internally-scrolling widget here (just stacked Cards),
+"""Credits page with GitHub avatars. No internally-scrolling widget here (just stacked Cards),
 so this is one of the pages that gets PageBase's scrollable_body=True."""
 
 import webbrowser
