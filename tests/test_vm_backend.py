@@ -66,6 +66,25 @@ class ResolveBackendTests(unittest.TestCase):
         self.assertEqual(vb.resolve_backend({"vm_backend": "nope"}, {}, is_windows=False), vb.BACKEND_AVD)
 
 
+class SupportsHeadlessBootTests(unittest.TestCase):
+    def test_an_avd_install_supports_it(self):
+        self.assertTrue(vb.supports_headless_boot({"vm_backend": "avd"}, {}, is_windows=False))
+
+    def test_a_waydroid_install_does_not(self):
+        self.assertFalse(vb.supports_headless_boot({"vm_backend": "waydroid"}, {}, is_windows=False))
+
+    def test_windows_always_supports_it(self):
+        self.assertTrue(vb.supports_headless_boot({"vm_backend": "waydroid"}, {}, is_windows=True))
+
+    def test_an_install_from_before_the_setting_existed_supports_it_on_wayland(self):
+        env = {"XDG_SESSION_TYPE": "wayland"}
+        self.assertTrue(vb.supports_headless_boot({"avd_name": "iisuwin"}, env, is_windows=False))
+
+    def test_no_config_follows_the_detected_session(self):
+        self.assertFalse(vb.supports_headless_boot(None, {"XDG_SESSION_TYPE": "wayland"}, is_windows=False))
+        self.assertTrue(vb.supports_headless_boot(None, {}, is_windows=False))
+
+
 class WaydroidInstalledTests(unittest.TestCase):
     def test_uses_which(self):
         self.assertTrue(vb.waydroid_installed(lambda name: "/usr/bin/waydroid"))

@@ -33,7 +33,7 @@ from bridge.ui.widgets.card import Card
 from bridge.ui.widgets.gradient_background import GradientBlobBackground
 from bridge.ui.widgets.status_dot import StatusDot
 from shared.platform_compat import open_uri
-from shared.vm_backend import BACKEND_WAYDROID, resolve_backend
+from shared.vm_backend import supports_headless_boot
 from bridge.ui.workers.log_stream import LogStreamRedirector
 from bridge.ui.workers.task_runner import run_in_background
 from bridge_config import CONFIG_PATH
@@ -204,7 +204,7 @@ class HomePage(PageBase):
         # Only meaningful when nothing is running yet.
         boot_headless.setEnabled(
             self.window.configured and not self.busy and not (self.window.last_bridge_up or self.window.last_avd_up)
-            and resolve_backend(self.window.config_data) != BACKEND_WAYDROID  # nothing to hide windowless in a container
+            and supports_headless_boot(self.window.config_data)
         )
         menu.addSeparator()
         menu.addAction("ROMs Folder", self._open_roms_folder)

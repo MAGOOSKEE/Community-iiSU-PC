@@ -54,7 +54,7 @@ Once it's done, a short onboarding wizard walks you through your ROM directory, 
 
 Double-click the **desktop shortcut**, or run the Manager script for your platform (**`Community-iiSU-PC Manager.bat`** on Windows, **`./Community-iiSU-PC\ Manager.sh`** on Linux): one window, navigated with the sidebar:
 
-- **Home**: AVD/bridge status, Open/Stop, a running status line, and quick buttons to your ROMs folder and logs. The ▾ next to Start has **Boot Headless (no window)**, which boots the VM without its window or the launch bridge.
+- **Home**: AVD/bridge status, Open/Stop, a running status line, and quick buttons to your ROMs folder and logs. The ▾ next to Start has **Boot Headless (no window)**, which boots the VM without its window or the launch bridge. A headless boot always cold boots, ignores and clears the saved resume state, and renders in software with audio off so the windowless emulator doesn't crash. It isn't available with Waydroid, which has no window to leave out: the menu item is greyed out and a headless start request just starts normally.
 - **Library**: ROM Directory (your host ROM folder), Media Library (check/restore saved media), Android Storage (browse and manage the VM's shared storage over ADB).
 - **Games**: Console (every detected ROM, grouped by multi-disc playlist) and PC (native apps and URI launches, see below).
 - **Emulators**: PC emulator mappings and search folders, test a mapping without starting the AVD, and reinstall iiSU's redirector apps.

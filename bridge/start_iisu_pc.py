@@ -70,7 +70,7 @@ from portable_sdk import (
 )
 from shared import app_version
 from shared.platform_compat import IS_WINDOWS, detached_popen_kwargs, new_console_creationflags, subprocess_creationflags
-from shared.vm_backend import BACKEND_WAYDROID, resolve_backend, vm_device_connected
+from shared.vm_backend import BACKEND_WAYDROID, resolve_backend, supports_headless_boot, vm_device_connected
 
 BRIDGE_SCRIPT = Path(__file__).parent / "launch_bridge.py"
 STATE_PATH = Path(__file__).parent / ".runtime_state.json"
@@ -528,8 +528,7 @@ def main(headless: bool = False) -> None:
         print(f"[start] {e}")
         sys.exit(1)
     print(f"[start] {app_version.banner('start', f'backend {resolve_backend(config)}')}")
-    if headless and resolve_backend(config) == BACKEND_WAYDROID:
-        # Waydroid is a container with its own session, not an emulator with a window to leave out.
+    if headless and not supports_headless_boot(config):
         print("[start] Boot Headless isn't available with Waydroid, starting normally.")
         headless = False
 
