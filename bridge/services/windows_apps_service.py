@@ -1,8 +1,5 @@
-"""Non-UI logic behind the Windows Apps page, extracted out of
-bridge/manager.py's tkinter Manager class ahead of porting that page to Qt
-(the two largest pages, this one and Media Library, get their service
-layer extracted first, per the Qt rewrite plan, so the eventual page file
-is just "wire a service call to a signal/slot").
+"""Non-UI logic behind the Windows Apps page, kept apart so the page file
+is just "wire a service call to a signal/slot".
 
 Every function here takes its state as plain arguments instead of reading
 instance attributes, and reports errors by raising WindowsAppsServiceError

@@ -31,7 +31,7 @@ foreground itself (see launch_bridge.py's launch_iisu()), so this doesn't
 need to duplicate that, without it, display changes would leave the AVD
 freshly booted but with no bridge running to redirect game launches.
 
-Run this after changing display settings in manager.py's Display page.
+Run this after changing display settings in the Manager's Display page.
 """
 
 import sys

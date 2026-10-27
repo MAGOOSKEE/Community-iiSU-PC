@@ -248,8 +248,7 @@ def ensure_pillow() -> None:
 
 
 def ensure_pyside6() -> None:
-    """PySide6 is this project's GUI toolkit (the Qt rewrite replaced Tk
-    entirely, including tkinterdnd2's drag-and-drop, Qt has that
+    """PySide6 is this project's GUI toolkit (it also provides drag and drop
     natively). Unlike Pillow, this one isn't optional: with no PySide6
     there is no GUI at all, so a failed install here is raised, not
     silently swallowed like ensure_pillow()'s cosmetic-only fallback."""
@@ -867,7 +866,7 @@ def write_bridge_config(avd_name: str, backend: str = BACKEND_AVD, storage_gb: i
     The "emulators" map is seeded from shared/emulator_defaults.py the
     same way, via setdefault: a brand-new config gets the full curated
     set, but re-running this never overwrites emulator mappings someone
-    has since customized in manager.py's Emulators page."""
+    has since customized on the Manager's Emulators page."""
     sys.path.insert(0, str(PROJECT_ROOT))
     from shared.emulator_defaults import build_emulators_map
 

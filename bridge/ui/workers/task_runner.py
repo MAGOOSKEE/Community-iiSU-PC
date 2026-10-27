@@ -1,9 +1,7 @@
 """
-Qt replacement for the old tkinter pattern of `threading.Thread(...).start()`
-followed by `self.after(0, callback, *args)` once the background work is
-done (~30+ call sites across the old bridge/manager.py). A QThreadPool
-worker plus queued signals gets the same "do I/O off the main thread, then
-safely touch widgets back on the main thread" result, since Qt already
+Runs work off the main thread and calls back on it. A QThreadPool
+worker plus queued signals gives "do I/O off the main thread, then
+safely touch widgets back on the main thread", since Qt already
 marshals a signal emitted from a worker thread onto its receiver's own
 thread automatically (a queued connection), no extra plumbing needed
 for that part.

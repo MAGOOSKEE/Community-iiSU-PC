@@ -1,5 +1,4 @@
-"""Advanced settings page, ports manager.py's _build_advanced_page.
-Reuses HotkeyEditor/KeyCaptureDialog from onboarding_wizard.py rather than
+"""Advanced settings page. Reuses HotkeyEditor/KeyCaptureDialog from onboarding_wizard.py rather than
 re-implementing hotkey capture a second time (its own docstring already
 anticipated this reuse)."""
 

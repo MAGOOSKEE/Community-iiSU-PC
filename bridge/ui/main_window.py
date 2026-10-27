@@ -1,15 +1,11 @@
 """The Manager's top-level window: sidebar + page container + shared Save
-bar, replaces manager.py's Manager(tk.Tk) chrome (_build_ui/_build_
-sidebar/_build_group_shell/_show_page/_show_subpage/_update_save_bar, plus
-its config-reload and status-polling glue). Individual pages are ported one
-at a time (see the plan); anything not yet ported shows a plain "coming
-soon" placeholder so the app stays runnable throughout the rewrite.
+bar, plus its config-reload and status-polling glue. Every nav entry in
+sidebar.NAV_ITEMS and NAV_GROUPS has a page registered in ManagerWindow's
+constructor.
 
 Page-specific side effects (refreshing a page's own data when it becomes
-visible) go through an `on_shown()` duck-typed hook instead of manager.py's
-hardcoded _trigger_page_side_effects elif chain, each newly-ported page
-just implements the method it needs, nothing here has to know its name in
-advance.
+visible) go through an `on_shown()` duck-typed hook: a page just implements
+the method it needs, nothing here has to know its name in advance.
 """
 
 import sys
@@ -54,29 +50,11 @@ from bridge.ui.sidebar import DANGER_NAV_ITEMS, LOCKED_NAV, NAV_GROUPS, NAV_ITEM
 from bridge_config import CONFIG_PATH, load_config, save_config
 import emulator_profiles
 from shared.platform_compat import detached_popen_kwargs
-from shared.qt_theme import Fonts, GREEN, PANEL_BG_HOVER, RED, TEXT_DIM
+from shared.qt_theme import GREEN, PANEL_BG_HOVER, RED
 
 # Sub-page keys (or top-level keys with no group) that use the shared
 # bottom Save bar to commit straight to config.json.
 SAVE_BAR_PAGES = {"roms", "emulators", "settings", "advanced"}
-
-
-class _ComingSoonPage(QWidget):
-    """Placeholder for a nav destination whose page hasn't been ported to
-    Qt yet, keeps every nav entry clickable throughout the rewrite
-    instead of hiding unported destinations."""
-
-    def __init__(self, label: str, parent=None):
-        super().__init__(parent)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 20, 24, 20)
-        title = QLabel(label)
-        title.setFont(Fonts.title())
-        layout.addWidget(title)
-        note = QLabel("Not yet ported to the new interface, coming soon.")
-        note.setStyleSheet(f"color: {TEXT_DIM};")
-        layout.addWidget(note)
-        layout.addStretch(1)
 
 
 class ManagerWindow(QMainWindow):
@@ -97,9 +75,9 @@ class ManagerWindow(QMainWindow):
         self.group_current_sub: dict[str, str] = {}
         self.settings_dirty = False
 
-        # Populated as each settings page is ported: key -> () -> bool
-        # (True if that page's live inputs differ from config_data) and
-        # key -> () -> bool (save it; returns whether the save succeeded).
+        # Per settings page: key -> () -> bool (True if that page's live inputs
+        # differ from config_data) and key -> () -> bool (save it; returns
+        # whether the save succeeded).
         self.dirty_checkers: dict[str, callable] = {}
         self.save_handlers: dict[str, callable] = {}
 
@@ -158,16 +136,10 @@ class ManagerWindow(QMainWindow):
             elif key == "uninstall":
                 self._register_page(key, UninstallPage(self))
             else:
-                self._register_page(key, _ComingSoonPage(label))
+                raise KeyError(f"no page registered for nav entry {key!r}")
 
-        for group_key, subs in NAV_GROUPS.items():
-            for sub_key, sub_label in subs:
-                self.register_subpage(sub_key, _ComingSoonPage(sub_label))
-
-        # Ported settings pages replace their placeholders here as each one
-        # is written, roms/emulators share one Save action and one dirty
-        # flag (see _gather_settings), matching manager.py's original
-        # single-config-write-covers-four-pages behavior.
+        # The settings pages share one Save action and one dirty flag (see
+        # _gather_settings), so a single config write covers all of them.
         self.roms_page = RomsPage(self)
         self.register_subpage("roms", self.roms_page)
         self.emulators_page = EmulatorsPage(self)
@@ -186,6 +158,9 @@ class ManagerWindow(QMainWindow):
         self.register_subpage("advanced", self.advanced_page)
         self.register_subpage("backup_restore", BackupRestorePage(self))
         self.register_subpage("diagnostics", DiagnosticsPage(self))
+        missing = [sub_key for subs in NAV_GROUPS.values() for sub_key, _label in subs if sub_key not in self.subpages]
+        if missing:
+            raise KeyError(f"no page registered for sub-page(s) {missing}")
 
         self._settings_rebuild_handlers = [
             self.roms_page.reload_from_config,
@@ -257,20 +232,16 @@ class ManagerWindow(QMainWindow):
             return False
 
     def rebuild_settings_pages(self) -> None:
-        """Placeholder for manager.py's _build_settings_pages, once the
-        settings/ROMs/emulators pages are ported, each one registers a
-        rebuild-from-config_data callback here instead of this method
-        knowing their internals directly."""
+        """Rebuilds the settings pages from config_data. Each page registers
+        a rebuild-from-config_data callback instead of this method knowing
+        their internals directly."""
         for handler in getattr(self, "_settings_rebuild_handlers", []):
             handler()
 
     def _gather_settings(self, silent: bool = False) -> dict | None:
-        """Builds the settings dict exactly as Save would write it, ports
-        manager.py's _gather_settings, but starting from a copy of the
-        last-saved config_data rather than reading every field off self:
-        only pages that exist yet override their own keys, so this grows
-        as more settings pages get ported without touching the ones that
-        already work. silent=True (the dirty-check timer) swallows invalid
+        """Builds the settings dict exactly as Save would write it, starting
+        from a copy of the last-saved config_data: each settings page
+        overrides only its own keys. silent=True (the dirty-check timer) swallows invalid
         input instead of popping up a message box, a field being mid-
         edit shouldn't interrupt typing, it just reads as dirty until it's
         valid and saved."""
@@ -361,9 +332,8 @@ class ManagerWindow(QMainWindow):
         self.page_stack.addWidget(widget)
 
     def register_subpage(self, sub_key: str, widget: QWidget) -> None:
-        """Swaps a placeholder for a real ported page, called by whatever
-        sets up that page (currently nothing; each future page-porting
-        step will call this once its widget exists)."""
+        """Adds a sub-page to its group's stack, replacing one already
+        registered under the same key."""
         stack = self.subpage_stacks[self._group_for_sub(sub_key)]
         if sub_key in self.subpages:
             old = self.subpages[sub_key]

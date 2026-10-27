@@ -26,7 +26,7 @@ tap of the keyboard quit hotkey does (see launch_bridge.quit_tap_action):
 force-quit the running game and return to iiSU, or close iiSU and shut
 down the VM entirely if nothing's running. Fires once per press, not on
 a hold, and the chord can be remapped to any combination of buttons from
-BUTTON_NAME_TO_BIT via manager.py's Advanced page.
+BUTTON_NAME_TO_BIT via the Manager's Advanced page.
 
 Also separately watches (via the legacy winmm joystick API, not XInput,
 see detect_unmapped_sony_controller) for a DualSense/DS4 that's plugged in
@@ -108,7 +108,7 @@ TRIGGER_THRESHOLD = 128
 STICK_DEADZONE = 12000
 POLL_HZ = 60
 
-# Every button the quit chord can be remapped to, by the name manager.py's
+# Every button the quit chord can be remapped to, by the name the Manager's
 # Advanced page uses. "select" matches XInput's BACK bit, which different
 # controller generations label Back, View, or Select, same physical
 # button, same bit, just a naming difference.
@@ -133,7 +133,7 @@ DEFAULT_QUIT_CHORD = ["select", "start"]
 # Short, standard Xbox-pad labels for the names above, matches iiSU's own
 # on-screen gamepad legend (see the BUTTON_TO_KEYCODE comment), and far more
 # compact than a plain name.replace("_", " ").title() would be (e.g. "Left
-# Stick" / "Right Shoulder"), which matters for manager.py's Advanced page
+# Stick" / "Right Shoulder"), which matters for the Manager's Advanced page
 # where all 14 need to fit in a tight checkbox grid.
 BUTTON_DISPLAY_NAMES = {
     "dpad_up": "D-Pad Up",

@@ -1,10 +1,7 @@
 """
-Qt replacement for the old tkinter QueueWriter (shared/theme.py) +
-self-rescheduling `self.after(N, poll_queue)` pattern used for live setup/
-uninstall/install logs. A Signal(str) already marshals safely from a
-background thread to the main thread on its own (Qt queues the delivery),
-so this collapses the old two-part "push into a queue.Queue, drain it on a
-timer" dance into one emit-and-forget call.
+Streams live setup/uninstall/install logs to the UI. A Signal(str) already
+marshals safely from a background thread to the main thread on its own (Qt
+queues the delivery), so writing to the log is one emit-and-forget call.
 """
 
 from PySide6.QtCore import QObject, Signal

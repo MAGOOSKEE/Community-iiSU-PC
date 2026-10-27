@@ -1,7 +1,7 @@
 """
 Tears down everything start_iisu_pc.py starts (the launch bridge and the
 AVD), plus anything else standing in the way of a clean slate. This is
-what runs when you click Stop on manager.py's Home page.
+what runs when you click Stop on the Manager's Home page.
 
 Tries a graceful `adb emu kill` first and gives qemu a few seconds to exit
 on its own, a clean exit is what lets it release its own lock files

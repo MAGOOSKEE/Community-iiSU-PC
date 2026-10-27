@@ -1,7 +1,6 @@
 """
 Fetches a GitHub user's avatar and renders it as a circular QPixmap, for
-the Credits page in bridge/ui (replaces shared/avatars.py's tkinter
-version during the Qt rewrite).
+the Credits page in bridge/ui.
 
 GitHub serves a user's current avatar at a stable, unauthenticated URL,
 https://github.com/<username>.png, which redirects to the real image on
@@ -13,10 +12,9 @@ a plain colored circle with the user's first initial rather than break the
 page, the same "cosmetic nice-to-have degrades quietly" approach
 create_shortcut.py already takes for iiSU's own icon.
 
-Unlike the tkinter version, this has no Pillow dependency at all: Qt's
-QPixmap/QImage decode PNG/JPEG natively, and QPainter's antialiasing
-already smooths a circular clip well at avatar sizes (64-96px) without
-needing Pillow's manual supersample-then-downscale trick.
+There is no Pillow dependency: Qt's QPixmap/QImage decode PNG/JPEG
+natively, and QPainter's antialiasing smooths a circular clip well at
+avatar sizes (64-96px).
 """
 
 import urllib.request

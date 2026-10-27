@@ -100,8 +100,8 @@ WS_BORDERLESS_MASK = WS_CAPTION | WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBO
 def minimize_own_console() -> None:
     """Minimizes this process's own console window, if it has one. Every
     entry point launched via `start "" python foo.py` from a .bat file
-    (manager.py, setup_gui.py) gets a visible console alongside its real
-    tkinter GUI, since python.exe, unlike pythonw.exe, is a console-
+    (the Manager, Setup) gets a visible console alongside its real
+    GUI, since python.exe, unlike pythonw.exe, is a console-
     subsystem executable; minimizing it out of the way instead of leaving
     it sitting on top keeps the actual GUI window the thing you see first.
     Minimized rather than hidden so the raw stdout/stderr it carries (a

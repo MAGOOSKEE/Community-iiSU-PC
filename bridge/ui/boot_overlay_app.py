@@ -1,13 +1,11 @@
 """
 Standalone PySide6 entry point for the fullscreen boot/hand-off overlay,
-launched as its own OS process by boot_overlay_qt.py's show(), the same
-way the PowerShell+WinForms version it replaces (bridge/boot_overlay.py)
-already was. Kept as a separate process rather than an in-process QWidget
-for the same reason as before: start_iisu_pc.py is a synchronous script
-that may not be running inside any QApplication at all, and manager.py
-calls show()/close() from background threads, an in-process widget
-would reintroduce the "second GUI root from a non-owning thread" problem
-this design exists to avoid.
+launched as its own OS process by boot_overlay_qt.py's show(). Kept as a
+separate process rather than an in-process QWidget because
+start_iisu_pc.py is a synchronous script that may not be running inside
+any QApplication at all, and the Manager calls show()/close() from
+background threads, an in-process widget would reintroduce the "second
+GUI root from a non-owning thread" problem this design exists to avoid.
 
 Usage: python -m bridge.ui.boot_overlay_app <context> [flavor]
 """

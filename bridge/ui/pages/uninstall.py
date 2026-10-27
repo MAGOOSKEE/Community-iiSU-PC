@@ -1,7 +1,6 @@
-"""Uninstall page, ports manager.py's _build_uninstall_page and its
-supporting scan/confirm/run methods. Deliberately never locked behind
+"""Uninstall page: scan, confirm and run. Deliberately never locked behind
 LOCKED_NAV (see sidebar.py) so it stays reachable against a partial or
-broken install, same as the original."""
+broken install."""
 
 import sys
 import traceback

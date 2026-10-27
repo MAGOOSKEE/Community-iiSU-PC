@@ -5,20 +5,16 @@ feedback, instead of dropping a fresh install straight into the
 Manager's settings pages, meant for occasional later editing (still
 reachable afterward from its sidebar).
 
-Replaces bridge/onboarding_wizard.py's tkinter version during the Qt
-rewrite. Launched automatically by bridge/ui/setup_app.py right after
+Launched automatically by bridge/ui/setup_app.py right after
 setup finishes. Shares its emulator-mapping dialog with the Manager
 (bridge/ui/dialogs/emulator_dialog.py) and its data helpers (console-folder
 recognition, monitor detection, executable search) with the same modules
 the Manager uses, but keeps its own simpler step-flow UI, a wizard is a
 different shape of problem than a settings page.
 
-Architecturally simpler than the tkinter version it replaces: each step is
-built once as its own QWidget and kept alive in a QStackedWidget, rather
-than destroyed and rebuilt from scratch on every visit. That removes the
-old _capture_current_step() dance entirely (copying live widget state back
-into plain-Python fields before a rebuild could destroy it), a step's
-own widgets are simply always there to read from directly.
+Each step is built once as its own QWidget and kept alive in a
+QStackedWidget, rather than destroyed and rebuilt on every visit, so a
+step's own widgets are always there to read from directly.
 """
 
 import json
@@ -63,11 +59,9 @@ MODIFIER_NAMES = ["ctrl", "alt", "shift", "win"]
 STEP_TITLES = ["Welcome", "ROM Directory", "Emulator Folders", "Emulator Mappings", "Display", "Hotkeys", "Finish"]
 
 # Qt.Key -> the exact lowercase name bridge/launch_bridge.py's NAMED_KEY_VK
-# expects (originally a Tk keysym, lowercased), anything not listed here
-# falls back to the pressed character itself, which already covers every
-# plain letter/digit key. Must stay in sync with launch_bridge.py's table;
-# that module is untouched by this rewrite, so the *stored* format can't
-# drift even though the *capture UI* is being replaced.
+# expects, anything not listed here falls back to the pressed character
+# itself, which already covers every plain letter/digit key. Must stay in
+# sync with launch_bridge.py's table so the *stored* format can't drift.
 _NAMED_KEYS = {
     Qt.Key.Key_Escape: "escape", Qt.Key.Key_Tab: "tab", Qt.Key.Key_Return: "return",
     Qt.Key.Key_Enter: "return", Qt.Key.Key_Space: "space",
@@ -119,10 +113,8 @@ def _hotkey_signature(hotkey: dict) -> tuple[frozenset, str]:
 
 
 class KeyCaptureDialog(QDialog):
-    """Modal key capture, upgrades the old tkinter approach (temporarily
-    stealing the main window's own keypress binding while a button read
-    "press any key...") to a real dialog: modal focus trapping and Esc-to-
-    cancel are idiomatic here in a way they weren't for a plain button."""
+    """Modal key capture: a real dialog gives modal focus trapping and
+    Esc-to-cancel."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -155,8 +147,8 @@ class KeyCaptureDialog(QDialog):
 
 class HotkeyEditor(QWidget):
     """One "modifiers + key" row (quit hotkey, shutdown hotkey), used
-    twice by HotkeysStep, and reused as-is by whatever Manager Advanced
-    page eventually replaces bridge/manager.py's identical hotkey editor."""
+    twice by HotkeysStep, and reused as-is by the Manager's Advanced
+    page."""
 
     def __init__(self, title: str, initial: dict, default_key: str, parent=None):
         super().__init__(parent)

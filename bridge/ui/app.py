@@ -1,8 +1,4 @@
-"""Manager entry point: `pythonw.exe -m bridge.ui.app` (see the packaging
-plan) replaces the old `python manager.py`. Mirrors manager.py's own
-module-level bootstrap (Pillow/tkinterdnd2 auto-install), except
-tkinterdnd2 is gone entirely (Qt has native drag-and-drop) and PySide6
-itself now needs the same treatment tkinterdnd2 used to get, it's a
+"""Manager entry point: `pythonw.exe -m bridge.ui.app` . PySide6 is a
 dependency of this file's own imports below, so ensure_pyside6() has to
 run before any of them, not inside main()."""
 

@@ -1,7 +1,6 @@
 """Non-UI logic behind the Android Storage page, ADB-backed file
-browsing/transfer against the Android VM's shared storage. Ports
-manager.py's _adb_*/_android_*/_android_storage_* helper methods as plain
-functions, extracted ahead of porting that page to Qt.
+browsing/transfer against the Android VM's shared storage, as plain
+functions that need no GUI toolkit.
 """
 
 from __future__ import annotations

@@ -2,7 +2,7 @@
 Resolves a ROM folder name to one of iiSU's own known console short names
 (see console_names.json, extracted from iiSU's own bundled
 emuladores_default.json). Shared by sync_library.py (to build the AVD's
-placeholder mirror) and manager.py (to show whether iiSU will actually
+placeholder mirror) and the Manager (to show whether iiSU will actually
 recognize your ROM folders before you save).
 """
 

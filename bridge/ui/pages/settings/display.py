@@ -1,4 +1,4 @@
-"""Display settings page, ports manager.py's _build_display_page. Reuses
+"""Display settings page. Reuses
 DisplayPreview (bridge/ui/widgets/display_preview.py), the same widget
 onboarding_wizard.py's DisplayStep uses, instead of a second hand-drawn
 aspect-ratio canvas."""
@@ -183,9 +183,8 @@ class DisplayPage(PageBase):
         self.width_edit.setText(str(width))
         self.height_edit.setText(str(height))
         self.refresh_edit.setText(str(hz))
-        # Density scales with resolution rather than staying fixed, see
-        # manager.py's original comment: Android's own UI sizing is
-        # density-driven, so jumping resolution while density stayed fixed
+        # Density scales with resolution rather than staying fixed:
+        # Android's own UI sizing is density-driven, so jumping resolution while density stayed fixed
         # made everything render tiny on higher-resolution displays.
         density = round(REFERENCE_DISPLAY["density"] * height / REFERENCE_DISPLAY["height"])
         self.density_edit.setText(str(density))

@@ -1,5 +1,4 @@
-"""Media Library page, ports manager.py's _build_media_library_page and
-its core Check/Restore/preview flow. Backed by
+"""Media Library page: the Check/Restore/preview flow. Backed by
 bridge/services/media_library_service.py and the native soundbite player
 in bridge/ui/audio/winmm_playback.py.
 

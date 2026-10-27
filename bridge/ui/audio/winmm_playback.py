@@ -1,8 +1,6 @@
 """Native Windows waveOut (WinMM) playback for short PCM WAV soundbites,
-verbatim carry-over of manager.py's ctypes WinMM code, just reorganized
-into a plain state-machine class with no GUI-toolkit dependency (no Tk,
-no Qt) so bridge/ui/pages/media_library.py can drive it with a QTimer the
-same way manager.py drove it with self.after().
+as a plain state-machine class with no GUI-toolkit dependency so
+bridge/ui/pages/media_library.py can drive it with a QTimer.
 
 Only plays uncompressed PCM WAV, saved soundbites are always this format,
 so no other codec support was ever needed here.

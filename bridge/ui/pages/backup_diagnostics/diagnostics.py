@@ -1,4 +1,4 @@
-"""Diagnostics page, ports manager.py's _build_diagnostics_page. Backed
+"""Diagnostics page. Backed
 by bridge/services/diagnostics_service.py."""
 
 import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path

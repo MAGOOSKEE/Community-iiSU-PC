@@ -111,7 +111,7 @@ def load_dedupe_exceptions() -> set[str]:
     separately-launchable modes rather than continuation discs of the same
     game, so collapsing them away isn't right the way it is for an
     ordinary multi-disc RPG. Set from the Games > Console page in
-    manager.py, one entry per opted-out playlist/sheet, not per console or
+    the Manager, one entry per opted-out playlist/sheet, not per console or
     per folder, opting out one game should never affect its neighbors."""
     if not DEDUPE_EXCEPTIONS_PATH.is_file():
         return set()
@@ -249,7 +249,7 @@ def scan_library(
 
 def scan_windows_stubs() -> list[tuple[str, int, int]]:
     """Windows Apps' .pcgame placeholders live in the install directory
-    (see manager.py's WINDOWS_STUBS_DIR), not under roms_dir, so they
+    (see WINDOWS_STUBS_DIR in windows_apps_service.py), not under roms_dir, so they
     never clutter the real ROM library on disk, scanned separately here
     and merged into the "windows" console's entries so Windows Apps games
     still show up in iiSU."""
@@ -266,7 +266,7 @@ def merge_windows_stubs(consoles: dict[str, list[tuple[str, int, int]]]) -> None
     """Merges scan_windows_stubs() into consoles["windows"] in place,
     de-duplicating by filename against whatever scan_library() already
     found under a legacy <roms_dir>/windows folder, an install mid-
-    migration (see manager.py's _migrate_legacy_windows_stubs) can
+    migration (see _migrate_legacy_windows_stubs in windows_apps_service.py) can
     otherwise have the same placeholder in both places."""
     stub_entries = scan_windows_stubs()
     if not stub_entries:
