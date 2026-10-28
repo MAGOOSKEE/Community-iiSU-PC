@@ -85,7 +85,7 @@ from shared.emulator_defaults import (
     standalone_profile_for_core_dll,
 )
 from shared.platform_compat import IS_WINDOWS, detached_popen_kwargs, new_console_creationflags, open_uri, subprocess_creationflags
-from shared.vm_backend import BACKEND_WAYDROID, resolve_backend, vm_device_connected
+from shared.vm_backend import BACKEND_WAYDROID, resolve_backend, vm_device_listed
 from winapi import (
     SW_MINIMIZE,
     SW_RESTORE,
@@ -143,6 +143,7 @@ NAMED_KEY_VK = {
 }
 KEY_POLL_INTERVAL = 0.03  # seconds, responsive without busy-looping
 BOOTANIM_WAIT_SECONDS = 90  # generous cap; see launch_iisu's docstring
+AVD_GONE_CHECKS = 5  # consecutive 2s polls with no VM listed before the bridge exits
 
 
 def resolve_vk(key: str) -> int:
@@ -1762,20 +1763,32 @@ def main() -> None:
     def _watch_avd_lifetime() -> None:
         """Self-terminates the bridge once the AVD it's serving is gone
         (closed some other way than Stop, e.g. a crash), rather than
-        lingering as an orphaned process nobody can Start again over."""
+        lingering as an orphaned process nobody can Start again over.
+
+        Only gives up after the VM has been missing from `adb devices`
+        entirely for AVD_GONE_CHECKS polls in a row. An AVD that's still
+        booting, or whose adb link drops for a moment, is listed as
+        "offline", and quitting on that first blip used to kill the bridge
+        a few seconds after every cold boot."""
         time.sleep(2)
+        missing = 0
         while True:
             time.sleep(2)
             try:
                 result = subprocess.run(
-                    ["adb", "devices"], capture_output=True, text=True, timeout=3,
+                    ["adb", "devices"], capture_output=True, text=True, timeout=5,
                     creationflags=subprocess_creationflags(),
                 )
-                if not vm_device_connected(result.stdout):
-                    debug_log("AVD is no longer running; shutting down bridge")
-                    os._exit(0)
             except (OSError, subprocess.SubprocessError):
-                pass
+                continue
+            if vm_device_listed(result.stdout):
+                missing = 0
+                continue
+            missing += 1
+            debug_log(f"AVD not listed by adb ({missing}/{AVD_GONE_CHECKS})")
+            if missing >= AVD_GONE_CHECKS:
+                debug_log("AVD is no longer running; shutting down bridge")
+                os._exit(0)
 
     threading.Thread(target=_watch_avd_lifetime, daemon=True).start()
 

@@ -108,6 +108,17 @@ def vm_device_connected(adb_devices_stdout: str) -> bool:
     return vm_device_serial(adb_devices_stdout) is not None
 
 
+def vm_device_listed(adb_devices_stdout: str) -> bool:
+    """Whether the VM appears in `adb devices` at all, in any state. A
+    booting or briefly reconnecting AVD shows as "offline" for a while;
+    that's still a running VM, unlike an empty list."""
+    for line in adb_devices_stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and (parts[0].startswith("emulator-") or _NETWORK_SERIAL_RE.match(parts[0])):
+            return True
+    return False
+
+
 def parse_waydroid_status(text: str) -> dict[str, str]:
     """`waydroid status` prints "Key:\\tValue" lines (Session, Container,
     Vendor type, ...). Keys are lower-cased with spaces as underscores."""

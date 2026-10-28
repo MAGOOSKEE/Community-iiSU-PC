@@ -115,6 +115,7 @@ class HeadlessSnapshotTests(unittest.TestCase):
              patch.object(start_iisu_pc, "start_avd", return_value=4242) as start_avd, \
              patch.object(start_iisu_pc, "save_boot_fingerprint") as save, \
              patch.object(start_iisu_pc, "clear_boot_fingerprint") as clear, \
+             patch.object(start_iisu_pc, "wait_for_android_boot", return_value=True), \
              patch.object(start_iisu_pc, "sync_rom_library"), \
              patch.object(start_iisu_pc, "save_state"), \
              patch.object(start_iisu_pc, "is_port_open", return_value=True), \
@@ -161,6 +162,76 @@ class HeadlessLaunchTests(unittest.TestCase):
              patch.object(start_iisu_pc, "_launch_once", return_value=1) as launch:
             start_iisu_pc.start_avd("iisuwin", [], headless=True)
         self.assertIs(launch.call_args.args[-1], True)
+
+
+class AndroidBootWaitTests(unittest.TestCase):
+    def _wait(self, readings):
+        """readings: one (listed, boot_completed) pair per poll."""
+        poll = {"i": -1}
+
+        def is_running(_name):
+            poll["i"] += 1
+            return readings[poll["i"]][0]
+
+        def getprop(name):
+            return readings[poll["i"]][1] if name == "sys.boot_completed" else ""
+
+        clock = iter(range(0, 10_000, 2))
+        with patch.object(start_iisu_pc, "is_avd_running", side_effect=is_running), \
+             patch.object(start_iisu_pc, "_getprop", side_effect=getprop), \
+             patch.object(start_iisu_pc.time, "time", side_effect=lambda: next(clock)), \
+             patch.object(start_iisu_pc.time, "sleep"):
+            # One clock read sets the deadline, then one per poll.
+            return start_iisu_pc.wait_for_android_boot(timeout=len(readings) * 2 + 1)
+
+    def test_needs_two_good_readings_in_a_row(self):
+        self.assertTrue(self._wait([(True, "1"), (False, ""), (True, "1"), (True, "1")]))
+
+    def test_one_good_reading_between_drops_is_not_enough(self):
+        self.assertFalse(self._wait([(True, "1"), (False, ""), (True, "1"), (False, "")]))
+
+
+class OverlayDropTests(unittest.TestCase):
+    def _run(self, avd_already_running: bool):
+        ready = unittest.mock.Mock()
+        with patch.object(start_iisu_pc, "is_avd_running", return_value=avd_already_running), \
+             patch.object(start_iisu_pc, "compute_boot_fingerprint_parts", return_value={}), \
+             patch.object(start_iisu_pc, "load_saved_boot_fingerprint_parts", return_value={}), \
+             patch.object(start_iisu_pc, "describe_boot_fingerprint_diff", return_value=[]), \
+             patch.object(start_iisu_pc, "start_avd", return_value=1234), \
+             patch.object(start_iisu_pc, "save_boot_fingerprint"), \
+             patch.object(start_iisu_pc, "compute_boot_fingerprint", return_value=""), \
+             patch.object(start_iisu_pc, "wait_for_android_boot", return_value=True) as wait, \
+             patch.object(start_iisu_pc.emulator_profiles, "active_profile", return_value={}), \
+             patch.object(start_iisu_pc, "sync_rom_library", side_effect=lambda: ready.assert_called_once()), \
+             patch.object(start_iisu_pc, "is_port_open", return_value=True), \
+             patch.object(start_iisu_pc, "save_state"), \
+             patch.object(start_iisu_pc, "launch_iisu"), \
+             patch.object(start_iisu_pc, "show_iisu_window"):
+            start_iisu_pc._run_start_sequence(
+                {"iisu_fullscreen": True}, "iisuwin", 7737, False, {}, False, on_android_ready=ready
+            )
+        return ready, wait
+
+    def test_overlay_drops_after_boot_and_before_the_rom_sync(self):
+        ready, wait = self._run(avd_already_running=False)
+        wait.assert_called_once()
+        ready.assert_called_once()
+
+    def test_overlay_drops_right_away_when_the_vm_was_already_up(self):
+        ready, wait = self._run(avd_already_running=True)
+        wait.assert_not_called()
+        ready.assert_called_once()
+
+
+class OverlayLaunchArgsTests(unittest.TestCase):
+    def test_overlay_is_told_its_parent_and_a_time_limit(self):
+        from bridge.ui import boot_overlay_qt
+        with patch.object(boot_overlay_qt.subprocess, "Popen") as popen:
+            boot_overlay_qt.show("Booting...", max_seconds=42)
+        argv = popen.call_args.args[0]
+        self.assertEqual(argv[argv.index("--parent-pid") + 1], str(start_iisu_pc.os.getpid()))
+        self.assertEqual(argv[argv.index("--max-seconds") + 1], "42")
 
 
 if __name__ == "__main__":

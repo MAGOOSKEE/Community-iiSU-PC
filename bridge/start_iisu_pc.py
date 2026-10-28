@@ -85,6 +85,11 @@ BRIDGE_LOG_PATH = Path(__file__).parent / "bridge.log"
 AVD_BOOT_TIMEOUT = 300  # seconds
 MAX_LAUNCH_ATTEMPTS = 3
 RETRY_DELAY = 5  # seconds
+# How long to wait for Android to finish booting once adb can see it.
+ANDROID_BOOT_WAIT_SECONDS = 180
+# The boot overlay closes itself after this long no matter what. Normally
+# it's closed much sooner, as soon as Android finishes booting.
+BOOT_OVERLAY_MAX_SECONDS = 300
 
 # See shared/platform_compat.py: detached_popen_kwargs() covers Windows's
 # DETACHED_PROCESS|CREATE_NEW_PROCESS_GROUP|CREATE_NO_WINDOW combo (a
@@ -211,8 +216,46 @@ def is_avd_running(avd_name: str) -> bool:
     (and unused) from when this only ever meant an AVD: a running AVD shows
     up as "emulator-5554\tdevice", Waydroid as "<ip>:5555\tdevice", and
     vm_device_connected() accepts both."""
-    result = subprocess.run(["adb", "devices"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
+    try:
+        result = subprocess.run(
+            ["adb", "devices"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW, timeout=15
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
     return vm_device_connected(result.stdout)
+
+
+def _getprop(name: str) -> str:
+    try:
+        result = subprocess.run(
+            ["adb", "shell", "getprop", name], capture_output=True, text=True,
+            creationflags=CREATE_NO_WINDOW, timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def wait_for_android_boot(timeout: float = ANDROID_BOOT_WAIT_SECONDS) -> bool:
+    """Waits for Android itself to finish booting, not just for adb to see
+    the device. adb lists the emulator as soon as adbd starts, early in
+    boot, and the connection then drops to "offline" and back while the
+    system comes up. Treating that first sighting as "up" made the ROM sync
+    fail mid-boot (exit 255) and made the bridge's watchdog quit on the
+    first "offline" it saw. Done means the boot animation has stopped or
+    sys.boot_completed is set, seen twice in a row so a single good reading
+    between drops doesn't count."""
+    deadline = time.time() + timeout
+    good_in_a_row = 0
+    while time.time() < deadline:
+        if is_avd_running("") and (_getprop("sys.boot_completed") == "1" or _getprop("init.svc.bootanim") == "stopped"):
+            good_in_a_row += 1
+            if good_in_a_row >= 2:
+                return True
+        else:
+            good_in_a_row = 0
+        time.sleep(2)
+    return False
 
 
 def find_system_emulator_exe() -> Path | None:
@@ -549,11 +592,20 @@ def main(headless: bool = False) -> None:
         and not debug_console
         and not headless
     )
-    overlay = boot_overlay.show("Booting Community-iiSU-PC, please wait...") if show_overlay else None
-    try:
-        _run_start_sequence(config, avd_name, port, debug_console, state, headless)
-    finally:
+    overlay = (
+        boot_overlay.show("Booting Community-iiSU-PC, please wait...", max_seconds=BOOT_OVERLAY_MAX_SECONDS)
+        if show_overlay else None
+    )
+
+    def drop_overlay() -> None:
+        nonlocal overlay
         boot_overlay.close(overlay)
+        overlay = None
+
+    try:
+        _run_start_sequence(config, avd_name, port, debug_console, state, headless, on_android_ready=drop_overlay)
+    finally:
+        drop_overlay()
 
 
 def _start_waydroid(config: dict, state: dict) -> None:
@@ -572,7 +624,12 @@ def _start_waydroid(config: dict, state: dict) -> None:
     print("[start] Waydroid is up.")
 
 
-def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: bool, state: dict, headless: bool = False) -> None:
+def _run_start_sequence(
+    config: dict, avd_name: str, port: int, debug_console: bool, state: dict, headless: bool = False,
+    on_android_ready=None,
+) -> None:
+    """on_android_ready is called once Android has finished booting (or right
+    away if the VM was already up), main() uses it to drop the boot overlay."""
     if resolve_backend(config) == BACKEND_WAYDROID:
         _start_waydroid(config, state)
     elif is_avd_running(avd_name):
@@ -604,7 +661,21 @@ def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: b
             clear_boot_fingerprint()  # the next normal start cold boots, see above
         else:
             save_boot_fingerprint(compute_boot_fingerprint(config), new_parts)
-        print(f"[start] {avd_name} is up{' (headless, no window)' if headless else ''}.")
+        print(f"[start] {avd_name} is up{' (headless, no window)' if headless else ''}, waiting for Android to finish booting...")
+        if wait_for_android_boot():
+            print("[start] Android has finished booting.")
+        else:
+            print(f"[start] Android didn't report boot complete within {ANDROID_BOOT_WAIT_SECONDS}s, continuing anyway.")
+        if not headless and config.get("iisu_fullscreen"):
+            # Fullscreen the emulator window before the overlay drops, so
+            # what's revealed is iiSU rather than a small window on the desktop.
+            try:
+                show_iisu_window(config)
+            except Exception as e:  # noqa: BLE001; cosmetic, never fatal
+                print(f"[start] couldn't fullscreen the emulator window yet ({e}), the bridge will retry")
+
+    if on_android_ready is not None:
+        on_android_ready()
 
     print("[start] Syncing your ROM library into the AVD...")
     sync_rom_library()

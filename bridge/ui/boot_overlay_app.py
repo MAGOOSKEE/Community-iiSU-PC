@@ -9,10 +9,21 @@ calls show()/close() from background threads, an in-process widget
 would reintroduce the "second GUI root from a non-owning thread" problem
 this design exists to avoid.
 
-Usage: python -m bridge.ui.boot_overlay_app <context> [flavor]
+Usage: python -m bridge.ui.boot_overlay_app <context> [flavor] [--parent-pid N] [--max-seconds N]
+
+The overlay never relies on its caller to close it. It also closes by
+itself when:
+  - the process that opened it (--parent-pid) is gone, so a crashed or
+    killed Manager/start script can't leave it stuck on screen;
+  - --max-seconds have passed;
+  - the user clicks it, or presses Escape or Alt+F4. On Windows those keys
+    are read globally, since Windows usually refuses to give a background
+    process's window keyboard focus, so a plain keyPressEvent never fires.
 """
 
+import argparse
 import math
+import os
 import sys
 
 import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
@@ -189,10 +200,49 @@ class _BounceBar(QWidget):
         painter.fillRect(self._x, 0, self._fill_width, self.height(), self._theme["title"])
 
 
+def _pid_alive(pid: int) -> bool:
+    if IS_WINDOWS:
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return False
+        try:
+            code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(code)):
+                return False
+            return code.value == STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _dismiss_keys_down() -> bool:
+    """Escape, or Alt+F4, held right now, regardless of which window has focus."""
+    if not IS_WINDOWS:
+        return False
+    import ctypes
+    user32 = ctypes.windll.user32
+    VK_ESCAPE, VK_MENU, VK_F4 = 0x1B, 0x12, 0x73
+
+    def down(vk: int) -> bool:
+        return bool(user32.GetAsyncKeyState(vk) & 0x8000)
+
+    return down(VK_ESCAPE) or (down(VK_MENU) and down(VK_F4))
+
+
 class OverlayWindow(QWidget):
     _TITLE_TEXT = "iiSU-PC Starting"
 
-    def __init__(self, context: str, flavor: str):
+    def __init__(self, context: str, flavor: str, parent_pid: int | None = None, max_seconds: float = 0):
         super().__init__()
         theme = _THEMES[_detect_windows_theme()]
 
@@ -247,6 +297,27 @@ class OverlayWindow(QWidget):
         flavor_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(flavor_label)
 
+        hint_label = QLabel("Press Esc or click to hide this screen")
+        hint_label.setFont(QFont("Segoe UI", 9))
+        hint_label.setStyleSheet(f"color: {theme['flavor'].name()};")
+        hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addSpacing(24)
+        layout.addWidget(hint_label)
+
+        self._parent_pid = parent_pid
+        self._watch_timer = QTimer(self)
+        self._watch_timer.timeout.connect(self._check_parent)
+        if parent_pid:
+            self._watch_timer.start(1000)
+        if max_seconds and max_seconds > 0:
+            QTimer.singleShot(int(max_seconds * 1000), self._dismiss)
+        # Ignore keys already held when the overlay appears (e.g. the Escape
+        # that was used to quit a game a moment ago).
+        self._keys_were_down = _dismiss_keys_down()
+        self._key_timer = QTimer(self)
+        self._key_timer.timeout.connect(self._check_keys)
+        self._key_timer.start(50)
+
         # Cycles 0..3 dots on a fixed-length string (padded with trailing
         # spaces) so the label's width, and therefore its centering,
         # never jitters as the dot count changes.
@@ -254,6 +325,32 @@ class OverlayWindow(QWidget):
         self._dot_timer = QTimer(self)
         self._dot_timer.timeout.connect(self._tick_dots)
         self._dot_timer.start(450)
+
+    def _dismiss(self) -> None:
+        QApplication.quit()
+
+    def _check_parent(self) -> None:
+        if self._parent_pid and not _pid_alive(self._parent_pid):
+            self._dismiss()
+
+    def _check_keys(self) -> None:
+        down = _dismiss_keys_down()
+        if down and not self._keys_were_down:
+            self._dismiss()
+        self._keys_were_down = down
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() == Qt.Key.Key_Escape:
+            self._dismiss()
+            return
+        super().keyPressEvent(event)
+
+    def mousePressEvent(self, _event) -> None:
+        self._dismiss()
+
+    def closeEvent(self, event) -> None:
+        event.accept()
+        self._dismiss()
 
     def _tick_dots(self) -> None:
         self._dot_count = (self._dot_count + 1) % 4
@@ -267,11 +364,20 @@ class OverlayWindow(QWidget):
             child.setGeometry(self.rect())
 
 
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("context", nargs="?", default="Loading...")
+    parser.add_argument("flavor", nargs="?", default="")
+    parser.add_argument("--parent-pid", type=int, default=None)
+    parser.add_argument("--max-seconds", type=float, default=0)
+    args, _unknown = parser.parse_known_args(argv)
+    return args
+
+
 def main() -> None:
-    context = sys.argv[1] if len(sys.argv) > 1 else "Loading..."
-    flavor = sys.argv[2] if len(sys.argv) > 2 else ""
-    app = QApplication(sys.argv)
-    window = OverlayWindow(context, flavor)
+    args = parse_args(sys.argv[1:])
+    app = QApplication(sys.argv[:1])
+    window = OverlayWindow(args.context, args.flavor, args.parent_pid, args.max_seconds)
     if IS_WINDOWS:
         window.show()
     else:

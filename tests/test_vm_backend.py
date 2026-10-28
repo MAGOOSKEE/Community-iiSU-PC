@@ -97,6 +97,17 @@ class VmDeviceTests(unittest.TestCase):
         self.assertFalse(vb.vm_device_connected("List of devices attached\n\n"))
 
 
+class VmDeviceListedTests(unittest.TestCase):
+    def test_offline_emulator_still_counts_as_listed(self):
+        self.assertTrue(vb.vm_device_listed("List of devices attached\nemulator-5554\toffline\n"))
+
+    def test_ready_emulator_is_listed(self):
+        self.assertTrue(vb.vm_device_listed("List of devices attached\nemulator-5554\tdevice\n"))
+
+    def test_empty_list_and_usb_phone_are_not(self):
+        self.assertFalse(vb.vm_device_listed("List of devices attached\n\n"))
+        self.assertFalse(vb.vm_device_listed("List of devices attached\nR5CT1234ABC\tdevice\n"))
+
 class WaydroidStatusTests(unittest.TestCase):
     def test_parses_key_value_lines(self):
         text = "Session:\tRUNNING\nContainer:\tRUNNING\nVendor type:\tMAINLINE\nWayland display:\twayland-0\n"

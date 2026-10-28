@@ -14,6 +14,7 @@ GUI root from a non-owning thread" problem a separate process avoids
 entirely, Tk or Qt.
 """
 
+import os
 import random
 import subprocess
 import sys
@@ -88,7 +89,11 @@ _FLAVOR_LINES = [
 ]
 
 
-def show(context: str) -> subprocess.Popen | None:
+# The overlay closes itself after this long even if nobody closes it.
+DEFAULT_MAX_SECONDS = 120
+
+
+def show(context: str, max_seconds: float = DEFAULT_MAX_SECONDS) -> subprocess.Popen | None:
     """Best-effort: returns None instead of raising if the overlay process
     can't be started for any reason, a missing overlay is a cosmetic
     regression, never a reason to fail an actual start or game launch.
@@ -98,11 +103,17 @@ def show(context: str) -> subprocess.Popen | None:
     paired with a randomly-picked, purely-for-fun line underneath. Passed
     as real argv entries (not interpolated into a shell string the way the
     PowerShell version had to escape into), so there's nothing to escape
-    here at all."""
+    here at all.
+
+    The overlay watches this process and closes when it exits, and also
+    closes after max_seconds, or when the user clicks it or presses Escape."""
     flavor = random.choice(_FLAVOR_LINES)
     try:
         return subprocess.Popen(
-            [sys.executable, "-m", "bridge.ui.boot_overlay_app", context, flavor],
+            [
+                sys.executable, "-m", "bridge.ui.boot_overlay_app", context, flavor,
+                "--parent-pid", str(os.getpid()), "--max-seconds", str(max_seconds),
+            ],
             cwd=str(_PROJECT_ROOT),
             creationflags=subprocess_creationflags(),
             stdin=subprocess.DEVNULL,
