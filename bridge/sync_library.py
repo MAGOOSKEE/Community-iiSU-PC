@@ -194,13 +194,69 @@ def referenced_disc_filenames(
     return referenced
 
 
-def adb(*args: str, check: bool = True) -> subprocess.CompletedProcess:
+# Every adb call is time-limited. Without one, a single wedged adb call
+# hung the whole start sequence, and with it the boot overlay, forever.
+ADB_DEFAULT_TIMEOUT = 60  # seconds
+ADB_PUSH_TIMEOUT = 300
+ADB_EXTRACT_TIMEOUT = 600
+# adb shell's own exit code when the connection to the device drops.
+ADB_CONNECTION_LOST = 255
+
+
+def adb(*args: str, check: bool = True, timeout: float = ADB_DEFAULT_TIMEOUT) -> subprocess.CompletedProcess:
     # adb.exe is console-subsystem; every caller of this runs from the GUI
     # (pythonw.exe, no console of its own), so without CREATE_NO_WINDOW
     # each call here would flash its own console window.
     return subprocess.run(
-        ["adb", *args], capture_output=True, text=True, check=check, creationflags=subprocess_creationflags()
+        ["adb", *args], capture_output=True, text=True, check=check, creationflags=subprocess_creationflags(),
+        timeout=timeout,
     )
+
+
+# Where the previous sync's tree is moved before it's deleted.
+AVD_OLD_ROMS_PREFIX = f"{AVD_SDCARD_ROOT}/.{AVD_ROMS_DIRNAME}_old_"
+
+
+def build_extract_command() -> str:
+    """The old tree has to go so a console removed from the real library
+    (or renamed) doesn't leave its placeholders behind, since tar only ever
+    adds and overwrites. Deleting it first with rm -rf was slow: /sdcard
+    goes through Android's FUSE layer at roughly 200 files a second, so a
+    big leftover tree held up the whole start for minutes. Instead the old
+    tree is renamed out of the way (one operation), the new one extracted,
+    and the old one deleted by a detached background job that outlives
+    this adb shell. Any trees left by earlier interrupted runs go with it.
+    The command's exit code is tar's."""
+    roms = shlex.quote(AVD_ROMS_ROOT)
+    old = shlex.quote(AVD_OLD_ROMS_PREFIX) + "$(date +%s)"
+    old_glob = shlex.quote(AVD_OLD_ROMS_PREFIX) + "*"
+    return (
+        f"if [ -e {roms} ]; then mv {roms} {old} || rm -rf {roms}; fi; "
+        f"cd {shlex.quote(AVD_SDCARD_ROOT)} && tar xf {shlex.quote(AVD_TAR_PUSH_PATH)}; rc=$?; "
+        f"setsid nohup sh -c 'rm -rf {old_glob}' </dev/null >/dev/null 2>&1 & "
+        f"exit $rc"
+    )
+
+
+def _run_extract(extract_cmd: str) -> subprocess.CompletedProcess:
+    """Runs the extract, retrying once if adb lost the device partway
+    (exit 255): that's a dropped connection, not a tar error, and the
+    archive is still sitting on the device to try again."""
+    result = None
+    for attempt in range(2):
+        try:
+            result = adb("shell", extract_cmd, check=False, timeout=ADB_EXTRACT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            return subprocess.CompletedProcess(["adb", "shell"], 1, "", f"timed out after {ADB_EXTRACT_TIMEOUT}s")
+        if result.returncode != ADB_CONNECTION_LOST or attempt == 1:
+            return result
+        print("The AVD's adb connection dropped during the extract, reconnecting and retrying once...")
+        try:
+            adb("wait-for-device", check=False, timeout=60)
+        except subprocess.TimeoutExpired:
+            return result
+        time.sleep(2)
+    return result
 
 
 def scan_library(
@@ -375,21 +431,18 @@ def main() -> None:
     push_size_mb = tar_path.stat().st_size / 1e6
     print(f"Pushing the archive ({push_size_mb:.1f} MB) to the AVD and extracting it in one shot...")
     push_start = time.time()
-    adb("push", str(tar_path), AVD_TAR_PUSH_PATH)
+    adb("push", str(tar_path), AVD_TAR_PUSH_PATH, timeout=ADB_PUSH_TIMEOUT)
     push_elapsed = max(time.time() - push_start, 0.01)
     print(f"Pushed in {push_elapsed:.1f}s ({push_size_mb / push_elapsed:.1f} MB/s).")
-    # rm -rf first so a console removed from the real library (or renamed)
-    # doesn't leave its old placeholders behind, tar only ever adds/
-    # overwrites, it never removes what a previous sync left there.
-    extract_cmd = (
-        f"rm -rf {shlex.quote(AVD_ROMS_ROOT)} && "
-        f"cd {shlex.quote(AVD_SDCARD_ROOT)} && tar xf {shlex.quote(AVD_TAR_PUSH_PATH)}"
-    )
-    result = adb("shell", extract_cmd, check=False)
-    adb("shell", f"rm -f {shlex.quote(AVD_TAR_PUSH_PATH)}", check=False)
+    extract_cmd = build_extract_command()
+    result = _run_extract(extract_cmd)
+    try:
+        adb("shell", f"rm -f {shlex.quote(AVD_TAR_PUSH_PATH)}", check=False)
+    except subprocess.TimeoutExpired:
+        pass
     tar_path.unlink(missing_ok=True)
     if result.returncode != 0:
-        print("Extracting the archive on the AVD failed:")
+        print(f"Extracting the archive on the AVD failed (exit code {result.returncode}):")
         print(result.stdout)
         print(result.stderr)
         sys.exit(1)
