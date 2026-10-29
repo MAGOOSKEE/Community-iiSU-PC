@@ -219,11 +219,95 @@ class HeadlessSnapshotTests(unittest.TestCase):
         self.assertTrue(self.snapshot.exists())
 
 
+class FakeClock:
+    """A stand-in for the time module that only moves when something sleeps."""
+
+    def __init__(self):
+        self.now = 1000.0
+
+    def time(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+    @staticmethod
+    def strftime(*args):
+        return "now"
+
+
+class FakeProcess:
+    """An emulator process that exits with `code` once `lives` seconds have passed on `clock`
+    (never, when `code` is None)."""
+
+    pid = 4242
+
+    def __init__(self, clock, lives=None, code=None):
+        self.clock = clock
+        self.exit_at = None if lives is None else clock.now + lives
+        self.code = code
+
+    def poll(self):
+        if self.exit_at is not None and self.clock.now >= self.exit_at:
+            return self.code
+        return None
+
+    @property
+    def returncode(self):
+        return self.code if self.poll() is not None else None
+
+
+class HeadlessSettleTests(unittest.TestCase):
+    def setUp(self):
+        self.clock = FakeClock()
+        patcher = patch.object(start_iisu_pc, "time", self.clock)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_process_that_keeps_running_counts_as_up(self):
+        self.assertTrue(start_iisu_pc._stays_up(FakeProcess(self.clock), 30))
+        self.assertGreaterEqual(self.clock.now, 1030)
+
+    def test_a_crash_during_the_wait_is_reported_with_its_exit_code(self):
+        process = FakeProcess(self.clock, lives=13, code=0xC0000005)
+        with patch("builtins.print") as printed:
+            self.assertFalse(start_iisu_pc._stays_up(process, 30))
+        self.assertIn("0xC0000005", printed.call_args_list[0].args[0])
+        self.assertLess(self.clock.now, 1030, "it stops waiting as soon as the process is gone")
+
+    def test_a_negative_exit_code_is_shown_as_unsigned(self):
+        process = FakeProcess(self.clock, lives=1, code=-1073741819)
+        with patch("builtins.print") as printed:
+            start_iisu_pc._stays_up(process, 30)
+        self.assertIn("0xC0000005", printed.call_args_list[0].args[0])
+
+    def _launch(self, headless: bool, process: FakeProcess):
+        profile = start_iisu_pc.emulator_profiles.normalize_profile({})
+        with patch.object(start_iisu_pc.subprocess, "Popen", return_value=process), \
+             patch.object(start_iisu_pc, "is_avd_running", return_value=True), \
+             patch("builtins.open", unittest.mock.mock_open()), \
+             patch("builtins.print"):
+            return start_iisu_pc._launch_once(Path("emulator.exe"), "iisuwin", {}, [], False, profile, False, headless)
+
+    def test_a_headless_start_whose_emulator_dies_right_after_boot_fails(self):
+        self.assertIsNone(self._launch(True, FakeProcess(self.clock, lives=13, code=0xC0000005)))
+
+    def test_a_headless_start_that_stays_up_returns_the_pid(self):
+        self.assertEqual(self._launch(True, FakeProcess(self.clock)), 4242)
+        self.assertGreaterEqual(self.clock.now, 1000 + start_iisu_pc.HEADLESS_SETTLE_SECONDS)
+
+    def test_a_windowed_start_does_not_wait(self):
+        self.assertEqual(self._launch(False, FakeProcess(self.clock, lives=13, code=0xC0000005)), 4242)
+        self.assertEqual(self.clock.now, 1000.0)
+
+
 class HeadlessLaunchTests(unittest.TestCase):
     def _emulator_args(self, headless: bool) -> list[str]:
         """The command line _launch_once builds, without starting anything."""
         profile = start_iisu_pc.emulator_profiles.normalize_profile({})
-        with patch.object(start_iisu_pc.subprocess, "Popen") as popen, \
+        clock = FakeClock()
+        with patch.object(start_iisu_pc, "time", clock), \
+             patch.object(start_iisu_pc.subprocess, "Popen", return_value=FakeProcess(clock)) as popen, \
              patch.object(start_iisu_pc, "is_avd_running", return_value=True), \
              patch("builtins.open", unittest.mock.mock_open()):
             start_iisu_pc._launch_once(Path("emulator.exe"), "iisuwin", {}, [], False, profile, False, headless)
@@ -235,10 +319,22 @@ class HeadlessLaunchTests(unittest.TestCase):
     def test_a_normal_start_keeps_the_window(self):
         self.assertNotIn("-no-window", self._emulator_args(headless=False))
 
-    def test_headless_uses_software_rendering_and_no_audio(self):
-        args = self._emulator_args(headless=True)
-        self.assertEqual(args[args.index("-gpu") + 1], "swiftshader_indirect")
+    def test_headless_on_windows_uses_the_host_gpu_and_no_audio(self):
+        with patch.object(start_iisu_pc, "IS_WINDOWS", True):
+            args = self._emulator_args(headless=True)
+        self.assertEqual(args[args.index("-gpu") + 1], "host")
         self.assertIn("-no-audio", args)
+
+    def test_headless_elsewhere_keeps_software_rendering(self):
+        with patch.object(start_iisu_pc, "IS_WINDOWS", False):
+            args = self._emulator_args(headless=True)
+        self.assertEqual(args[args.index("-gpu") + 1], "swiftshader_indirect")
+
+    def test_headless_never_uses_gpu_auto_which_means_software_without_a_window(self):
+        for is_windows in (True, False):
+            with self.subTest(is_windows=is_windows), patch.object(start_iisu_pc, "IS_WINDOWS", is_windows):
+                args = self._emulator_args(headless=True)
+                self.assertNotEqual(args[args.index("-gpu") + 1], "auto")
 
     def test_a_normal_start_keeps_the_profile_gpu_and_audio(self):
         args = self._emulator_args(headless=False)

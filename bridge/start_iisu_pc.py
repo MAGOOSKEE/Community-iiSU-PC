@@ -86,6 +86,11 @@ BRIDGE_LOG_PATH = Path(__file__).parent / "bridge.log"
 AVD_BOOT_TIMEOUT = 300  # seconds
 MAX_LAUNCH_ATTEMPTS = 3
 RETRY_DELAY = 5  # seconds
+# adb lists the VM as soon as the emulator is up, well before Android has finished
+# starting. A windowless emulator that is going to crash tends to do it in the next
+# few seconds, once the guest starts drawing, so a headless start waits this long
+# before calling the VM up.
+HEADLESS_SETTLE_SECONDS = 30
 
 # See shared/platform_compat.py: detached_popen_kwargs() covers Windows's
 # DETACHED_PROCESS|CREATE_NEW_PROCESS_GROUP|CREATE_NO_WINDOW combo (a
@@ -326,6 +331,21 @@ def build_usb_passthrough_args(usb_passthrough: list[dict]) -> list[str]:
     return args
 
 
+def _stays_up(process, seconds: float = HEADLESS_SETTLE_SECONDS) -> bool:
+    """Whether the emulator is still running after `seconds` more seconds.
+    When it is not, says so with its exit code, since otherwise the start
+    reports a VM that is already gone."""
+    deadline = time.time() + seconds
+    while time.time() < deadline:
+        if process.poll() is not None:
+            code = process.returncode & 0xFFFFFFFF
+            print(f"[start] The emulator exited (code 0x{code:08X}) right after it came up, so the VM is not running.")
+            print(f"[start] see {EMULATOR_LOG_PATH} for what it logged before it stopped.")
+            return False
+        time.sleep(1)
+    return True
+
+
 def _launch_once(
     emulator_exe: Path,
     avd_name: str,
@@ -368,12 +388,16 @@ def _launch_once(
     # kept Linux-only rather than changed for existing Windows installs too,
     # since neither was something Windows behavior needed fixing.
     if headless:
-        # With no window the emulator can't use the host GPU and falls back to software
-        # rendering anyway; stating it (and dropping audio) avoids the flaky "fail fast
-        # exception" crash of qemu-system-x86_64-headless.exe seen with -gpu auto while
-        # iiSU was running (2 of 3 runs crashed, none of 4 with these flags). A background
-        # VM has no use for sound. Only this launch's command line changes, not the profile.
-        profile = {**profile, "gpu_mode": "swiftshader_indirect", "audio": "none"}
+        # On Windows the windowless emulator (qemu-system-x86_64-headless.exe) crashes with an
+        # access violation about 13 seconds after Android finishes booting whenever it renders
+        # in software, which is what -gpu auto picks without a window. Measured on one PC with
+        # Emulator 37: swiftshader_indirect, angle_indirect, guest, swangle_indirect and auto
+        # all crashed on every boot, while -gpu host survived 6 of 6 (also with iiSU running
+        # and with audio on). So headless states the host GPU explicitly. Linux keeps software
+        # rendering, the usual choice for a headless run there, which has not been measured.
+        # A background VM has no use for sound. Only this launch's command line changes, not
+        # the profile.
+        profile = {**profile, "gpu_mode": "host" if IS_WINDOWS else "swiftshader_indirect", "audio": "none"}
     args = [
         str(emulator_exe), "-avd", avd_name,
         *emulator_profiles.build_emulator_args(profile, IS_WINDOWS, kvm_present=Path("/dev/kvm").exists()),
@@ -414,6 +438,8 @@ def _launch_once(
     deadline = time.time() + AVD_BOOT_TIMEOUT
     while time.time() < deadline:
         if is_avd_running(avd_name):
+            if headless and not _stays_up(process):
+                return None
             return process.pid
         if process.poll() is not None:
             print(f"[start] emulator.exe exited early (code {process.returncode}) before the AVD came up.")
