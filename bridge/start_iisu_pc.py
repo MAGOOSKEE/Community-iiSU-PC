@@ -69,7 +69,7 @@ from portable_sdk import (
     patch_config_ini,
     set_quickboot_autosave,
 )
-from shared import app_version
+from shared import adb_client, app_version
 from shared.platform_compat import IS_WINDOWS, detached_popen_kwargs, new_console_creationflags, subprocess_creationflags
 from shared.stage_timer import StageTimer
 from shared.vm_backend import BACKEND_WAYDROID, resolve_backend, supports_headless_boot, vm_device_connected
@@ -238,9 +238,9 @@ def is_avd_running(avd_name: str) -> bool:
     """Whether the Android VM is up and adb can see it. The name is kept
     (and unused) from when this only ever meant an AVD: a running AVD shows
     up as "emulator-5554\tdevice", Waydroid as "<ip>:5555\tdevice", and
-    vm_device_connected() accepts both."""
-    result = subprocess.run(["adb", "devices"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
-    return vm_device_connected(result.stdout)
+    vm_device_connected() accepts both. Asks the adb server over its socket
+    (see shared/adb_client.py), which is cheap enough to call twice a second."""
+    return vm_device_connected(adb_client.devices_text())
 
 
 def find_system_emulator_exe() -> Path | None:
@@ -452,7 +452,7 @@ def _launch_once(
                 for line in tail:
                     print(f"    {line}")
             return None
-        time.sleep(2)
+        time.sleep(0.5)
     print(
         f"[start] {avd_name} did not report ready within {AVD_BOOT_TIMEOUT}s. If your PC doesn't have "
         "hardware virtualization enabled (Hyper-V/Windows Hypervisor Platform, or in your BIOS/UEFI), "

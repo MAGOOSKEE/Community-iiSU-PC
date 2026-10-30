@@ -86,7 +86,7 @@ from hotkey_keys import MODIFIER_FLAGS, MODIFIER_VK, resolve_vk
 # subprocess with cwd set to this directory, not the project root.
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from bridge.ui import boot_overlay_qt as boot_overlay
-from shared import app_version
+from shared import adb_client, app_version
 from shared.platform_compat import IS_WINDOWS, detached_popen_kwargs, new_console_creationflags, open_uri, subprocess_creationflags
 from shared.vm_backend import BACKEND_WAYDROID, resolve_backend, vm_device_connected
 from winapi import (
@@ -261,43 +261,23 @@ def _adb_media_volume_get() -> int | None:
     """Read Android's MUSIC stream volume (stream 3) without showing a
     console. Tries the current `cmd media_session volume` API first,
     falling back to the older `media volume` command some system image
-    versions still need."""
-    try:
-        result = subprocess.run(
-            ["adb", "shell", "cmd", "media_session", "volume", "--stream", "3", "--get"],
-            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
-            creationflags=subprocess_creationflags(), timeout=3,
-        )
-        if result.returncode != 0:
-            result = subprocess.run(
-                ["adb", "shell", "media", "volume", "--stream", "3", "--get"],
-                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True,
-                creationflags=subprocess_creationflags(), timeout=3,
-            )
-    except (OSError, subprocess.SubprocessError):
-        return None
+    versions still need. Both run in one device shell command."""
+    _status, output = adb_client.shell(
+        "cmd media_session volume --stream 3 --get 2>/dev/null || media volume --stream 3 --get 2>/dev/null", timeout=5,
+    )
     # Typical Android output: "volume is 7 in range [0..15]"
-    match = re.search(r"volume\s+is\s+(\d+)", result.stdout, re.IGNORECASE)
+    match = re.search(r"volume\s+is\s+(\d+)", output, re.IGNORECASE)
     return int(match.group(1)) if match else None
 
 
 def _adb_media_volume_set(volume: int) -> bool:
-    try:
-        result = subprocess.run(
-            ["adb", "shell", "cmd", "media_session", "volume", "--stream", "3", "--set", str(max(0, volume))],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            creationflags=subprocess_creationflags(), timeout=3,
-        )
-        if result.returncode == 0:
-            return True
-        result = subprocess.run(
-            ["adb", "shell", "media", "volume", "--stream", "3", "--set", str(max(0, volume))],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            creationflags=subprocess_creationflags(), timeout=3,
-        )
-        return result.returncode == 0
-    except (OSError, subprocess.SubprocessError):
-        return False
+    level = max(0, volume)
+    status, _output = adb_client.shell(
+        f"cmd media_session volume --stream 3 --set {level} >/dev/null 2>&1 "
+        f"|| media volume --stream 3 --set {level} >/dev/null 2>&1",
+        timeout=5,
+    )
+    return status == 0
 
 
 def begin_game_handoff() -> None:
@@ -381,44 +361,67 @@ def launch_iisu(config: dict) -> None:
     project's own redirector stubs, and can lag well behind bootanim once
     more of them are installed, confirmed live on an earlier run
     (iiSU sitting on the stock home screen for 1-2 minutes with
-    boot_completed still unset). Retries every second after that since
-    `am start` can still fail with a transient "does not exist" error for
-    a moment even once the system looks interactive, package manager
-    can still be resolving components (confirmed via `dumpsys package`:
-    the activity is genuinely registered, `am start` just tried too
-    early)."""
+    boot_completed still unset). Retries after that since `am start` can
+    still fail with a transient "does not exist" error for a moment even
+    once the system looks interactive, package manager can still be
+    resolving components (confirmed via `dumpsys package`: the activity is
+    genuinely registered, `am start` just tried too early).
+
+    Both waits run on the device in one shell command (_LAUNCH_IISU_SCRIPT),
+    checking every 0.2 seconds, instead of one adb command line per check
+    from here: no 26 ms process start per check, and iiSU starts within a
+    fifth of a second of Android accepting it rather than up to a second
+    later. The device prints a marker after each stage, timed here as it
+    arrives."""
+    started = time.monotonic()
+    component = config.get("iisu_component", DEFAULT_IISU_COMPONENT)
     # Waydroid has already waited for sys.boot_completed in
     # waydroid_backend.start() and has no boot animation to watch for.
-    started = time.monotonic()
-    deadline = started + (0 if _is_waydroid(config) else BOOTANIM_WAIT_SECONDS)
-    while time.monotonic() < deadline:
-        result = subprocess.run(
-            ["adb", "shell", "getprop", "init.svc.bootanim"], capture_output=True, text=True,
-            creationflags=subprocess_creationflags(),
+    bootanim_wait = 0 if _is_waydroid(config) else BOOTANIM_WAIT_SECONDS
+    script = _LAUNCH_IISU_SCRIPT.format(
+        bootanim_wait=bootanim_wait, start_wait=IISU_START_WAIT_SECONDS, component=adb_client.quote(component),
+    )
+    boot_wait = None
+    attempt = None
+    status = None
+    output = []
+    for line in adb_client.shell_lines(script, timeout=bootanim_wait + IISU_START_WAIT_SECONDS + 30):
+        code = adb_client.exit_status(line)
+        if code is not None:
+            status = code
+        elif line == "bootanim_done":
+            boot_wait = time.monotonic() - started
+        elif line.startswith("started_attempt="):
+            attempt = line.split("=", 1)[1]
+        else:
+            output.append(line)
+    if status == 0:
+        print(
+            f"[bridge] iiSU started {time.monotonic() - started:.1f}s after asking "
+            f"(boot animation wait {boot_wait or 0:.1f}s, am start attempt {attempt})"
         )
-        if result.stdout.strip() == "stopped":
-            break
-        time.sleep(1)
-    boot_wait = time.monotonic() - started
-
-    component = config.get("iisu_component", DEFAULT_IISU_COMPONENT)
-    result = None
-    for attempt in range(1, 61):
-        result = subprocess.run(
-            ["adb", "shell", "am", "start", "-n", component], capture_output=True, text=True,
-            creationflags=subprocess_creationflags(),
-        )
-        if result.returncode == 0 and "Error" not in result.stdout:
-            print(
-                f"[bridge] iiSU started {time.monotonic() - started:.1f}s after asking "
-                f"(boot animation wait {boot_wait:.1f}s, am start attempt {attempt})"
-            )
-            set_volume_max()
-            return
-        time.sleep(1)
+        set_volume_max()
+        return
     print(f"[bridge] could not launch iiSU ({component}):")
-    if result is not None:
-        print(f"    {result.stdout.strip()}\n    {result.stderr.strip()}")
+    print("    " + ("\n    ".join(output[-5:]) or "no answer from adb"))
+
+
+# Waits on the device for the boot animation to end (up to {bootanim_wait}s),
+# then retries `am start` until Android accepts it (up to {start_wait}s),
+# checking every 0.2 seconds. Prints bootanim_done, then started_attempt=N
+# and exits 0 on success; exits 1 with am start's last output otherwise.
+_LAUNCH_IISU_SCRIPT = (
+    "end=$(( $(date +%s) + {bootanim_wait} )); "
+    "while [ \"$(getprop init.svc.bootanim)\" != stopped ] && [ $(date +%s) -lt $end ]; do sleep 0.2; done; "
+    "echo bootanim_done; "
+    "end=$(( $(date +%s) + {start_wait} )); n=0; out=; "
+    "while [ $(date +%s) -lt $end ]; do "
+    "n=$((n+1)); out=$(am start -n {component} 2>&1); "
+    "case \"$out\" in *Error*) sleep 0.2;; *) echo started_attempt=$n; exit 0;; esac; "
+    "done; "
+    "echo \"$out\"; exit 1"
+)
+IISU_START_WAIT_SECONDS = 60
 
 
 def set_volume_max() -> None:
@@ -430,10 +433,7 @@ def set_volume_max() -> None:
     AOSP vs OEM MAX_VOLUME differences, so this doesn't need to know the
     exact volume index, one `adb shell input keyevent` call with the
     keycode repeated is enough, no need for 20 separate subprocess calls."""
-    subprocess.run(
-        ["adb", "shell", "input", "keyevent"] + ["24"] * 20, capture_output=True, text=True,
-        creationflags=subprocess_creationflags(),
-    )
+    adb_client.shell("input keyevent " + " ".join(["24"] * 20), timeout=15)
 
 
 def show_iisu_window(config: dict) -> None:
@@ -1490,20 +1490,33 @@ def main() -> None:
     def _watch_avd_lifetime() -> None:
         """Self-terminates the bridge once the AVD it's serving is gone
         (closed some other way than Stop, e.g. a crash), rather than
-        lingering as an orphaned process nobody can Start again over."""
+        lingering as an orphaned process nobody can Start again over.
+
+        Listens to the adb server's device change stream instead of asking
+        every 2 seconds. A change that drops the VM is re-checked a few
+        seconds later before shutting down, since the stream also reports a
+        momentary "offline" that polling would mostly have missed. If the
+        stream breaks, falls back to asking every 2 seconds, without ever
+        starting an adb server Stop has just ended."""
         time.sleep(2)
-        while True:
-            time.sleep(2)
-            try:
-                result = subprocess.run(
-                    ["adb", "devices"], capture_output=True, text=True, timeout=3,
-                    creationflags=subprocess_creationflags(),
-                )
-                if not vm_device_connected(result.stdout):
-                    debug_log("AVD is no longer running; shutting down bridge")
-                    os._exit(0)
-            except (OSError, subprocess.SubprocessError):
-                pass
+
+        def vm_gone() -> bool:
+            if vm_device_connected(adb_client.devices_text(start=False)):
+                return False
+            time.sleep(3)
+            return not vm_device_connected(adb_client.devices_text(start=False))
+
+        try:
+            for listing in adb_client.track_devices():
+                if not vm_device_connected(listing) and vm_gone():
+                    break
+            else:
+                raise adb_client.AdbError("the device stream ended")
+        except (OSError, adb_client.AdbError):
+            while not vm_gone():
+                time.sleep(2)
+        debug_log("AVD is no longer running; shutting down bridge")
+        os._exit(0)
 
     threading.Thread(target=_watch_avd_lifetime, daemon=True).start()
 

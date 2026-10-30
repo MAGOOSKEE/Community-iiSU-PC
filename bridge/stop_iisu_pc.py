@@ -45,7 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from portable_sdk import PORTABLE_AVD_HOME
-from shared import app_version
+from shared import adb_client, app_version
 from shared.platform_compat import IS_WINDOWS, subprocess_creationflags
 from shared.vm_backend import BACKEND_WAYDROID, resolve_backend, vm_device_connected
 
@@ -80,8 +80,7 @@ def load_avd_name(state: dict) -> str | None:
 
 
 def is_avd_running() -> bool:
-    result = subprocess.run(["adb", "devices"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
-    return vm_device_connected(result.stdout)
+    return vm_device_connected(adb_client.devices_text())
 
 
 def load_config_safely() -> dict:
@@ -213,7 +212,7 @@ def main() -> None:
         subprocess.run(["adb", "emu", "kill"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
         deadline = time.time() + GRACEFUL_STOP_TIMEOUT
         while time.time() < deadline and is_avd_running():
-            time.sleep(1)
+            time.sleep(0.25)
         if is_avd_running():
             print(f"[stop] the AVD was still running after {GRACEFUL_STOP_TIMEOUT}s, killing it...")
         else:

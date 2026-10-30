@@ -56,6 +56,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import portable_sdk  # noqa: F401; imported for its import-time PATH fix (adb), not used directly here
 from console_names import load_console_lookup, resolve_console_shortname
+from shared import adb_client
 from shared.platform_compat import subprocess_creationflags
 
 CONFIG_PATH = Path(__file__).parent / "config.json"
@@ -303,13 +304,15 @@ def wait_for_external_storage(timeout: float = 60.0) -> bool:
     AVD_ROMS_ROOT with "No such file or directory" since /sdcard itself
     isn't there yet; an already-running AVD (the common case, this runs
     on every start, not just the first) has always been up long enough
-    for this to return immediately."""
-    deadline = time.time() + timeout
-    while time.time() < deadline:
-        if adb("shell", "test -d /sdcard", check=False).returncode == 0:
-            return True
-        time.sleep(2)
-    return False
+    for this to return immediately. The wait runs on the device, checking
+    every 0.2 seconds, in one adb call."""
+    status, _output = adb_client.shell(
+        f"end=$(( $(date +%s) + {int(timeout)} )); "
+        "while [ ! -d /sdcard ] && [ $(date +%s) -lt $end ]; do sleep 0.2; done; "
+        "[ -d /sdcard ]",
+        timeout=timeout + 15,
+    )
+    return status == 0
 
 
 def build_placeholder_tar(consoles: dict[str, list[tuple[str, int, int]]], current_fingerprint: str) -> Path:
