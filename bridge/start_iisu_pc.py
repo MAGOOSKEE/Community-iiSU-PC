@@ -70,7 +70,7 @@ from portable_sdk import (
     patch_config_ini,
     set_quickboot_autosave,
 )
-from shared import adb_client, app_version
+from shared import adb_client, app_version, iisu_install_record
 from shared.platform_compat import IS_WINDOWS, detached_popen_kwargs, new_console_creationflags, subprocess_creationflags
 from shared.stage_timer import StageTimer
 from shared.vm_backend import BACKEND_WAYDROID, resolve_backend, supports_headless_boot, vm_device_connected
@@ -607,6 +607,14 @@ def sync_rom_library() -> None:
         print(f"[start] ROM library sync failed ({e}), continuing anyway")
 
 
+def open_manager() -> None:
+    """Opens the Manager on its own, for a start that can't go ahead without
+    it (the desktop shortcut runs this script directly)."""
+    subprocess.Popen(
+        [sys.executable, "-m", "bridge.ui.app"], cwd=str(Path(__file__).resolve().parent.parent), **detached_popen_kwargs()
+    )
+
+
 def main(headless: bool = False) -> None:
     """headless=True boots the Android VM without its window and starts neither
     the boot overlay (nothing to cover) nor the launch bridge, for running it
@@ -631,6 +639,13 @@ def main(headless: bool = False) -> None:
         updater.check_for_updates()
     else:
         print("[updater] automatic Community-iiSU-PC updates are disabled")
+    if iisu_install_record.needs_repatch(iisu_install_record.load()):
+        print(
+            "[start] This update of Community-iiSU-PC changed the patch it applies to iiSU, so iiSU "
+            "has to be repatched before it can start. Opening the Manager, which walks you through it."
+        )
+        open_manager()
+        sys.exit(1)
     avd_name = config["avd_name"]
     port = config["bridge_port"]
     debug_console = config.get("debug_show_console_windows", False)

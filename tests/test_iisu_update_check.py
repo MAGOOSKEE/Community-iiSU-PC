@@ -31,7 +31,11 @@ class RecordTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "record.json"
             iisu_install_record.save("iiSU-Alpha-7.4.apk", "0.1.6.1", path)
-            self.assertEqual(iisu_install_record.load(path), {"apk_name": "iiSU-Alpha-7.4.apk", "version_name": "0.1.6.1"})
+            self.assertEqual(
+                iisu_install_record.load(path),
+                {"apk_name": "iiSU-Alpha-7.4.apk", "version_name": "0.1.6.1",
+                 "patch_version": iisu_install_record.PATCH_VERSION},
+            )
 
     def test_missing_or_broken_is_none(self):
         with tempfile.TemporaryDirectory() as tmp:

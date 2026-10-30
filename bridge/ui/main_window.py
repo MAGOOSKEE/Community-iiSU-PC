@@ -186,6 +186,8 @@ class ManagerWindow(QMainWindow):
 
         self._startup_update_signals = None
         QTimer.singleShot(500, self._run_startup_update_check)
+        self._repatch_wizard = None
+        QTimer.singleShot(700, self._prompt_repatch_if_needed)
 
     # == Style / icon ==
 
@@ -498,6 +500,36 @@ class ManagerWindow(QMainWindow):
         elif self.save_status_label.text() == "Stop Community-iiSU-PC to change settings":
             self.save_status_label.setText("")
             self.save_status_label.setStyleSheet(f"color: {GREEN};")
+
+    # == Required iiSU repatch ==
+
+    def needs_repatch(self) -> bool:
+        """Whether a project update changed the patch since iiSU was last
+        patched, in which case iiSU isn't started until it's repatched."""
+        from shared import iisu_install_record
+
+        return self.configured and iisu_install_record.needs_repatch(iisu_install_record.load())
+
+    def _vm_running(self) -> bool:
+        if self.last_avd_up or self.last_bridge_up:
+            return True
+        # Home's status poll may not have run yet, right after launch.
+        from shared import adb_client
+        from shared.vm_backend import vm_device_connected
+
+        return vm_device_connected(adb_client.devices_text())
+
+    def open_repatch_wizard(self) -> None:
+        from bridge.ui.dialogs.repatch_wizard import RepatchWizard
+
+        # Kept on the window: its GitHub lookup may answer after it's closed.
+        self._repatch_wizard = RepatchWizard(self._vm_running, parent=self)
+        self._repatch_wizard.exec()
+        self.home_page.refresh_primary_button()
+
+    def _prompt_repatch_if_needed(self) -> None:
+        if self.needs_repatch():
+            self.open_repatch_wizard()
 
     # == Startup update check ==
 

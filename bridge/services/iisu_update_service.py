@@ -160,6 +160,19 @@ def check_for_iisu_update() -> IisuUpdateCheck:
     )
 
 
+def find_recorded_apk(record: dict | None, folders: list[Path] | None = None) -> Path | None:
+    """The APK iiSU was last installed from, when it's still in installer/input/
+    or Downloads, where Setup's APK usually comes from. Only the file name is
+    recorded, so anywhere else it has to be picked by hand."""
+    if not record:
+        return None
+    for folder in folders or [PROJECT_ROOT / "installer" / "input", Path.home() / "Downloads"]:
+        candidate = folder / record["apk_name"]
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def _download(url: str, dest: Path) -> None:
     req = urllib.request.Request(url, headers={"User-Agent": "Community-iiSU-PC"})
     with urllib.request.urlopen(req, timeout=120) as resp, open(dest, "wb") as f:
