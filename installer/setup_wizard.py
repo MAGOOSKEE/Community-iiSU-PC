@@ -562,6 +562,11 @@ def boot_avd_and_install(
                 # emulator still runs and responds to adb identically
                 # headless; only the visible window is skipped.
                 [str(emulator_exe), "-avd", avd_name, "-no-snapshot", "-no-window"]
+                # Without a window, -gpu auto renders in software on Windows, and that
+                # emulator crashes about 13 seconds after Android boots (see the headless
+                # note in start_iisu_pc.py). Seen here too: an iiSU update lost the VM
+                # one redirector app into installing them. The host GPU doesn't crash.
+                + (["-gpu", "host"] if IS_WINDOWS else [])
                 + (["-accel", "on"] if not IS_WINDOWS and Path("/dev/kvm").exists() else []),
                 **detached_popen_kwargs(),
                 stdin=subprocess.DEVNULL,
