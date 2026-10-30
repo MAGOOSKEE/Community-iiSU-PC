@@ -152,6 +152,25 @@ class ManagerWindowSmokeTests(unittest.TestCase):
         combo.setCurrentIndex(combo.findText("2560 x 1440"))
         self.assertEqual((page.width_edit.text(), page.height_edit.text()), ("2560", "1440"))
 
+    def test_the_next_start_line_stays_short_when_many_things_changed(self):
+        import bridge.ui.pages.home as home
+
+        self.config_path.write_text(json.dumps(self.config), encoding="utf-8")
+        window = self._window()
+        label = window.home_page.resume_reason_label
+        many = ["the display settings changed", "the ROM library changed", "the emulator profile changed"]
+        with unittest.mock.patch.object(home.start_iisu_pc, "describe_boot_fingerprint_diff", return_value=many):
+            window.home_page.refresh_resume_reason()
+        self.assertEqual(label.text(), "Next start: cold boot (3 things changed)")
+        self.assertEqual(label.toolTip().splitlines(), many)
+        with unittest.mock.patch.object(home.start_iisu_pc, "describe_boot_fingerprint_diff", return_value=many[:1]):
+            window.home_page.refresh_resume_reason()
+        self.assertEqual(label.text(), "Next start: cold boot (the display settings changed)")
+        self.assertEqual(label.toolTip(), "")
+        with unittest.mock.patch.object(home.start_iisu_pc, "describe_boot_fingerprint_diff", return_value=[]):
+            window.home_page.refresh_resume_reason()
+        self.assertEqual(label.text(), "Next start: quick resume")
+
     def test_credits_avatars_load_on_first_visit_only(self):
         import bridge.ui.pages.credits as credits
 

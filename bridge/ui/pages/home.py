@@ -150,6 +150,8 @@ class HomePage(PageBase):
 
         self.resume_reason_label = QLabel("")
         self.resume_reason_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self.resume_reason_label.setWordWrap(True)
+        self.resume_reason_label.setMaximumWidth(520)
         self.resume_reason_label.setStyleSheet(f"color: {TEXT_DIM};")
         center_layout.addWidget(self.resume_reason_label)
 
@@ -234,10 +236,15 @@ class HomePage(PageBase):
         new_parts = start_iisu_pc.compute_boot_fingerprint_parts(self.window.config_data)
         old_parts = start_iisu_pc.load_saved_boot_fingerprint_parts()
         reasons = start_iisu_pc.describe_boot_fingerprint_diff(old_parts, new_parts)
-        if reasons:
-            self.resume_reason_label.setText(f"Next start: cold boot ({', '.join(reasons)})")
+        if not reasons:
+            text, tooltip = "Next start: quick resume", ""
+        elif len(reasons) == 1:
+            text, tooltip = f"Next start: cold boot ({reasons[0]})", ""
         else:
-            self.resume_reason_label.setText("Next start: quick resume")
+            # The full list runs off the page, so it goes in the tooltip.
+            text, tooltip = f"Next start: cold boot ({len(reasons)} things changed)", "\n".join(reasons)
+        self.resume_reason_label.setText(text)
+        self.resume_reason_label.setToolTip(tooltip)
 
     def _clear_resume_state(self) -> None:
         reply = QMessageBox.question(
