@@ -85,6 +85,23 @@ class LaunchIisuTests(unittest.TestCase):
         self.assertIn("+ 0 ))", scripts[0][0])
 
 
+class QuitTapTests(unittest.TestCase):
+    def test_quitting_a_subprocess_emulator_is_logged_and_terminates_it(self):
+        proc = SimpleNamespace(pid=4321, poll=lambda: None, terminated=False)
+        proc.terminate = lambda: setattr(proc, "terminated", True)
+        with patch.object(launch_bridge, "current_process", proc), \
+             patch.object(launch_bridge, "current_native_window", None), \
+             patch.object(launch_bridge, "current_native_pid", None), \
+             patch.object(launch_bridge, "game_handoff_active", False), \
+             patch.object(launch_bridge, "log_launch") as log, \
+             patch.object(launch_bridge, "shutdown_everything") as shutdown, \
+             patch("builtins.print"):
+            launch_bridge.quit_tap_action("escape")
+        self.assertTrue(proc.terminated)
+        shutdown.assert_not_called()
+        log.assert_called_once_with("QUIT: escape, terminating emulator PID 4321")
+
+
 class MediaVolumeTests(unittest.TestCase):
     def test_reads_the_volume_from_androids_answer(self):
         with patch.object(launch_bridge.adb_client, "shell", return_value=(0, "volume is 7 in range [0..15]")):

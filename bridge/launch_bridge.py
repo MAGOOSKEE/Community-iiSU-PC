@@ -664,6 +664,7 @@ def quit_tap_action(label: str = "quit") -> None:
         # No native HWND/PID has been established, so this is still a
         # normal subprocess-backed emulator/game launch.
         print(f"[bridge] {label}, terminating emulator")
+        log_launch(f"QUIT: {label}, terminating emulator PID {proc.pid}")
         proc.terminate()
     elif handoff_active:
         # Steam may still be between URI invocation and creation of the

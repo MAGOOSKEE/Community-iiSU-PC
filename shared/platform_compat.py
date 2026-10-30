@@ -69,6 +69,22 @@ def detached_popen_kwargs() -> dict:
     return {"start_new_session": True}
 
 
+def gui_python(executable: str | None = None) -> str:
+    """The interpreter a shortcut should start: pythonw.exe on Windows, which
+    has no console window. Setup run from a command prompt runs under
+    python.exe, and a shortcut pointing at that opened a console window
+    beside iiSU on every start. Falls back to the given interpreter when
+    there is no pythonw.exe next to it, and on Linux, which has no such split."""
+    from pathlib import Path
+
+    exe = Path(executable or sys.executable)
+    if IS_WINDOWS and exe.name.lower() == "python.exe":
+        windowed = exe.with_name("pythonw.exe")
+        if windowed.is_file():
+            return str(windowed)
+    return str(exe)
+
+
 def new_console_creationflags() -> int:
     """creationflags for spawning a *visible* new console window (the
     "Show console windows" debug option). Windows-only concept:
