@@ -33,7 +33,7 @@ setup_wizard.ensure_pyside6()
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
+    QCheckBox, QComboBox, QDialog, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
     QListWidget, QMainWindow, QMessageBox, QProgressBar, QPushButton, QStackedWidget,
     QTreeWidget, QTreeWidgetItem, QVBoxLayout, QWidget,
 )
@@ -47,13 +47,12 @@ from shared.emulator_defaults import all_emulator_exe_names, describe_profile
 from bridge.ui.dialogs.emulator_dialog import EmulatorDialog
 from bridge.ui.dialogs.emulator_download_dialog import EmulatorDownloadDialog
 from bridge.ui.widgets.card import Card
+from bridge.ui.pages.settings.display import REFRESH_RATE_PRESETS, RESOLUTION_PRESETS
 from bridge.ui.widgets.display_preview import DisplayPreview
 from bridge.ui.widgets.gradient_divider import GradientDivider
 from bridge.ui.workers.task_runner import run_in_background
 from shared.qt_theme import GREEN, GRADIENT_STOPS, RED, SPACING_LG, SPACING_MD, SPACING_SM, Fonts, apply_theme
 
-RESOLUTION_PRESETS = ["1280 x 720", "1600 x 900", "1920 x 1080", "2560 x 1440", "3840 x 2160"]
-REFRESH_RATE_PRESETS = ["60", "90", "120", "144", "165", "240"]
 MODIFIER_NAMES = ["ctrl", "alt", "shift", "win"]
 
 STEP_TITLES = ["Welcome", "ROM Directory", "Emulator Folders", "Emulator Mappings", "Display", "Hotkeys", "Finish"]
@@ -551,73 +550,67 @@ class DisplayStep(QWidget):
         heading.setFont(Fonts.heading())
         layout.addWidget(heading)
 
-        subtitle = QLabel("iiSU defaults to a portrait phone screen. This switches it to a desktop-shaped\ndisplay, pre-filled from your primary monitor.")
+        subtitle = QLabel(
+            "Pre-filled from your primary monitor. It only affects iiSU's own UI, games run at "
+            "your monitor's real resolution."
+        )
+        subtitle.setWordWrap(True)
         subtitle.setProperty("role", "dim")
         layout.addWidget(subtitle)
 
+        # Laid out like the Manager's Display page (bridge/ui/pages/settings/display.py):
+        # one resolution row and one editable refresh rate box, not a preset menu
+        # beside every field.
         columns = QHBoxLayout()
-        left = QVBoxLayout()
-        right = QVBoxLayout()
+        settings_col = QVBoxLayout()
+        grid = QGridLayout()
 
-        preset_row = QHBoxLayout()
-        preset_row.addWidget(QLabel("Resolution:"))
+        grid.addWidget(QLabel("Resolution:"), 0, 0)
+        resolution_row = QHBoxLayout()
         self.resolution_combo = QComboBox()
         self.resolution_combo.addItems(RESOLUTION_PRESETS)
         self.resolution_combo.setCurrentIndex(-1)
         self.resolution_combo.currentTextChanged.connect(self._apply_resolution_preset)
-        preset_row.addWidget(self.resolution_combo)
-        preset_row.addStretch()
-        left.addLayout(preset_row)
-
-        exact_row = QHBoxLayout()
-        exact_row.addWidget(QLabel("or exactly:"))
+        resolution_row.addWidget(self.resolution_combo)
         self.width_edit = QLineEdit(str(display.get("width", 1920)))
         self.width_edit.setFixedWidth(60)
-        exact_row.addWidget(self.width_edit)
-        exact_row.addWidget(QLabel("x"))
+        resolution_row.addWidget(self.width_edit)
+        resolution_row.addWidget(QLabel("x"))
         self.height_edit = QLineEdit(str(display.get("height", 1080)))
         self.height_edit.setFixedWidth(60)
-        exact_row.addWidget(self.height_edit)
-        exact_row.addStretch()
-        left.addLayout(exact_row)
+        resolution_row.addWidget(self.height_edit)
+        resolution_row.addStretch(1)
+        grid.addLayout(resolution_row, 0, 1)
 
-        refresh_row = QHBoxLayout()
-        refresh_row.addWidget(QLabel("Refresh rate:"))
-        self.refresh_edit = QLineEdit(str(display.get("refresh_rate", 60)))
-        self.refresh_edit.setFixedWidth(50)
-        refresh_row.addWidget(self.refresh_edit)
+        grid.addWidget(QLabel("Refresh rate (Hz):"), 1, 0)
         refresh_combo = QComboBox()
+        refresh_combo.setEditable(True)
+        refresh_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         refresh_combo.addItems(REFRESH_RATE_PRESETS)
-        refresh_combo.setCurrentIndex(-1)
-        refresh_combo.currentTextChanged.connect(lambda text: self.refresh_edit.setText(text) if text else None)
-        refresh_row.addWidget(refresh_combo)
-        refresh_row.addWidget(QLabel("Hz"))
-        refresh_row.addStretch()
-        left.addLayout(refresh_row)
+        refresh_combo.setFixedWidth(90)
+        self.refresh_edit = refresh_combo.lineEdit()
+        self.refresh_edit.setText(str(display.get("refresh_rate", 60)))
+        grid.addWidget(refresh_combo, 1, 1, Qt.AlignmentFlag.AlignLeft)
 
-        redetect_button = QPushButton("Re-detect from primary monitor")
+        settings_col.addLayout(grid)
+        redetect_button = QPushButton("Auto-detect from primary monitor")
+        redetect_button.setObjectName("ghost")
         redetect_button.clicked.connect(lambda: self._autodetect(silent=False))
-        left.addWidget(redetect_button, alignment=Qt.AlignmentFlag.AlignLeft)
-        left.addStretch()
+        settings_col.addWidget(redetect_button, alignment=Qt.AlignmentFlag.AlignLeft)
+        settings_col.addStretch(1)
 
-        right.addWidget(QLabel("Preview"))
-        self.preview = DisplayPreview(box_width=160, box_height=100)
-        right.addWidget(self.preview)
-        right.addStretch()
+        preview_col = QVBoxLayout()
+        preview_col.addWidget(QLabel("Aspect ratio preview"))
+        self.preview = DisplayPreview(box_width=150, box_height=110)
+        preview_col.addWidget(self.preview)
+        preview_col.addStretch(1)
 
-        columns.addLayout(left)
-        columns.addSpacing(SPACING_LG + 4)
-        columns.addLayout(right)
+        columns.addLayout(settings_col, 1)
+        columns.addLayout(preview_col)
         layout.addLayout(columns)
 
         self.fullscreen_check = QCheckBox("Maximize the iiSU/AVD window automatically")
         layout.addWidget(self.fullscreen_check)
-        note = QLabel(
-            "Only affects iiSU's own UI inside the VM. Games run in a native emulator\n"
-            "window at your monitor's real resolution."
-        )
-        note.setProperty("role", "dim")
-        layout.addWidget(note)
         layout.addStretch()
 
         self.width_edit.textChanged.connect(self._redraw_preview)
@@ -642,7 +635,17 @@ class DisplayStep(QWidget):
         self.height_edit.setText(str(height))
         self.refresh_edit.setText(str(hz))
 
+    def _sync_resolution_preset(self) -> None:
+        """Shows the preset that matches the typed width and height, or none."""
+        text = f"{self.width_edit.text().strip()} x {self.height_edit.text().strip()}"
+        index = self.resolution_combo.findText(text)
+        if index != self.resolution_combo.currentIndex():
+            self.resolution_combo.blockSignals(True)
+            self.resolution_combo.setCurrentIndex(index)
+            self.resolution_combo.blockSignals(False)
+
     def _redraw_preview(self, *_args) -> None:
+        self._sync_resolution_preset()
         try:
             width, height = int(self.width_edit.text()), int(self.height_edit.text())
         except ValueError:
