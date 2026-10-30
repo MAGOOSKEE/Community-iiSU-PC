@@ -183,7 +183,7 @@ Maintainer-only, not needed to run or develop the project day to day: `installer
 - `installer/patch_iisu.py`'s patch is anchored on specific log strings in iiSU's code. If iiSU updates and changes them, the patch fails loudly instead of silently producing a broken build. The Media Library's MediaBridge hooks find iiSU's obfuscated helper classes by method signature at patch time; if that fails the patch still completes with a warning and media is installed without re-indexing.
 - `bridge/emulator.log`, `bridge/bridge.log`, `bridge/stop.log` and `bridge/setup.log` cover the AVD, the launch bridge, shutdown and Setup respectively. Setup's log keeps what it printed even if the window is closed partway. Open the Manager's Home page (Logs button) to check them.
 - Re-running setup is safe: it skips anything already done and won't overwrite an existing `config.json`'s settings.
-- Community-iiSU-PC uses a quick resume when nothing relevant has changed since the last start, and only cold-boots (a bit slower) when your settings or ROM library have changed since then, or on the very first start.
+- Community-iiSU-PC uses a quick resume when nothing relevant has changed since the last start, and only cold-boots (a bit slower) when something that changes the VM itself has changed since then (display, VM profile, USB passthrough, the AVD, or switching between a normal and a headless start), or on the very first start. Adding ROMs or changing PC emulator mappings doesn't need a cold boot: the ROM library is synced into the VM on every start either way, and iiSU's "Rescan full library" picks new games up.
 
 ### A leaner Android VM
 

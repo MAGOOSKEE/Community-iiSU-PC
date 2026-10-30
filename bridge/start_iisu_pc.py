@@ -28,9 +28,9 @@ Android Studio install, see portable_sdk.py for why.
 Smart resume: a quickboot snapshot is only trusted (skip -no-snapshot,
 let the AVD resume) when nothing that would make it stale has changed
 since it was captured, see compute_boot_fingerprint(). Anything that
-changes the hardware profile, the emulator/controller mapping, or the
-ROM library forces a fresh cold boot instead, and the resulting state is
-what gets snapshotted for the *next* start to potentially resume from.
+changes the virtual hardware or how the VM is launched forces a fresh cold
+boot instead, and the resulting state is what gets snapshotted for the
+*next* start to potentially resume from.
 A cold boot costs maybe 30-60s more than a resume; that's the cost paid
 only when something has actually changed, rather than on every start.
 """
@@ -108,33 +108,10 @@ def save_state(state: dict) -> None:
         json.dump(state, f)
 
 
-def _roms_signature(roms_dir: Path) -> str:
-    """A directory-mtime signature of the ROM library, not a full per-file
-    stat: adding or removing an entry updates its parent directory's own
-    mtime, so walking directories only (never opening or stat-ing
-    individual ROM files) still catches "a change in the ROMs folder" at
-    a cost proportional to folder count instead of file count, the
-    difference between this running instantly and it meaningfully
-    delaying every single start on a large library."""
-    if not roms_dir.is_dir():
-        return "missing"
-    h = hashlib.sha256()
-    try:
-        for dirpath, dirnames, _filenames in os.walk(roms_dir):
-            dirnames.sort()
-            rel = os.path.relpath(dirpath, roms_dir)
-            h.update(f"{rel}|{os.stat(dirpath).st_mtime}\n".encode("utf-8"))
-    except OSError:
-        return "unreadable"
-    return h.hexdigest()
-
-
 FINGERPRINT_PART_LABELS = {
     "avd_name": "the AVD name",
     "display": "the display settings",
-    "emulators": "the emulator mappings",
     "usb_passthrough": "the USB passthrough list",
-    "roms_dir": "the ROM library",
     "emulator_profile": "the emulator profile",
     "vm_backend": "the Android runtime",
     "boot_mode": "the boot mode (window or headless)",
@@ -155,13 +132,18 @@ def compute_boot_fingerprint_parts(config: dict, headless: bool = False) -> dict
     something did. Anything else in config.json (window position, debug
     flags, auto-update settings...) doesn't affect what's actually running
     inside the VM, so it's deliberately left out; otherwise an unrelated
-    settings change would force a needless cold boot."""
+    settings change would force a needless cold boot.
+
+    The PC emulator mappings and the ROM library are left out too. The
+    mappings are only read on the PC side, per launch. The ROM placeholders
+    are synced into the running VM on every start, after a resume as well as
+    a cold boot, and the snapshot's disk only changes through that sync, so
+    it can't go stale against it; iiSU needs its own "Rescan full library"
+    to notice new games either way. Both used to force a cold boot."""
     return {
         "avd_name": str(config.get("avd_name", "")),
         "display": hashlib.sha256(json.dumps(config.get("display", {}), sort_keys=True).encode("utf-8")).hexdigest(),
-        "emulators": hashlib.sha256(json.dumps(config.get("emulators", {}), sort_keys=True).encode("utf-8")).hexdigest(),
         "usb_passthrough": hashlib.sha256(json.dumps(config.get("usb_passthrough", []), sort_keys=True).encode("utf-8")).hexdigest(),
-        "roms_dir": _roms_signature(Path(config.get("roms_dir", ""))),
         "emulator_profile": emulator_profiles.fingerprint(emulator_profiles.active_profile(config)),
         "vm_backend": resolve_backend(config),
         "boot_mode": BOOT_MODE_HEADLESS if headless else BOOT_MODE_WINDOWED,

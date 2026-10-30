@@ -272,7 +272,7 @@ def _adb_media_volume_get() -> int | None:
 
 def _adb_media_volume_set(volume: int) -> bool:
     """Set Android's MUSIC stream volume. `cmd audio set-volume` goes first:
-    on Android 16 `cmd media_session volume --set` reports success but only
+    on Android 16 media_session's volume set command reports success but only
     changes the volume of the "default" output device, not the speaker iiSU
     actually plays through (measured: the speaker stayed at 15), so iiSU's
     music kept playing during games. `cmd audio` answers with
