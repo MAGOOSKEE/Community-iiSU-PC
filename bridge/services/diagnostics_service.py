@@ -250,8 +250,19 @@ def check_for_updates_detailed() -> UpdateCheckResult:
             return UpdateCheckResult("Couldn't compare local and remote commits.", False)
         if local_sha == remote_sha:
             return UpdateCheckResult(f"Up to date on {branch}. Nothing was downloaded or installed.", False)
-        count = updater._run_git(["rev-list", "--count", f"HEAD..origin/{branch}"])
-        behind = count.stdout.strip() if count and count.returncode == 0 else "one or more"
+        position = updater.commits_ahead_behind(branch)
+        if position is not None and position[1] == 0:
+            return UpdateCheckResult(
+                f"Up to date on {branch}; this copy has {position[0]} commit(s) GitHub doesn't. Nothing was downloaded or installed.",
+                False,
+            )
+        if position is not None and position[0] > 0:
+            return UpdateCheckResult(
+                f"GitHub has {position[1]} new commit(s) on {branch}, but this copy also has {position[0]} of its own, "
+                "so Install Update can't fast-forward it. Update it with git instead. Nothing was downloaded or installed.",
+                False,
+            )
+        behind = str(position[1]) if position is not None else "one or more"
         log = updater._run_git(["log", "--format=- %s", "-n", "15", f"HEAD..origin/{branch}"])
         notes = log.stdout.strip() if log and log.returncode == 0 else ""
         return UpdateCheckResult(f"Update available: {behind} new commit(s) on {branch}.", True, notes)
