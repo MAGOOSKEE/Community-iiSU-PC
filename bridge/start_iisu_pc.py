@@ -25,8 +25,8 @@ It also always launches from the portable SDK/AVD copy under
 android-sdk-portable/ (see portable_sdk.py) rather than the system-wide
 Android Studio install, see portable_sdk.py for why.
 
-Smart resume: a quickboot snapshot is only trusted (skip -no-snapshot-load,
-let the AVD resume) when nothing that would make it stale has changed
+Smart resume: a quickboot snapshot is only trusted (kept, so the AVD
+resumes it) when nothing that would make it stale has changed
 since it was captured, see compute_boot_fingerprint(). Anything that
 changes the virtual hardware or how the VM is launched forces a fresh cold
 boot instead, and the resulting state is what gets snapshotted for the
@@ -66,6 +66,7 @@ from portable_sdk import (
     PORTABLE_SDK,
     clear_quickboot_snapshot,
     ensure_portable_sdk,
+    has_complete_quickboot_snapshot,
     patch_config_ini,
     set_quickboot_autosave,
 )
@@ -169,6 +170,23 @@ def describe_boot_fingerprint_diff(old_parts: dict[str, str] | None, new_parts: 
         for key in new_parts
         if old_parts.get(key, _LEGACY_PART_VALUES.get(key)) != new_parts[key]
     ]
+
+
+INCOMPLETE_SNAPSHOT_REASON = "the saved resume snapshot is incomplete"
+
+
+def cold_boot_reasons(config: dict, headless: bool = False, avd_name: str | None = None) -> list[str]:
+    """Why the next start must cold boot, empty when it can resume: the boot
+    fingerprint's changes, or a snapshot folder that a finished save would have
+    filled. Resuming from a partial one cold boots anyway and saves nothing,
+    while a deliberate cold boot deletes it first and saves a whole one."""
+    reasons = describe_boot_fingerprint_diff(
+        load_saved_boot_fingerprint_parts(), compute_boot_fingerprint_parts(config, headless)
+    )
+    avd_dir = PORTABLE_AVD_HOME / f"{avd_name or config.get('avd_name', 'iisuwin')}.avd"
+    if not reasons and not has_complete_quickboot_snapshot(avd_dir):
+        reasons = [INCOMPLETE_SNAPSHOT_REASON]
+    return reasons
 
 
 def boot_mode_changed(old_parts: dict[str, str] | None, new_parts: dict[str, str]) -> bool:
@@ -395,9 +413,9 @@ def _launch_once(
     (resolution) does. A changed profile does force one anyway, via the
     boot fingerprint, since the guest sees different hardware.
 
-    force_cold_boot decides whether -no-snapshot-load is passed at all, see
-    compute_boot_fingerprint() in start_avd()'s caller. When it's False,
-    the AVD attempts a quickboot resume instead of a full cold boot."""
+    force_cold_boot only adds a flag for a headless run (-no-snapshot). A
+    windowed cold boot looks like a resume here, start_avd() has already
+    deleted the snapshot it would have loaded."""
     # Profile flags include -accel on when KVM is present on Linux (same
     # reasoning as Setup's own first boot). -no-boot-anim/-fixed-scale are
     # kept Linux-only rather than changed for existing Windows installs too,
@@ -421,12 +439,11 @@ def _launch_once(
     if not IS_WINDOWS:
         args += ["-no-boot-anim", "-fixed-scale"]
     print(f"[start] emulator profile: {emulator_profiles.describe(profile)}")
-    if force_cold_boot:
-        # -no-snapshot also skips the save on exit, so the start after a cold boot found
-        # no snapshot and cold booted again. -no-snapshot-load cold boots and still saves,
-        # which is what lets the next start resume. A headless run never resumes (see
-        # _run_start_sequence), so it has nothing to save.
-        args.append("-no-snapshot" if headless else "-no-snapshot-load")
+    if force_cold_boot and headless:
+        # A headless run never resumes (see _run_start_sequence), so it neither loads
+        # nor saves. A windowed cold boot passes no flag: start_avd deletes the snapshot
+        # first, see there for why.
+        args.append("-no-snapshot")
     if headless:
         # No emulator window at all; adb, the bridge and iiSU itself run as usual.
         args.append("-no-window")
@@ -549,9 +566,16 @@ def start_avd(
         # is what actually decides whether a saved snapshot gets trusted
         # later, this just makes sure one exists for it to trust.
         set_quickboot_autosave(avd_dir, enabled=True)
+        # A windowed cold boot deletes the snapshot and then launches like any quick
+        # boot: with nothing to load it boots from scratch, and it saves on exit. Both
+        # -no-snapshot-load and fastboot.forceColdBoot=yes cold boot too, but save
+        # nothing unless a complete snapshot was already there (measured: Stop left
+        # only ram.img), so every start after them cold booted again.
+        if effective_cold_boot and not headless:
+            clear_quickboot_snapshot(avd_dir)
         patch_config_ini(
             avd_dir / "config.ini",
-            force_cold_boot=effective_cold_boot,
+            force_cold_boot=effective_cold_boot and headless,
             extra_overrides=emulator_profiles.config_ini_overrides(profile),
         )
         pid = _launch_once(emulator_exe, avd_name, env, usb_passthrough, debug_console, profile, effective_cold_boot, headless)
@@ -662,7 +686,7 @@ def _run_start_sequence(
     else:
         new_parts = compute_boot_fingerprint_parts(config, headless)
         old_parts = load_saved_boot_fingerprint_parts()
-        reasons = describe_boot_fingerprint_diff(old_parts, new_parts)
+        reasons = cold_boot_reasons(config, headless, avd_name)
         # A headless run never uses quick resume: a snapshot taken with a window
         # failed to load windowless (and a headless run can't save one), so a later
         # windowed resume would bring back the state from before it, losing whatever

@@ -667,6 +667,21 @@ def boot_avd_and_install(
         time.sleep(1)
     if process is not None and process.poll() is None:
         process.terminate()
+    if process is not None:
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=30)
+    forget_resume_state(avd_name)
+
+
+def forget_resume_state(avd_name: str) -> None:
+    """This boot changed the VM's disk (a new iiSU, the lean trim), so a snapshot
+    from before it would resume a memory state that no longer matches that disk.
+    Dropping the snapshot and the boot fingerprint makes the next start cold boot
+    and save a fresh one. A re-run Setup used to leave both behind."""
+    import portable_sdk
+
+    portable_sdk.clear_quickboot_snapshot(portable_sdk.PORTABLE_AVD_HOME / f"{avd_name}.avd")
+    (BRIDGE_DIR / ".boot_fingerprint.json").unlink(missing_ok=True)
 
 
 def boot_waydroid_and_install(patched_apk: Path) -> None:

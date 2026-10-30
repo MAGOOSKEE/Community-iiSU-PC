@@ -16,6 +16,7 @@ from unittest.mock import patch
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "bridge"))
 
+import portable_sdk  # noqa: E402; path set up above
 import start_iisu_pc  # noqa: E402; path set up above
 
 
@@ -116,16 +117,37 @@ class QuickbootAutosaveRegressionTests(unittest.TestCase):
     trusted later; autosave being off would mean there's never one to
     trust in the first place."""
 
-    def _run_start_avd(self, force_cold_boot: bool):
+    def _run_start_avd(self, force_cold_boot: bool, headless: bool = False):
+        # clear_quickboot_snapshot is patched: unpatched it would delete this
+        # machine's real snapshot under PORTABLE_AVD_HOME.
         with patch.object(start_iisu_pc, "find_system_emulator_exe", return_value=Path("C:/fake/emulator.exe")), \
              patch.object(start_iisu_pc, "ensure_portable_sdk", return_value={"ANDROID_SDK_ROOT": "C:/fake/sdk"}), \
              patch.object(start_iisu_pc, "clear_stale_locks"), \
-             patch.object(start_iisu_pc, "patch_config_ini"), \
+             patch.object(start_iisu_pc, "patch_config_ini") as config_ini, \
+             patch.object(start_iisu_pc, "clear_quickboot_snapshot") as cleared, \
              patch.object(start_iisu_pc, "set_quickboot_autosave") as mock_autosave, \
              patch.object(start_iisu_pc, "_launch_once", return_value=12345):
-            pid = start_iisu_pc.start_avd("iisuwin", [], force_cold_boot=force_cold_boot)
+            pid = start_iisu_pc.start_avd("iisuwin", [], force_cold_boot=force_cold_boot, headless=headless)
             self.assertEqual(pid, 12345)
+            self.config_ini, self.cleared = config_ini, cleared
             return mock_autosave
+
+    def test_a_windowed_cold_boot_deletes_the_snapshot_and_boots_like_a_quick_boot(self):
+        # -no-snapshot-load and forceColdBoot=yes save nothing on exit without an
+        # existing complete snapshot, so the start after them cold booted again.
+        self._run_start_avd(force_cold_boot=True)
+        self.cleared.assert_called_once()
+        self.assertIs(self.config_ini.call_args.kwargs["force_cold_boot"], False)
+
+    def test_a_resume_keeps_the_snapshot(self):
+        self._run_start_avd(force_cold_boot=False)
+        self.cleared.assert_not_called()
+        self.assertIs(self.config_ini.call_args.kwargs["force_cold_boot"], False)
+
+    def test_a_headless_cold_boot_keeps_forcing_it_in_the_config(self):
+        self._run_start_avd(force_cold_boot=True, headless=True)
+        self.cleared.assert_not_called()
+        self.assertIs(self.config_ini.call_args.kwargs["force_cold_boot"], True)
 
     def test_autosave_enabled_after_a_cold_boot(self):
         mock_autosave = self._run_start_avd(force_cold_boot=True)
@@ -193,7 +215,8 @@ class HeadlessSnapshotTests(unittest.TestCase):
         self.avd_home = Path(self._tmp.name)
         self.snapshot = self.avd_home / "iisuwin.avd" / "snapshots" / "default_boot"
         self.snapshot.mkdir(parents=True)
-        (self.snapshot / "ram.bin").write_bytes(b"x")
+        for name in portable_sdk.QUICKBOOT_SNAPSHOT_FILES:
+            (self.snapshot / name).write_bytes(b"x")
 
     def _start(self, headless: bool, previous_mode: str | None):
         """previous_mode is the boot mode the saved fingerprint records, None for no saved fingerprint."""
@@ -236,6 +259,16 @@ class HeadlessSnapshotTests(unittest.TestCase):
         save.assert_called_once()
         self.assertEqual(save.call_args.args[1]["boot_mode"], "headless")
         self.assertIs(fingerprint.call_args.args[1], True)
+
+    def test_an_incomplete_snapshot_is_cold_booted_so_a_whole_one_gets_saved(self):
+        # What a save that never happened leaves behind: resuming it cold boots
+        # without saving, so every later start cold booted too.
+        for name in ("hardware.ini", "ram.bin"):
+            (self.snapshot / name).unlink()
+        with patch("builtins.print") as printed:
+            start_avd, _, _ = self._start(headless=False, previous_mode="windowed")
+        self.assertIs(start_avd.call_args.kwargs["force_cold_boot"], True)
+        self.assertTrue(any(start_iisu_pc.INCOMPLETE_SNAPSHOT_REASON in str(call) for call in printed.call_args_list))
 
     def test_a_normal_start_after_a_normal_start_still_resumes_and_keeps_the_snapshot(self):
         start_avd, save, _ = self._start(headless=False, previous_mode="windowed")
@@ -399,10 +432,11 @@ class HeadlessLaunchTests(unittest.TestCase):
             start_iisu_pc._launch_once(Path("emulator.exe"), "iisuwin", {}, [], False, profile, force_cold_boot, headless)
             return popen.call_args.args[0]
 
-    def test_a_windowed_cold_boot_still_saves_a_snapshot_for_the_next_start(self):
+    def test_a_windowed_cold_boot_passes_no_snapshot_flag(self):
+        # Every -no-snapshot* flag stops the save on exit; start_avd deletes the
+        # snapshot instead, so the launch itself is a plain quick boot.
         args = self._emulator_args(headless=False, force_cold_boot=True)
-        self.assertIn("-no-snapshot-load", args)
-        self.assertNotIn("-no-snapshot", args, "-no-snapshot also skips the save on exit")
+        self.assertFalse([arg for arg in args if arg.startswith("-no-snapshot")])
 
     def test_a_resume_passes_no_snapshot_flag(self):
         args = self._emulator_args(headless=False, force_cold_boot=False)
@@ -446,6 +480,7 @@ class HeadlessLaunchTests(unittest.TestCase):
              patch.object(start_iisu_pc, "ensure_portable_sdk", return_value={"ANDROID_SDK_ROOT": "C:/fake/sdk"}), \
              patch.object(start_iisu_pc, "clear_stale_locks"), \
              patch.object(start_iisu_pc, "patch_config_ini"), \
+             patch.object(start_iisu_pc, "clear_quickboot_snapshot"), \
              patch.object(start_iisu_pc, "set_quickboot_autosave"), \
              patch.object(start_iisu_pc, "_launch_once", return_value=1) as launch:
             start_iisu_pc.start_avd("iisuwin", [], headless=True)

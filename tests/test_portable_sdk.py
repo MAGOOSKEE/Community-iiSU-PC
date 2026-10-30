@@ -38,6 +38,18 @@ class ClearQuickbootSnapshotTests(unittest.TestCase):
         self.assertFalse(portable_sdk.clear_quickboot_snapshot(self.avd))
         self.assertFalse(portable_sdk.clear_quickboot_snapshot(self.avd / "missing.avd"))
 
+    def test_a_snapshot_is_complete_only_with_every_file_a_save_writes(self):
+        snapshot = self.avd / "snapshots" / "default_boot"
+        self.assertFalse(portable_sdk.has_complete_quickboot_snapshot(self.avd))
+        snapshot.mkdir(parents=True)
+        # What the spare install was left with after a save that never happened.
+        (snapshot / "snapshot.pb").write_bytes(b"x")
+        (snapshot / "ram.img").write_bytes(b"x")
+        self.assertFalse(portable_sdk.has_complete_quickboot_snapshot(self.avd))
+        for name in portable_sdk.QUICKBOOT_SNAPSHOT_FILES:
+            (snapshot / name).write_bytes(b"x")
+        self.assertTrue(portable_sdk.has_complete_quickboot_snapshot(self.avd))
+
 
 class QuickbootAutosaveTests(unittest.TestCase):
     def test_writes_the_switch_both_ways(self):
