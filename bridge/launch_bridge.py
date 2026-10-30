@@ -389,7 +389,8 @@ def launch_iisu(config: dict) -> None:
     early)."""
     # Waydroid has already waited for sys.boot_completed in
     # waydroid_backend.start() and has no boot animation to watch for.
-    deadline = time.monotonic() + (0 if _is_waydroid(config) else BOOTANIM_WAIT_SECONDS)
+    started = time.monotonic()
+    deadline = started + (0 if _is_waydroid(config) else BOOTANIM_WAIT_SECONDS)
     while time.monotonic() < deadline:
         result = subprocess.run(
             ["adb", "shell", "getprop", "init.svc.bootanim"], capture_output=True, text=True,
@@ -398,15 +399,20 @@ def launch_iisu(config: dict) -> None:
         if result.stdout.strip() == "stopped":
             break
         time.sleep(1)
+    boot_wait = time.monotonic() - started
 
     component = config.get("iisu_component", DEFAULT_IISU_COMPONENT)
     result = None
-    for _ in range(60):
+    for attempt in range(1, 61):
         result = subprocess.run(
             ["adb", "shell", "am", "start", "-n", component], capture_output=True, text=True,
             creationflags=subprocess_creationflags(),
         )
         if result.returncode == 0 and "Error" not in result.stdout:
+            print(
+                f"[bridge] iiSU started {time.monotonic() - started:.1f}s after asking "
+                f"(boot animation wait {boot_wait:.1f}s, am start attempt {attempt})"
+            )
             set_volume_max()
             return
         time.sleep(1)
@@ -457,17 +463,19 @@ def show_iisu_window(config: dict) -> None:
         hide_emulator_toolbar()
 
 
-def bring_emulator_to_foreground(pid: int) -> None:
+def bring_emulator_to_foreground(pid: int) -> bool:
     """Poll for the new process's main window (it takes a moment to appear
-    after Popen returns) and force it to the foreground once found."""
+    after Popen returns) and force it to the foreground once found. Returns
+    whether the window was found."""
     hwnd = wait_for_window_by_pid(pid)
     if hwnd is None:
         print("[bridge] could not locate emulator window to focus")
-        return
+        return False
     force_foreground(hwnd)
     # Give the window a moment to finish becoming active before clicking it.
     time.sleep(0.3)
     nudge_focus_with_click(hwnd)
+    return True
 
 
 def wait_and_restore_iisu(process: subprocess.Popen, config: dict, emulator_name: str) -> None:
@@ -1184,6 +1192,7 @@ def launch_steam_game(app_id: str, config: dict) -> None:
 
 
 def handle_request(raw_intent: str) -> None:
+    request_started = time.monotonic()
     print(f"[bridge] received: {raw_intent}")
 
     # Reloaded fresh per request (not once at startup) so edits made in
@@ -1353,7 +1362,8 @@ def handle_request(raw_intent: str) -> None:
             daemon=True,
         ).start()
 
-        bring_emulator_to_foreground(process.pid)
+        if bring_emulator_to_foreground(process.pid):
+            log_launch(f"ON SCREEN: {friendly_emulator_name(executable)} {time.monotonic() - request_started:.1f}s after iiSU asked")
     finally:
         boot_overlay.close(overlay)
 
@@ -1441,6 +1451,7 @@ def recover_from_request_exception(config: dict) -> None:
 
 
 def main() -> None:
+    bridge_started = time.monotonic()
     # Install bridge-specific crash logging only when this module is actually
     # running the bridge. The Manager imports helpers from launch_bridge and
     # must retain its own sys/threading exception hooks.
@@ -1526,7 +1537,7 @@ def main() -> None:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind((HOST, config["bridge_port"]))
         server.listen(5)
-        print(f"[bridge] listening on {HOST}:{config['bridge_port']}")
+        print(f"[bridge] listening on {HOST}:{config['bridge_port']}, {time.monotonic() - bridge_started:.1f}s after the bridge started")
         while True:
             conn, addr = server.accept()
             with conn:

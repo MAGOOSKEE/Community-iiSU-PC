@@ -148,7 +148,7 @@ class HeadlessWithWaydroidTests(unittest.TestCase):
              patch.object(start_iisu_pc, "_run_start_sequence") as sequence, \
              patch.object(start_iisu_pc.boot_overlay, "close"):
             start_iisu_pc.main(headless=True)
-        self.assertIs(sequence.call_args.args[-1], False)
+        self.assertIs(sequence.call_args.args[5], False, "the headless argument")
 
 
 class HeadlessSnapshotTests(unittest.TestCase):
@@ -212,6 +212,16 @@ class HeadlessSnapshotTests(unittest.TestCase):
         self.assertTrue(self.snapshot.exists())
         save.assert_called_once()
         self.assertEqual(save.call_args.args[1]["boot_mode"], "windowed")
+
+    def test_the_log_ends_with_how_long_each_stage_took(self):
+        with patch("builtins.print") as printed:
+            self._start(headless=True, previous_mode="headless")
+        lines = [call.args[0] for call in printed.call_args_list]
+        took = next(line for line in lines if line.startswith("[start] Took "))
+        self.assertIn("Android VM", took)
+        self.assertIn("ROM library", took)
+        self.assertTrue(lines[-1].startswith("[start] Ready in "))
+        self.assertTrue(any(" is up (headless, no window) after " in line for line in lines))
 
     def test_a_first_ever_windowed_start_does_not_touch_the_snapshot(self):
         start_avd, _, _ = self._start(headless=False, previous_mode=None)
