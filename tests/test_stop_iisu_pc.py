@@ -10,6 +10,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -132,18 +133,90 @@ class KillCommandTests(unittest.TestCase):
             stop.kill_tree(1234)
         self.assertEqual(run.call_args.args[0], ["taskkill", "/PID", "1234", "/T", "/F"])
 
-    def test_the_command_line_sweep_on_windows_matches_by_command_line(self):
+    def test_the_command_line_sweep_on_windows_matches_the_path_literally_and_ignoring_case(self):
         with patch.object(stop, "IS_WINDOWS", True), patch.object(stop.subprocess, "run") as run:
-            stop.kill_by_cmdline_match("launch_bridge.py")
+            stop.kill_by_cmdline_match(r"D:\Games\It's Mine\bridge\launch_bridge.py")
         command = run.call_args.args[0]
         self.assertEqual(command[0], "powershell")
-        self.assertIn("-like '*launch_bridge.py*'", command[-1])
+        self.assertIn(r".ToLowerInvariant().Contains('d:\games\it''s mine\bridge\launch_bridge.py')", command[-1])
+        self.assertNotIn("-like", command[-1], "a literal match, so [ ] in a path aren't wildcards")
+        self.assertIn("$_.ProcessId -ne $PID", command[-1], "the path is in PowerShell's own command line")
         self.assertIn("Stop-Process", command[-1])
 
     def test_the_command_line_sweep_off_windows_uses_pkill(self):
         with patch.object(stop, "IS_WINDOWS", False), patch.object(stop.subprocess, "run") as run:
-            stop.kill_by_cmdline_match("launch_bridge.py")
-        self.assertEqual(run.call_args.args[0], ["pkill", "-f", "launch_bridge.py"])
+            stop.kill_by_cmdline_match("/opt/iisu/bridge/launch_bridge.py")
+        self.assertEqual(run.call_args.args[0], ["pkill", "-f", "/opt/iisu/bridge/launch_bridge.py"])
+
+    def test_the_sweeps_are_scoped_to_this_install(self):
+        self.assertTrue(stop.INSTALL_EMULATOR_NEEDLE.endswith(str(Path("android-sdk-portable") / "sdk")))
+        self.assertTrue(Path(stop.INSTALL_EMULATOR_NEEDLE).is_absolute())
+        self.assertEqual(Path(stop.INSTALL_BRIDGE_NEEDLE), (PROJECT_ROOT / "bridge" / "launch_bridge.py").resolve())
+
+    def test_counting_parses_the_powershell_answer(self):
+        with patch.object(stop, "IS_WINDOWS", True), \
+             patch.object(stop.subprocess, "run", return_value=SimpleNamespace(stdout="2\r\n")):
+            self.assertEqual(stop.count_processes_matching("x"), 2)
+        with patch.object(stop, "IS_WINDOWS", True), \
+             patch.object(stop.subprocess, "run", return_value=SimpleNamespace(stdout="")):
+            self.assertEqual(stop.count_processes_matching("x"), 0)
+
+
+class SnapshotSaveWaitTests(unittest.TestCase):
+    """Stop must let the emulator finish writing its quick-resume snapshot: killing
+    it a couple of seconds after adb loses the VM left a snapshot that couldn't be
+    loaded, so every start cold booted."""
+
+    def test_waits_until_the_emulator_has_exited(self):
+        counts = iter([2, 2, 2, 0])
+        needles = []
+
+        def count(needle):
+            needles.append(needle)
+            return next(counts)
+
+        with patch.object(stop, "count_processes_matching", side_effect=count), \
+             patch.object(stop.time, "sleep"):
+            self.assertIsNotNone(stop.wait_for_emulator_exit(timeout=60))
+        self.assertEqual(set(needles), {stop.INSTALL_QEMU_NEEDLE})
+
+    def test_the_wait_watches_qemu_not_helpers_that_outlive_it(self):
+        qemu = Path(stop.INSTALL_QEMU_NEEDLE)
+        self.assertEqual(qemu.parent.parent, Path(stop.INSTALL_EMULATOR_NEEDLE))
+        sdk = Path(stop.INSTALL_EMULATOR_NEEDLE)
+        lowered = stop.INSTALL_QEMU_NEEDLE.lower()
+        self.assertIn(lowered, str(sdk / "emulator" / "qemu" / "windows-x86_64" / "qemu-system-x86_64.exe").lower())
+        for helper in ("netsimd.exe", "crashpad_handler.exe", "emulator.exe"):
+            self.assertNotIn(lowered, str(sdk / "emulator" / helper).lower())
+
+    def test_gives_up_at_the_timeout(self):
+        clock = iter(range(0, 1000))
+        with patch.object(stop, "count_processes_matching", return_value=1), \
+             patch.object(stop.time, "monotonic", side_effect=lambda: next(clock)), \
+             patch.object(stop.time, "sleep"):
+            self.assertIsNone(stop.wait_for_emulator_exit(timeout=5))
+
+    def test_main_waits_for_the_save_before_any_sweep(self):
+        events = []
+        running = iter([True, True, False])
+        with patch.object(stop, "load_state", return_value={"avd_name": "iisuwin", "emulator_pid": 4242}), \
+             patch.object(stop, "load_config_safely", return_value={"vm_backend": "avd"}), \
+             patch.object(stop, "resolve_backend", return_value="avd"), \
+             patch.object(stop, "is_avd_running", side_effect=lambda: next(running, False)), \
+             patch.object(stop, "wait_for_emulator_exit", side_effect=lambda: events.append("wait") or 19.0), \
+             patch.object(stop, "kill_by_cmdline_match", side_effect=lambda needle: events.append(("sweep", needle))), \
+             patch.object(stop, "kill_tree", side_effect=lambda pid: events.append(("kill", pid))), \
+             patch.object(stop, "clear_stale_locks"), \
+             patch.object(stop.subprocess, "run"), \
+             patch.object(stop.time, "sleep"), \
+             patch.object(stop, "STATE_PATH", Path(tempfile.gettempdir()) / "no_state_here.json"), \
+             patch("builtins.print"):
+            stop.main()
+        self.assertEqual(events[0], "wait")
+        self.assertNotIn(("kill", 4242), events, "the emulator exited by itself, nothing to kill")
+        self.assertIn(("sweep", stop.INSTALL_EMULATOR_NEEDLE), events)
+        self.assertIn(("sweep", stop.INSTALL_BRIDGE_NEEDLE), events)
+        self.assertFalse(any(needle in ("android-sdk-portable", "launch_bridge.py") for _kind, needle in events[1:]))
 
 
 class StopWaydroidTests(unittest.TestCase):
