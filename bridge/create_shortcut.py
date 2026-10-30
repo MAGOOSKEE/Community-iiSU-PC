@@ -23,7 +23,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from shared.platform_compat import IS_WINDOWS
+from shared.platform_compat import IS_WINDOWS, gui_python
 
 BRIDGE_DIR = Path(__file__).parent
 PROJECT_ROOT = BRIDGE_DIR.parent
@@ -309,7 +309,7 @@ def create_desktop_shortcut(apk_path: Path | None = None) -> Path:
     script = (
         "$shell = New-Object -ComObject WScript.Shell\n"
         f"$shortcut = $shell.CreateShortcut('{shortcut_path}')\n"
-        f"$shortcut.TargetPath = '{sys.executable}'\n"
+        f"$shortcut.TargetPath = '{gui_python()}'\n"
         f"$shortcut.Arguments = '\"{START_SCRIPT}\"'\n"
         f"$shortcut.WorkingDirectory = '{BRIDGE_DIR}'\n"
         f"$shortcut.IconLocation = '{icon_path}'\n"

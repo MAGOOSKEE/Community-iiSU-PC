@@ -29,13 +29,12 @@ import os
 import shutil
 import struct
 import subprocess
-import sys
 import zlib
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 
-from shared.platform_compat import IS_WINDOWS, subprocess_creationflags
+from shared.platform_compat import IS_WINDOWS, gui_python, subprocess_creationflags
 from shared.steam_deck import STEAM_DECK_DISPLAY, is_gamescope_session, is_steam_deck  # noqa: F401; re-exported for callers
 
 # Binary VDF type tags.
@@ -257,7 +256,7 @@ def steam_is_running() -> bool:
 def launcher_entry(python_exe: str | None = None, start_script: Path = START_SCRIPT) -> dict:
     """The shortcut that starts Community-iiSU-PC the same way the desktop
     shortcut does."""
-    exe = python_exe or sys.executable
+    exe = python_exe or gui_python()
     return build_entry(
         SHORTCUT_NAME,
         exe=exe,
