@@ -158,6 +158,19 @@ INTENT_DAT_RE = re.compile(r"dat=(\S+)")
 GAMENATIVE_PACKAGE = "app.gamenative"
 WINDOWS_LAUNCH_PACKAGES = {"com.winlator.cmod", "com.winlator", "com.cmodded.winlator"}
 
+# The one byte answered to the patched iiSU after each launch (see
+# installer/smali_patch/LaunchBridge$1.smali). "A" hands the launch back to
+# Android unchanged; "P" means the PC took it.
+REPLY_LAUNCH_ON_ANDROID = b"A"
+REPLY_HANDLED_ON_PC = b"P"
+# The line a patched iiSU adds to every launch once it reads that answer. An
+# iiSU patched before then hangs up without reading it, so for that one the
+# bridge starts the Android app itself, and nobody has to re-patch.
+REPLY_CAPABLE_LINE = "BRIDGE_REPLY:1"
+INTENT_ACT_RE = re.compile(r"\bact=(\S+)")
+INTENT_CAT_RE = re.compile(r"\bcat=\[([^\]]*)\]")
+INTENT_FLG_RE = re.compile(r"\bflg=(0x[0-9a-fA-F]+)")
+
 # Set to the currently-running emulator Popen while a game is active, so the
 # quit hotkey listener (on its own thread) has something to terminate.
 current_process: subprocess.Popen | None = None
@@ -1200,6 +1213,82 @@ def launch_steam_game(app_id: str, config: dict) -> None:
         boot_overlay.close(overlay)
 
 
+def launch_package(raw_intent: str) -> str | None:
+    cmp_match = INTENT_CMP_RE.search(raw_intent)
+    return cmp_match.group(1).split("/")[0] if cmp_match else None
+
+
+def belongs_on_android(raw_intent: str, config: dict) -> bool:
+    """Whether a launch from iiSU is an Android app no PC program stands in
+    for, such as Chrome or the Play Store. iiSU sends those through the same
+    call as games, so the patch used to send them here, where they failed
+    with "no known PC emulator mapped" and could never be opened. Anything
+    this bridge would handle stays on the PC: a mapped emulator package,
+    Winlator for Windows apps, or GameNative for Steam."""
+    package = launch_package(raw_intent)
+    if package is None:
+        return True
+    if package in WINDOWS_LAUNCH_PACKAGES or package == GAMENATIVE_PACKAGE:
+        return False
+    return not any(package.startswith(prefix) for prefix in config.get("emulators", {}))
+
+
+def android_start_command(raw_intent: str) -> str | None:
+    """The `am start` that opens an app the way iiSU asked to: its component,
+    action, categories and flags, all of which Intent.toString() shows in
+    full. None when the launch names no component to start."""
+    cmp_match = INTENT_CMP_RE.search(raw_intent)
+    if not cmp_match:
+        return None
+    args = ["am", "start", "-n", cmp_match.group(1)]
+    if act := INTENT_ACT_RE.search(raw_intent):
+        args += ["-a", act.group(1)]
+    if cat := INTENT_CAT_RE.search(raw_intent):
+        for category in filter(None, (c.strip() for c in cat.group(1).split(","))):
+            args += ["-c", category]
+    if flg := INTENT_FLG_RE.search(raw_intent):
+        args += ["-f", flg.group(1)]
+    return " ".join(adb_client.quote(arg) for arg in args)
+
+
+def start_on_android(raw_intent: str) -> tuple[bool, str]:
+    """Opens an Android app for an iiSU patched before it could do that
+    itself. Returns whether it started, and what am said."""
+    command = android_start_command(raw_intent)
+    if command is None:
+        return False, "the launch names no app to start"
+    status, output = adb_client.shell(command, timeout=15)
+    return status == 0 and "Error" not in output, output.strip()
+
+
+def answer_launch(conn, raw_intent: str) -> bool:
+    """Decides, before any of the slower work in handle_request(), whether
+    this launch is an Android app, and gets it started there. A patched iiSU
+    that reads the answer starts it itself; for one patched before that, the
+    bridge starts it over adb. Returns True when the launch went to Android,
+    so there is nothing left to do here. A config that can't be read keeps the
+    launch here, where handle_request() reports why."""
+    try:
+        on_android = belongs_on_android(raw_intent, load_config())
+    except ConfigMissingError:
+        on_android = False
+    package = launch_package(raw_intent) or "a launch with no app named"
+    if REPLY_CAPABLE_LINE in raw_intent.splitlines():
+        try:
+            conn.sendall(REPLY_LAUNCH_ON_ANDROID if on_android else REPLY_HANDLED_ON_PC)
+        except OSError:
+            pass  # iiSU gave up waiting; a launch it sent is the PC's from here
+        if on_android:
+            log_launch(f"ANDROID: handed {package} back to Android")
+    elif on_android:
+        started, output = start_on_android(raw_intent)
+        if started:
+            log_launch(f"ANDROID: started {package} on Android for an older iiSU patch")
+        else:
+            log_launch(f"FAILED: couldn't start {package} on Android ({output})", notify=True)
+    return on_android
+
+
 def handle_request(raw_intent: str) -> None:
     request_started = time.monotonic()
     print(f"[bridge] received: {raw_intent}")
@@ -1571,6 +1660,8 @@ def main() -> None:
                     chunks.append(chunk)
                 payload = b"".join(chunks).decode("utf-8", errors="replace")
                 if payload:
+                    if answer_launch(conn, payload):
+                        continue
                     try:
                         handle_request(payload)
                     except Exception:

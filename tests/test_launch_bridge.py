@@ -85,6 +85,98 @@ class LaunchIisuTests(unittest.TestCase):
         self.assertIn("+ 0 ))", scripts[0][0])
 
 
+CHROME_INTENT = (
+    "Intent { act=android.intent.action.MAIN cat=[android.intent.category.LAUNCHER] flg=0x10000000 "
+    "cmp=com.android.chrome/com.google.android.apps.chrome.Main }"
+)
+GAME_INTENT = (
+    "Intent { act=android.intent.action.VIEW dat=content://x/y.chd flg=0x10000001 "
+    "cmp=com.github.stenzek.duckstation/.EmulationActivity }\nCLIPURI:content://x/y.chd"
+)
+
+
+class AndroidHandBackTests(unittest.TestCase):
+    CONFIG = {"emulators": {"com.github.stenzek.duckstation": {}, "com.retroarch": {}}}
+
+    def test_an_android_app_goes_back_to_android(self):
+        for intent in (CHROME_INTENT, CHROME_INTENT.replace("com.android.chrome/com.google.android.apps.chrome.Main",
+                                                            "com.android.vending/.AssetBrowserActivity")):
+            with self.subTest(intent=intent[-40:]):
+                self.assertTrue(launch_bridge.belongs_on_android(intent, self.CONFIG))
+
+    def test_what_the_pc_handles_stays_on_the_pc(self):
+        self.assertFalse(launch_bridge.belongs_on_android(GAME_INTENT, self.CONFIG))
+        retroarch = "Intent { act=android.intent.action.MAIN cmp=com.retroarch.aarch64/.Main }\nEXTRA:ROM=/x.n64"
+        self.assertFalse(launch_bridge.belongs_on_android(retroarch, self.CONFIG), "keys match as prefixes")
+        for package in ("com.winlator.cmod", "app.gamenative"):
+            with self.subTest(package=package):
+                self.assertFalse(launch_bridge.belongs_on_android(f"Intent {{ cmp={package}/.Main }}", self.CONFIG))
+
+    def test_an_intent_naming_no_app_is_for_android_to_resolve(self):
+        self.assertTrue(launch_bridge.belongs_on_android("Intent { act=android.intent.action.VIEW dat=https://x }", self.CONFIG))
+
+    CAPABLE = "\nBRIDGE_REPLY:1"
+
+    def _answer(self, intent, config=CONFIG, send_error=None, adb=(0, "Starting: Intent { ... }")):
+        conn = SimpleNamespace(sent=[])
+        conn.sendall = (lambda data: (_ for _ in ()).throw(send_error)) if send_error else conn.sent.append
+        loader = (lambda: (_ for _ in ()).throw(launch_bridge.ConfigMissingError())) if config is None else (lambda: config)
+        with patch.object(launch_bridge, "load_config", side_effect=loader), \
+             patch.object(launch_bridge.adb_client, "shell", return_value=adb) as shell, \
+             patch.object(launch_bridge, "log_launch") as log:
+            handed_back = launch_bridge.answer_launch(conn, intent)
+        self.shell = shell
+        return handed_back, conn.sent, log
+
+    def test_the_reply_comes_before_any_launch_work(self):
+        handed_back, sent, log = self._answer(CHROME_INTENT + self.CAPABLE)
+        self.assertTrue(handed_back)
+        self.assertEqual(sent, [b"A"])
+        log.assert_called_once_with("ANDROID: handed com.android.chrome back to Android")
+        self.shell.assert_not_called()
+        handed_back, sent, log = self._answer(GAME_INTENT + self.CAPABLE)
+        self.assertFalse(handed_back)
+        self.assertEqual(sent, [b"P"])
+        log.assert_not_called()
+
+    def test_an_unreadable_config_keeps_the_launch_here(self):
+        handed_back, sent, _ = self._answer(CHROME_INTENT + self.CAPABLE, config=None)
+        self.assertFalse(handed_back)
+        self.assertEqual(sent, [b"P"])
+
+    def test_iisu_giving_up_on_the_answer_is_fine(self):
+        handed_back, _, _ = self._answer(GAME_INTENT + self.CAPABLE, send_error=ConnectionResetError())
+        self.assertFalse(handed_back)
+
+    def test_for_an_older_patch_the_bridge_starts_the_app_itself(self):
+        # Patched before the answer existed: it never reads one, so without
+        # this its Android apps could only be fixed by re-patching iiSU.
+        handed_back, sent, log = self._answer(CHROME_INTENT)
+        self.assertTrue(handed_back)
+        self.assertEqual(sent, [], "nothing is sent to an iiSU that won't read it")
+        self.assertEqual(
+            self.shell.call_args.args[0],
+            "am start -n com.android.chrome/com.google.android.apps.chrome.Main "
+            "-a android.intent.action.MAIN -c android.intent.category.LAUNCHER -f 0x10000000",
+        )
+        log.assert_called_once_with("ANDROID: started com.android.chrome on Android for an older iiSU patch")
+
+    def test_an_older_patch_game_is_untouched_here(self):
+        handed_back, sent, _ = self._answer(GAME_INTENT)
+        self.assertFalse(handed_back)
+        self.assertEqual(sent, [])
+        self.shell.assert_not_called()
+
+    def test_a_failed_android_start_is_reported(self):
+        handed_back, _, log = self._answer(CHROME_INTENT, adb=(0, "Error: Activity class does not exist."))
+        self.assertTrue(handed_back)
+        self.assertIn("FAILED: couldn't start com.android.chrome on Android", log.call_args.args[0])
+
+    def test_the_start_command_is_quoted_for_the_device_shell(self):
+        command = launch_bridge.android_start_command("Intent { cmp=com.x/.Main;reboot }")
+        self.assertEqual(command, "am start -n 'com.x/.Main;reboot'")
+
+
 class QuitTapTests(unittest.TestCase):
     def test_quitting_a_subprocess_emulator_is_logged_and_terminates_it(self):
         proc = SimpleNamespace(pid=4321, poll=lambda: None, terminated=False)

@@ -6,14 +6,22 @@
 
 
 # instance fields
+.field final synthetic val$context:Landroid/content/Context;
+
 .field final synthetic val$intent:Landroid/content/Intent;
+
+.field final synthetic val$options:Landroid/os/Bundle;
 
 
 # direct methods
-.method constructor <init>(Landroid/content/Intent;)V
+.method constructor <init>(Landroid/content/Context;Landroid/content/Intent;Landroid/os/Bundle;)V
     .locals 0
 
-    iput-object p1, p0, Lcom/iisulauncher/pcbridge/LaunchBridge$1;->val$intent:Landroid/content/Intent;
+    iput-object p1, p0, Lcom/iisulauncher/pcbridge/LaunchBridge$1;->val$context:Landroid/content/Context;
+
+    iput-object p2, p0, Lcom/iisulauncher/pcbridge/LaunchBridge$1;->val$intent:Landroid/content/Intent;
+
+    iput-object p3, p0, Lcom/iisulauncher/pcbridge/LaunchBridge$1;->val$options:Landroid/os/Bundle;
 
     invoke-direct {p0}, Ljava/lang/Object;-><init>()V
 
@@ -23,7 +31,11 @@
 
 # virtual methods
 .method public run()V
-    .locals 7
+    .locals 8
+
+    # v7: whether the intent reached the PC bridge. Until it has, a failure
+    # (no bridge listening, as in a headless start) means Android launches it.
+    const/4 v7, 0x0
 
     :try_start_0
     iget-object v0, p0, Lcom/iisulauncher/pcbridge/LaunchBridge$1;->val$intent:Landroid/content/Intent;
@@ -136,7 +148,13 @@
     :cond_2
     goto :goto_1
 
+    # Tells the bridge this iiSU reads its answer (below). One patched before
+    # then doesn't, so the bridge starts that iiSU's Android apps itself.
     :cond_3
+    const-string v2, "\nBRIDGE_REPLY:1"
+
+    invoke-virtual {v1, v2}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
+
     invoke-virtual {v1}, Ljava/lang/StringBuilder;->toString()Ljava/lang/String;
 
     move-result-object v0
@@ -163,9 +181,40 @@
 
     invoke-virtual {v2}, Ljava/io/OutputStream;->flush()V
 
-    invoke-virtual {v2}, Ljava/io/OutputStream;->close()V
+    const/4 v7, 0x1
+
+    # Half-close, so the bridge sees the end of the intent, then read its one
+    # byte answer: "A" hands the launch back to Android. Anything else, or no
+    # answer at all from a bridge too old to send one, means the PC took it.
+    invoke-virtual {v1}, Ljava/net/Socket;->shutdownOutput()V
+
+    const/16 v3, 0x2710
+
+    invoke-virtual {v1, v3}, Ljava/net/Socket;->setSoTimeout(I)V
+
+    invoke-virtual {v1}, Ljava/net/Socket;->getInputStream()Ljava/io/InputStream;
+
+    move-result-object v2
+
+    invoke-virtual {v2}, Ljava/io/InputStream;->read()I
+
+    move-result v3
 
     invoke-virtual {v1}, Ljava/net/Socket;->close()V
+
+    const/16 v4, 0x41
+
+    if-ne v3, v4, :cond_4
+
+    iget-object v4, p0, Lcom/iisulauncher/pcbridge/LaunchBridge$1;->val$context:Landroid/content/Context;
+
+    iget-object v5, p0, Lcom/iisulauncher/pcbridge/LaunchBridge$1;->val$intent:Landroid/content/Intent;
+
+    iget-object v6, p0, Lcom/iisulauncher/pcbridge/LaunchBridge$1;->val$options:Landroid/os/Bundle;
+
+    invoke-static {v4, v5, v6}, Lcom/iisulauncher/pcbridge/LaunchBridge;->startOnAndroid(Landroid/content/Context;Landroid/content/Intent;Landroid/os/Bundle;)V
+
+    :cond_4
     :try_end_0
     .catch Ljava/lang/Throwable; {:try_start_0 .. :try_end_0} :catch_0
 
@@ -180,5 +229,18 @@
 
     invoke-static {v1, v2, v0}, Landroid/util/Log;->e(Ljava/lang/String;Ljava/lang/String;Ljava/lang/Throwable;)I
 
+    # Once the intent was sent the PC owns it, so a later failure never
+    # launches it a second time on Android.
+    if-nez v7, :cond_5
+
+    iget-object v1, p0, Lcom/iisulauncher/pcbridge/LaunchBridge$1;->val$context:Landroid/content/Context;
+
+    iget-object v2, p0, Lcom/iisulauncher/pcbridge/LaunchBridge$1;->val$intent:Landroid/content/Intent;
+
+    iget-object v3, p0, Lcom/iisulauncher/pcbridge/LaunchBridge$1;->val$options:Landroid/os/Bundle;
+
+    invoke-static {v1, v2, v3}, Lcom/iisulauncher/pcbridge/LaunchBridge;->startOnAndroid(Landroid/content/Context;Landroid/content/Intent;Landroid/os/Bundle;)V
+
+    :cond_5
     return-void
 .end method

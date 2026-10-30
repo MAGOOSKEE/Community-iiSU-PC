@@ -19,6 +19,47 @@ def _helper_smali(class_name: str, signatures=patch_iisu.ASSET_HELPER_METHODS) -
     return f".class public final L{class_name};\n.super Ljava/lang/Object;\n\n{body}"
 
 
+class RedirectStartActivityTests(unittest.TestCase):
+    """The coordinator's dispatch method, as iiSU 7.5-prerelease2 compiles it
+    (class ax2, method k()): one call passes an options Bundle, one doesn't."""
+
+    COORDINATOR = (
+        ".class public final Lax2;\n"
+        ".method public final k()V\n"
+        '    const-string v4, "GameLaunchCoordinator"\n'
+        "    if-eqz v0, :cond_5\n"
+        "    invoke-virtual {v1, p0, v0}, Landroid/content/Context;->startActivity(Landroid/content/Intent;Landroid/os/Bundle;)V\n"
+        "    return-void\n"
+        "    :cond_5\n"
+        "    invoke-virtual {v1, p0}, Landroid/content/Context;->startActivity(Landroid/content/Intent;)V\n"
+        "    return-void\n"
+        ".end method\n"
+    )
+
+    def test_the_options_bundle_goes_along_when_there_was_one(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "ax2.smali"
+            path.write_text(self.COORDINATOR, encoding="utf-8")
+            self.assertEqual(patch_iisu.patch_all_start_activity_calls(path), 2)
+            text = path.read_text(encoding="utf-8")
+        self.assertNotIn("->startActivity(", text)
+        self.assertIn(
+            "    invoke-static {v1, p0, v0}, Lcom/iisulauncher/pcbridge/LaunchBridge;->launch("
+            "Landroid/content/Context;Landroid/content/Intent;Landroid/os/Bundle;)V\n", text,
+        )
+        self.assertIn(
+            "    invoke-static {v1, p0}, Lcom/iisulauncher/pcbridge/LaunchBridge;->launch("
+            "Landroid/content/Context;Landroid/content/Intent;)V\n", text,
+        )
+
+    def test_both_launch_forms_exist_in_the_injected_class(self):
+        smali = (patch_iisu.SMALI_PATCH_DIR / "LaunchBridge.smali").read_text(encoding="utf-8")
+        for signature in ("launch(Landroid/content/Context;Landroid/content/Intent;)V",
+                          "launch(Landroid/content/Context;Landroid/content/Intent;Landroid/os/Bundle;)V"):
+            with self.subTest(signature=signature):
+                self.assertIn(f".method public static {signature}", smali)
+
+
 class FindAssetHelperTests(unittest.TestCase):
     def _tree(self, tmp: str, files: dict[str, str]) -> Path:
         root = Path(tmp)

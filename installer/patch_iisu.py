@@ -64,10 +64,28 @@ GAME_LAUNCH_COORDINATOR_LOG_TAG = "GameLaunchCoordinator"
 # longer needed is legal Dalvik bytecode) can pass them straight through
 # to startActivity without ever copying them into locals first.
 STARTACTIVITY_RE = re.compile(
-    r"^(\s*)invoke-virtual \{([vp]\d+), ([vp]\d+)(?:, [vp]\d+)?\}, "
+    r"^(\s*)invoke-virtual \{([vp]\d+), ([vp]\d+)(?:, ([vp]\d+))?\}, "
     r"Landroid/(?:content/Context|app/Activity);->startActivity\(Landroid/content/Intent;(?:Landroid/os/Bundle;)?\)V\s*$"
 )
 BRIDGE_PACKAGE_SMALI_DIR = "com/iisulauncher/pcbridge"
+LAUNCH_BRIDGE_CLASS = "Lcom/iisulauncher/pcbridge/LaunchBridge;"
+
+
+def redirect_start_activity(match: re.Match) -> str:
+    """The LaunchBridge.launch() call that replaces one startActivity call.
+    The options Bundle, when the original passed one, goes along too: the PC
+    bridge can hand a launch back (an Android app such as Chrome or the Play
+    Store), and LaunchBridge then makes the original call with it."""
+    indent, v_ctx, v_intent, v_options = match.groups()
+    if v_options is None:
+        return (
+            f"{indent}invoke-static {{{v_ctx}, {v_intent}}}, "
+            f"{LAUNCH_BRIDGE_CLASS}->launch(Landroid/content/Context;Landroid/content/Intent;)V\n"
+        )
+    return (
+        f"{indent}invoke-static {{{v_ctx}, {v_intent}, {v_options}}}, "
+        f"{LAUNCH_BRIDGE_CLASS}->launch(Landroid/content/Context;Landroid/content/Intent;Landroid/os/Bundle;)V\n"
+    )
 
 
 def run(args: list[str], **kwargs) -> subprocess.CompletedProcess:
@@ -162,11 +180,7 @@ def patch_main_activity(path: Path) -> int:
         match = STARTACTIVITY_RE.match(lines[i])
         if not match:
             continue
-        indent, v_ctx, v_intent = match.groups()
-        lines[i] = (
-            f"{indent}invoke-static {{{v_ctx}, {v_intent}}}, "
-            f"Lcom/iisulauncher/pcbridge/LaunchBridge;->launch(Landroid/content/Context;Landroid/content/Intent;)V\n"
-        )
+        lines[i] = redirect_start_activity(match)
         patched += 1
 
     if patched == 0:
@@ -223,11 +237,7 @@ def patch_all_start_activity_calls(path: Path) -> int:
         match = STARTACTIVITY_RE.match(line)
         if not match:
             continue
-        indent, v_ctx, v_intent = match.groups()
-        lines[i] = (
-            f"{indent}invoke-static {{{v_ctx}, {v_intent}}}, "
-            f"Lcom/iisulauncher/pcbridge/LaunchBridge;->launch(Landroid/content/Context;Landroid/content/Intent;)V\n"
-        )
+        lines[i] = redirect_start_activity(match)
         patched += 1
 
     if patched == 0:
