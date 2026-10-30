@@ -44,6 +44,16 @@ class ManifestXmlTests(unittest.TestCase):
         self.assertIn("&quot;quoted&quot;", xml)
         self.assertNotIn('com.iisupc.stub."quoted"', xml)
 
+    def test_the_stand_in_is_one_instance_kept_out_of_recents(self):
+        # The bridge's second start (the game ended) has to reach the open
+        # stand-in and close it, not stack another on top.
+        import xml.etree.ElementTree as ET
+
+        android = "{http://schemas.android.com/apk/res/android}"
+        activity = ET.fromstring(_manifest_xml("com.iisupc.stub.test", "Test")).find("application/activity")
+        self.assertEqual(activity.get(f"{android}launchMode"), "singleTask")
+        self.assertEqual(activity.get(f"{android}excludeFromRecents"), "true")
+
     def test_output_is_well_formed_xml(self):
         import xml.etree.ElementTree as ET
 

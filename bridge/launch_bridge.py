@@ -312,10 +312,44 @@ def begin_game_handoff() -> None:
     print("[bridge] iiSU input/audio suspended for PC game handoff")
 
 
+# The emulator's stand-in on Android (installer/stub_apk_template). iiSU's
+# launch is sent to the PC, so iiSU never leaves the screen and never gets the
+# return to the foreground that restores its music and interface after a game.
+# Opening the stand-in with HOLD covers iiSU the way a real Android emulator
+# would; opening it again without HOLD closes it, and iiSU comes back.
+STUB_ACTIVITY = "com.iisupc.stub.RedirectorActivity"
+STUB_HOLD_EXTRA = "com.iisupc.stub.HOLD"
+held_stub_package: str | None = None
+
+
+def hold_iisu_behind_stub(package: str | None) -> None:
+    """Covers iiSU with the launched package's stand-in for as long as the PC
+    game runs. A package with no stand-in (a real Android app, or a stub
+    installed before stand-ins held) answers with an error and is skipped."""
+    global held_stub_package
+    if not package:
+        return
+    component = adb_client.quote(f"{package}/{STUB_ACTIVITY}")
+    status, output = adb_client.shell(f"am start -n {component} --ez {STUB_HOLD_EXTRA} true", timeout=10)
+    if status == 0 and "Error" not in output:
+        held_stub_package = package
+    else:
+        debug_log(f"no stand-in to hold iiSU for {package}: {output.strip()}")
+
+
+def release_iisu_from_stub() -> None:
+    """Closes the stand-in, so Android returns to iiSU like a game exiting."""
+    global held_stub_package
+    package, held_stub_package = held_stub_package, None
+    if package:
+        adb_client.shell(f"am start -n {adb_client.quote(f'{package}/{STUB_ACTIVITY}')}", timeout=10)
+
+
 def end_game_handoff() -> None:
     """Restore iiSU controller navigation and its previous Android volume."""
     debug_log("end_game_handoff() entered")
     global game_handoff_active, saved_android_media_volume, pending_native_quit
+    release_iisu_from_stub()
     previous = saved_android_media_volume
     saved_android_media_volume = None
     if previous is not None:
@@ -1320,7 +1354,9 @@ def handle_request(raw_intent: str) -> None:
             app_name = Path(shortcut_path.replace("\\", "/")).stem
             print(f"[bridge] Windows app requested: {app_name}")
 
+            hold_iisu_behind_stub(package)
             if not launch_windows_app(app_name, config):
+                release_iisu_from_stub()
                 log_launch(
                     f"FAILED: Windows app '{app_name}' is not registered in windows_apps.json",
                     notify=True,
@@ -1361,6 +1397,7 @@ def handle_request(raw_intent: str) -> None:
             log_launch("FAILED: GameNative launch with no app_id extra, can't tell Steam what to run", notify=True)
             return
         log_launch(f"LAUNCHED: Steam app {app_id} via GameNative")
+        hold_iisu_behind_stub(package)
         launch_steam_game(app_id, config)
         return
 
@@ -1436,6 +1473,7 @@ def handle_request(raw_intent: str) -> None:
 
         print(f"[bridge] launching: {args}")
         log_launch(f"LAUNCHED: {friendly_emulator_name(executable)}, {args}")
+        hold_iisu_behind_stub(package)
         process = subprocess.Popen(
             args, cwd=str(executable.parent), env=game_overrides.launch_env(override) if override else None
         )

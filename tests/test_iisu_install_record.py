@@ -21,6 +21,8 @@ from shared import iisu_install_record as record  # noqa: E402; path set up abov
 # here; if not (a comment, say), replace the current version's hash.
 PATCH_HASHES = {
     2: "d54594b86ec6e4cae15330e2f4dafd0922b54c3f22fed14714710ea275c8ebc1",
+    # Same smali patch; version 3 changed the stand-in apps the repatch reinstalls.
+    3: "d54594b86ec6e4cae15330e2f4dafd0922b54c3f22fed14714710ea275c8ebc1",
 }
 
 
