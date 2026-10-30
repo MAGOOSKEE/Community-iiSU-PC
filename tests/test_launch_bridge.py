@@ -97,7 +97,10 @@ class MediaVolumeTests(unittest.TestCase):
     def test_setting_reports_success_and_never_goes_negative(self):
         with patch.object(launch_bridge.adb_client, "shell", return_value=(0, "")) as shell:
             self.assertTrue(launch_bridge._adb_media_volume_set(-3))
-        self.assertIn("--set 0 ", shell.call_args.args[0])
+        command = shell.call_args.args[0]
+        self.assertTrue(command.startswith('case "$(cmd audio set-volume 3 0 2>&1)"'), "cmd audio is tried first")
+        self.assertIn("*setStreamVolume*) exit 0", command)
+        self.assertIn("--set 0 ", command)
         with patch.object(launch_bridge.adb_client, "shell", return_value=(1, "")):
             self.assertFalse(launch_bridge._adb_media_volume_set(5))
 
