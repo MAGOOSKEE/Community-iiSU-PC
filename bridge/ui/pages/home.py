@@ -28,6 +28,7 @@ import start_iisu_pc
 import stop_iisu_pc
 from bridge.ui.pages.base import PageBase
 from bridge.ui.widgets.card import Card
+from bridge.ui.widgets.elided_label import ElidedLabel
 from bridge.ui.widgets.gradient_background import GradientBlobBackground
 from bridge.ui.widgets.status_dot import StatusDot
 from shared.platform_compat import open_uri
@@ -148,14 +149,14 @@ class HomePage(PageBase):
         self.progress.hide()
         center_layout.addWidget(self.progress, 0, Qt.AlignmentFlag.AlignHCenter)
 
-        self.resume_reason_label = QLabel("")
+        # One line each, cut short with the full text in the tooltip: a wrapped line
+        # here grew taller than the layout allowed for and drew over the button.
+        self.resume_reason_label = ElidedLabel(width=520)
         self.resume_reason_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        self.resume_reason_label.setWordWrap(True)
-        self.resume_reason_label.setMaximumWidth(520)
         self.resume_reason_label.setStyleSheet(f"color: {TEXT_DIM};")
-        center_layout.addWidget(self.resume_reason_label)
+        center_layout.addWidget(self.resume_reason_label, 0, Qt.AlignmentFlag.AlignHCenter)
 
-        self.stage_label = QLabel("")
+        self.stage_label = ElidedLabel(width=520)
         self.stage_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self.stage_label.setStyleSheet(f"color: {TEXT_DIM};")
         center_layout.addWidget(self.stage_label)
