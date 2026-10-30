@@ -152,6 +152,22 @@ class ManagerWindowSmokeTests(unittest.TestCase):
         combo.setCurrentIndex(combo.findText("2560 x 1440"))
         self.assertEqual((page.width_edit.text(), page.height_edit.text()), ("2560", "1440"))
 
+    def test_credits_avatars_load_on_first_visit_only(self):
+        import bridge.ui.pages.credits as credits
+
+        self.config_path.write_text(json.dumps(self.config), encoding="utf-8")
+        cache = Path(self._tmp.name) / "avatars"
+        with unittest.mock.patch.object(credits, "AVATAR_CACHE_DIR", cache), \
+             unittest.mock.patch.object(credits, "run_in_background") as background:
+            window = self._window()
+            background.assert_not_called()
+            page = window.pages["credits"]
+            page.on_shown()
+            fetched = [call.args[3] for call in background.call_args_list]
+            page.on_shown()
+        self.assertEqual(len(fetched), len(page._avatar_refs))
+        self.assertEqual(len(background.call_args_list), len(fetched), "a second visit fetches nothing")
+
     def test_the_avd_name_is_hidden_on_waydroid(self):
         import bridge.ui.pages.settings.advanced as advanced
 
