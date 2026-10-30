@@ -459,7 +459,9 @@ def patch_apk(
     keystore: Path,
     keystore_pass: str,
     key_alias: str,
-) -> None:
+) -> str | None:
+    """Patches source_apk into output_apk and returns iiSU's own versionName
+    from its manifest (None if it couldn't be read)."""
     decompiled_dir = work_dir / "decompiled"
     unsigned_apk = work_dir / "unsigned.apk"
     aligned_apk = work_dir / "aligned.apk"
@@ -471,8 +473,9 @@ def patch_apk(
     # alone says which build this was and which hooks were found.
     import patch_check
 
+    version_name = patch_check.read_version_name(decompiled_dir)
     print(f"[patch] build: {patch_check.KNOWN_BUILDS.get(patch_check.sha256_file(source_apk), 'not one this project has seen before')}"
-          f" (versionName {patch_check.read_version_name(decompiled_dir) or 'unknown'})")
+          f" (versionName {version_name or 'unknown'})")
     for finding in patch_check.inspect_decompiled(decompiled_dir):
         print(f"[patch]   {finding.status.upper():8} {finding.name}: {finding.detail}")
 
@@ -513,3 +516,4 @@ def patch_apk(
     sign(apksigner_exe, keystore, keystore_pass, key_alias, aligned_apk, output_apk)
 
     print(f"[patch] done: {output_apk}")
+    return version_name

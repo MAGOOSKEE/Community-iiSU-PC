@@ -17,6 +17,7 @@
 /bridge/.path_cache.json
 /bridge/.runtime_state.json
 /bridge/.boot_fingerprint.json
+/bridge/.iisu_installed.json
 /bridge/emulator.log
 /bridge/.iisu_icon.ico
 /bridge/_icon_extract_tmp/

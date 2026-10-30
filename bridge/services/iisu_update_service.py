@@ -21,6 +21,9 @@ import sys
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import unquote
+
+from shared import iisu_install_record
 
 BRIDGE_DIR = Path(__file__).resolve().parent.parent
 PROJECT_ROOT = BRIDGE_DIR.parent
@@ -106,11 +109,11 @@ class IisuUpdateCheck:
 def check_for_iisu_update() -> IisuUpdateCheck:
     """Read-only: never downloads or installs anything.
 
-    iiSU's own version scheme isn't guaranteed comparable across every
-    historical tag the way strict semver would be, so this reports a
-    *difference* between installed and latest rather than confidently
-    asserting "newer"/"older" beyond the plain case of the two strings
-    matching."""
+    iiSU's version name and its release tags use different numbering (see
+    shared/iisu_install_record.py), so the reliable comparison is the APK file
+    this install recorded at Setup or its last iiSU update against the latest
+    release's APK file. Without a usable record it says it can't tell, and
+    still offers the update, which installs that release and records it."""
     installed = get_installed_iisu_version()
     try:
         latest = _fetch_latest_official_release()
@@ -129,13 +132,30 @@ def check_for_iisu_update() -> IisuUpdateCheck:
             False,
         )
 
+    record = iisu_install_record.load()
+    if record is not None and record.get("version_name") in (None, installed):
+        if record["apk_name"].casefold() == latest.asset_name.casefold():
+            return IisuUpdateCheck(
+                installed, latest,
+                f"Up to date: iiSU {latest.version} ({latest.asset_name}) is installed. Nothing was downloaded or installed.",
+                False,
+            )
+        return IisuUpdateCheck(
+            installed, latest,
+            f"iiSU update available: {latest.version} ({latest.asset_name}). This install has {record['apk_name']}. "
+            "Nothing was downloaded or installed yet.",
+            True,
+        )
+
     if installed.strip().lower() == latest.version.strip().lstrip("vV").lower():
         return IisuUpdateCheck(installed, latest, f"Up to date (iiSU {installed}). Nothing was downloaded or installed.", False)
 
     return IisuUpdateCheck(
         installed,
         latest,
-        f"iiSU update available: {latest.version} (installed: {installed}). Nothing was downloaded or installed yet.",
+        f"Latest official iiSU release: {latest.version} ({latest.asset_name}). iiSU here reports version {installed}, "
+        "a different numbering, and this install has no record of which release it came from, so it can't tell "
+        "whether that's newer. Updating installs that release and remembers it. Nothing was downloaded or installed yet.",
         True,
     )
 
@@ -171,8 +191,11 @@ def apply_iisu_update(source: str | Path, on_stage=None) -> str:
         work_dir.mkdir(parents=True, exist_ok=True)
         apk_path = work_dir / "iisu_update_download.apk"
         _download(source, apk_path)
+        # The release's own file name, which the next update check compares.
+        source_name = unquote(source.rsplit("/", 1)[-1])
     else:
         apk_path = Path(source)
+        source_name = apk_path.name
 
-    setup_wizard.update_iisu(apk_path, on_stage=on_stage)
-    return f"iiSU updated from {apk_path.name}. Start iiSU to use it."
+    setup_wizard.update_iisu(apk_path, on_stage=on_stage, source_name=source_name)
+    return f"iiSU updated from {source_name}. Start iiSU to use it."
