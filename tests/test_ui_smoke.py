@@ -171,6 +171,31 @@ class ManagerWindowSmokeTests(unittest.TestCase):
             window.home_page.refresh_resume_reason()
         self.assertEqual(label.text(), "Next start: quick resume")
 
+    def test_long_status_lines_never_overlap_the_start_button(self):
+        from PySide6.QtCore import QRect
+
+        self.config_path.write_text(json.dumps(self.config), encoding="utf-8")
+        window = self._window()
+        window.show_page("home")
+        page = window.home_page
+        # The two lines that cut the button in half, at the window's smallest size.
+        page.resume_reason_label.setText("Next start: cold boot (the boot mode (window or headless) changed)")
+        page.stage_label.setText("Done in 4s. Bridge and Android VM should both be fully stopped now. " * 2)
+        window.resize(window.minimumSizeHint())
+        window.show()
+        self.app.processEvents()
+
+        def rect(widget):
+            return QRect(widget.mapTo(window, widget.rect().topLeft()), widget.size())
+
+        button = rect(page.primary_button)
+        self.assertGreaterEqual(button.height(), page.primary_button.minimumHeight())
+        for label in (page.resume_reason_label, page.stage_label):
+            with self.subTest(label=label.text()[:20]):
+                self.assertFalse(rect(label).intersects(button))
+                self.assertEqual(label.height(), label.fontMetrics().height(), "one line, never wrapped")
+        self.assertIn("Bridge and Android VM", page.stage_label.toolTip(), "the full text is in the tooltip")
+
     def test_credits_avatars_load_on_first_visit_only(self):
         import bridge.ui.pages.credits as credits
 
