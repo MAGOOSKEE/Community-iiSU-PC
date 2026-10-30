@@ -258,6 +258,9 @@ STANDALONE_DEFAULTS = [
         # in the Emulators settings table at all.
         "exe_names": ["steam.exe"],
         "pre_args": [],
+        # Steam games start through steam:// links, never this exe, so Setup's
+        # scan for installed emulators leaves Steam out.
+        "launched_by_link": True,
     },
 ]
 
@@ -428,9 +431,12 @@ def all_emulator_exe_names() -> list[tuple[str, list[str]]]:
     itself, one per unique label, for UIs that want to check which of
     these are actually installed under a set of search folders (see
     bridge/emulator_lookup.py's find_executable, which this is meant to be
-    used with for a result that matches what a real launch would find)."""
+    used with for a result that matches what a real launch would find).
+    Entries launched by link (Steam) aren't emulators to find."""
     seen = {}
     for entry in STANDALONE_DEFAULTS:
+        if entry.get("launched_by_link"):
+            continue
         seen.setdefault(entry["app_label"], entry["exe_names"])
     seen.setdefault(RETROARCH_APP_LABEL, ["retroarch.exe"])
     return list(seen.items())

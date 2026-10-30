@@ -15,11 +15,27 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from shared.emulator_defaults import (
     RETROARCH_PACKAGE,
     STANDALONE_DEFAULTS,
+    all_emulator_exe_names,
+    all_stub_packages,
     build_emulators_map,
     describe_profile,
     retroarch_core_dll_for_android_core,
     standalone_profile_for_core_dll,
 )
+
+
+class EmulatorScanTests(unittest.TestCase):
+    def test_steam_is_not_scanned_for_as_an_emulator(self):
+        # Steam games start through steam:// links, so Setup's scan listed
+        # Steam as a missing emulator for no reason.
+        labels = [label for label, _exe_names in all_emulator_exe_names()]
+        self.assertNotIn("Steam", labels)
+        self.assertIn("DuckStation", labels)
+        self.assertIn("RetroArch", labels)
+
+    def test_steam_still_gets_its_redirector_app_and_mapping(self):
+        self.assertIn("app.gamenative", [package for package, _label in all_stub_packages()])
+        self.assertEqual(build_emulators_map()["app.gamenative"], {"exe_names": ["steam.exe"], "pre_args": []})
 
 
 class BuildEmulatorsMapTests(unittest.TestCase):

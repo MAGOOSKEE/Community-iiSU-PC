@@ -244,6 +244,36 @@ class ManagerWindowSmokeTests(unittest.TestCase):
         wizard.latest_option.setChecked(True)
         self.assertEqual(wizard.selected_source(), "https://x/iiSU-Alpha-7.5.apk", "a URL is downloaded first")
 
+    def test_a_left_click_on_the_version_opens_its_release_page(self):
+        from PySide6.QtCore import QPoint, Qt
+        from PySide6.QtTest import QTest
+
+        import bridge.ui.sidebar as sidebar
+
+        window = self._window()
+        label = window.sidebar.version_label
+        with unittest.mock.patch.object(sidebar.updater, "get_installed_version", return_value="v0.5.7-alpha"), \
+             unittest.mock.patch.object(sidebar, "open_uri") as opened:
+            QTest.mouseClick(label, Qt.MouseButton.RightButton, pos=QPoint(5, 5))
+            opened.assert_not_called()
+            QTest.mouseClick(label, Qt.MouseButton.LeftButton, pos=QPoint(5, 5))
+        opened.assert_called_once_with("https://github.com/MAGOOSKEE/Community-iiSU-PC/releases/tag/v0.5.7-alpha")
+        self.assertEqual(sidebar.release_url(None), "https://github.com/MAGOOSKEE/Community-iiSU-PC/releases")
+
+    def test_setups_screen_step_is_laid_out_like_the_display_page(self):
+        from bridge.ui.onboarding_wizard import DisplayStep
+
+        step = DisplayStep({"width": 1920, "height": 1080, "refresh_rate": 144})
+        self.addCleanup(step.deleteLater)
+        self.assertEqual(step.resolution_combo.currentText(), "1920 x 1080", "the preset follows the typed size")
+        combo = step.refresh_edit.parent()
+        self.assertTrue(combo.isEditable(), "one editable refresh rate box, not a field and a menu")
+        self.assertEqual(step.refresh_edit.text(), "144")
+        combo.setCurrentIndex(combo.findText("60"))
+        self.assertEqual(step.refresh_edit.text(), "60")
+        step.resolution_combo.setCurrentIndex(step.resolution_combo.findText("2560 x 1440"))
+        self.assertEqual((step.width_edit.text(), step.height_edit.text()), ("2560", "1440"))
+
     def test_credits_avatars_load_on_first_visit_only(self):
         import bridge.ui.pages.credits as credits
 
