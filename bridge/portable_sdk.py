@@ -124,9 +124,10 @@ def patch_config_ini(config_ini: Path, force_cold_boot: bool = True, extra_overr
     which is the one entry re-patched on every single start (not just the
     one-time bootstrap copy), see start_iisu_pc.py's boot-fingerprint
     check, which decides force_cold_boot each run. This is belt-and-
-    suspenders alongside the matching -no-snapshot-load/no launch flag in
+    suspenders alongside the matching -no-snapshot launch flag in
     start_iisu_pc.py, in case anything ever launches this AVD another
-    way.
+    way. Only a headless start forces it: a windowed cold boot deletes the
+    snapshot instead, because forcing it stops the save on exit.
 
     extra_overrides carries per-launch settings that belong in config.ini
     (the active emulator profile's audio devices, see emulator_profiles.py)."""
@@ -206,6 +207,18 @@ def set_quickboot_autosave(avd_dir: Path, enabled: bool) -> None:
     fresh boot."""
     value = "true" if enabled else "false"
     (avd_dir / "quickbootChoice.ini").write_text(f"saveOnExit = {value}\n", encoding="utf-8")
+
+
+# Files every finished quickboot save writes. A save that never happened leaves the
+# folder with only some of them (snapshot.pb and ram.img, seen live). Resuming from
+# that silently cold boots instead, and that boot didn't save on exit either ("Not
+# saving state: RAM not mapped as shared"), so every later start cold booted too.
+QUICKBOOT_SNAPSHOT_FILES = ("snapshot.pb", "hardware.ini", "ram.bin")
+
+
+def has_complete_quickboot_snapshot(avd_dir: Path) -> bool:
+    snapshot = avd_dir / "snapshots" / "default_boot"
+    return all((snapshot / name).is_file() for name in QUICKBOOT_SNAPSHOT_FILES)
 
 
 def clear_quickboot_snapshot(avd_dir: Path) -> bool:

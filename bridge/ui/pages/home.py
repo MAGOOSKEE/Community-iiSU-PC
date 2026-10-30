@@ -234,9 +234,7 @@ class HomePage(PageBase):
         if not self.window.configured:
             self.resume_reason_label.setText("")
             return
-        new_parts = start_iisu_pc.compute_boot_fingerprint_parts(self.window.config_data)
-        old_parts = start_iisu_pc.load_saved_boot_fingerprint_parts()
-        reasons = start_iisu_pc.describe_boot_fingerprint_diff(old_parts, new_parts)
+        reasons = start_iisu_pc.cold_boot_reasons(self.window.config_data)
         if not reasons:
             text, tooltip = "Next start: quick resume", ""
         elif len(reasons) == 1:
