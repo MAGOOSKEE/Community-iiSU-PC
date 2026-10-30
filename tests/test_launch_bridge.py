@@ -177,6 +177,44 @@ class AndroidHandBackTests(unittest.TestCase):
         self.assertEqual(command, "am start -n 'com.x/.Main;reboot'")
 
 
+class StandInTests(unittest.TestCase):
+    """iiSU never leaves the screen for a PC game, so it never gets the return
+    that restores its music and interface. The emulator's stand-in covers it
+    during the game and closes when the game ends."""
+
+    def setUp(self):
+        launch_bridge.held_stub_package = None
+        self.addCleanup(setattr, launch_bridge, "held_stub_package", None)
+
+    def test_the_stand_in_covers_iisu_then_closes_on_return(self):
+        with patch.object(launch_bridge.adb_client, "shell", return_value=(0, "Starting: Intent { ... }")) as shell:
+            launch_bridge.hold_iisu_behind_stub("com.github.stenzek.duckstation")
+            launch_bridge.release_iisu_from_stub()
+            launch_bridge.release_iisu_from_stub()
+        commands = [call.args[0] for call in shell.call_args_list]
+        self.assertEqual(commands, [
+            "am start -n com.github.stenzek.duckstation/com.iisupc.stub.RedirectorActivity --ez com.iisupc.stub.HOLD true",
+            "am start -n com.github.stenzek.duckstation/com.iisupc.stub.RedirectorActivity",
+        ], "closed once, by a start without HOLD")
+
+    def test_a_package_with_no_stand_in_is_skipped(self):
+        answer = (0, "Error: Activity class {com.android.chrome/com.iisupc.stub.RedirectorActivity} does not exist.")
+        with patch.object(launch_bridge.adb_client, "shell", return_value=answer) as shell, \
+             patch.object(launch_bridge, "debug_log"):
+            launch_bridge.hold_iisu_behind_stub("com.android.chrome")
+            launch_bridge.release_iisu_from_stub()
+            launch_bridge.hold_iisu_behind_stub(None)
+        self.assertEqual(shell.call_count, 1, "nothing to close, and no package means no start")
+
+    def test_returning_to_iisu_closes_it(self):
+        launch_bridge.held_stub_package = "org.ppsspp.ppsspp"
+        with patch.object(launch_bridge.adb_client, "shell", return_value=(0, "")) as shell, \
+             patch.object(launch_bridge, "_adb_media_volume_set"), \
+             patch("builtins.print"):
+            launch_bridge.end_game_handoff()
+        self.assertEqual(shell.call_args.args[0], "am start -n org.ppsspp.ppsspp/com.iisupc.stub.RedirectorActivity")
+
+
 class QuitTapTests(unittest.TestCase):
     def test_quitting_a_subprocess_emulator_is_logged_and_terminates_it(self):
         proc = SimpleNamespace(pid=4321, poll=lambda: None, terminated=False)

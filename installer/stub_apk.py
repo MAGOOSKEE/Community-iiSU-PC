@@ -143,7 +143,13 @@ def _manifest_xml(package_name: str, app_label: str) -> str:
         # there's an actual resource to compile. A cosmetic icon isn't
         # worth trading for stubs that don't install at all.
         f'    <application android:label="{safe_label} (Community-iiSU-PC redirector)" android:hasCode="true">\n'
-        f'        <activity android:name="{REDIRECTOR_ACTIVITY}" android:exported="true">\n'
+        # singleTask so the launch bridge's "the game ended" start reaches the
+        # open stand-in instead of stacking a second one; kept out of recents
+        # since it only ever covers iiSU during a PC game. See the template's
+        # RedirectorActivity.smali.
+        f'        <activity android:name="{REDIRECTOR_ACTIVITY}" android:exported="true" '
+        'android:launchMode="singleTask" android:excludeFromRecents="true" '
+        'android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen">\n'
         '            <intent-filter>\n'
         '                <action android:name="android.intent.action.MAIN"/>\n'
         '                <category android:name="android.intent.category.LAUNCHER"/>\n'
