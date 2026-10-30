@@ -88,10 +88,11 @@ AVD_BOOT_TIMEOUT = 300  # seconds
 MAX_LAUNCH_ATTEMPTS = 3
 RETRY_DELAY = 5  # seconds
 # adb lists the VM as soon as the emulator is up, well before Android has finished
-# starting. A windowless emulator that is going to crash tends to do it in the next
-# few seconds, once the guest starts drawing, so a headless start waits this long
-# before calling the VM up.
-HEADLESS_SETTLE_SECONDS = 30
+# starting. A headless start (which has no bridge waiting on Android after it) waits
+# on the device for the boot animation to end, so its Ready means Android is up, then
+# watches the emulator this much longer: a windowless emulator that is going to crash
+# does it within seconds of the guest starting to draw.
+HEADLESS_SETTLE_SECONDS = 10
 
 # See shared/platform_compat.py: detached_popen_kwargs() covers Windows's
 # DETACHED_PROCESS|CREATE_NEW_PROCESS_GROUP|CREATE_NO_WINDOW combo (a
@@ -332,6 +333,12 @@ def build_usb_passthrough_args(usb_passthrough: list[dict]) -> list[str]:
     return args
 
 
+def _report_exit(process) -> None:
+    code = process.returncode & 0xFFFFFFFF
+    print(f"[start] The emulator exited (code 0x{code:08X}) right after it came up, so the VM is not running.")
+    print(f"[start] see {EMULATOR_LOG_PATH} for what it logged before it stopped.")
+
+
 def _stays_up(process, seconds: float = HEADLESS_SETTLE_SECONDS) -> bool:
     """Whether the emulator is still running after `seconds` more seconds.
     When it is not, says so with its exit code, since otherwise the start
@@ -339,12 +346,37 @@ def _stays_up(process, seconds: float = HEADLESS_SETTLE_SECONDS) -> bool:
     deadline = time.time() + seconds
     while time.time() < deadline:
         if process.poll() is not None:
-            code = process.returncode & 0xFFFFFFFF
-            print(f"[start] The emulator exited (code 0x{code:08X}) right after it came up, so the VM is not running.")
-            print(f"[start] see {EMULATOR_LOG_PATH} for what it logged before it stopped.")
+            _report_exit(process)
             return False
         time.sleep(1)
     return True
+
+
+def _wait_for_android_ui(seconds: float) -> bool:
+    """Waits on the device, checking every 0.2 seconds in one adb call, until
+    Android's boot animation has ended (the UI is up), for at most `seconds`.
+    Not sys.boot_completed: that waits on every app's boot receiver and has
+    lagged a minute or more behind the UI, see launch_bridge.launch_iisu."""
+    limit = max(1, int(seconds))
+    status, _output = adb_client.shell(
+        f"end=$(( $(date +%s) + {limit} )); "
+        "while [ \"$(getprop init.svc.bootanim)\" != stopped ] && [ $(date +%s) -lt $end ]; do sleep 0.2; done; "
+        "[ \"$(getprop init.svc.bootanim)\" = stopped ]",
+        timeout=limit + 15,
+    )
+    return status == 0
+
+
+def _headless_android_up(process, deadline: float) -> bool:
+    """A headless start's readiness: Android's UI is up and the emulator
+    survives HEADLESS_SETTLE_SECONDS after that. Reports why when it isn't."""
+    if not _wait_for_android_ui(deadline - time.time()):
+        if process.poll() is not None:
+            _report_exit(process)
+        else:
+            print("[start] Android did not finish starting in time.")
+        return False
+    return _stays_up(process)
 
 
 def _launch_once(
@@ -439,7 +471,7 @@ def _launch_once(
     deadline = time.time() + AVD_BOOT_TIMEOUT
     while time.time() < deadline:
         if is_avd_running(avd_name):
-            if headless and not _stays_up(process):
+            if headless and not _headless_android_up(process, deadline):
                 return None
             return process.pid
         if process.poll() is not None:
