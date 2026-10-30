@@ -291,24 +291,68 @@ class HeadlessSettleTests(unittest.TestCase):
             start_iisu_pc._stays_up(process, 30)
         self.assertIn("0xC0000005", printed.call_args_list[0].args[0])
 
-    def _launch(self, headless: bool, process: FakeProcess):
+    def _launch(self, headless: bool, process: FakeProcess, android_ui_up=True):
+        """android_ui_up: what the on-device wait for the boot animation answers,
+        or a number of seconds it takes before the process (maybe) dies."""
         profile = start_iisu_pc.emulator_profiles.normalize_profile({})
+
+        def wait_for_ui(_seconds):
+            return android_ui_up
+
         with patch.object(start_iisu_pc.subprocess, "Popen", return_value=process), \
              patch.object(start_iisu_pc, "is_avd_running", return_value=True), \
+             patch.object(start_iisu_pc, "_wait_for_android_ui", side_effect=wait_for_ui) as ui_wait, \
              patch("builtins.open", unittest.mock.mock_open()), \
-             patch("builtins.print"):
+             patch("builtins.print") as printed:
+            self.ui_wait = ui_wait
+            self.printed = printed
             return start_iisu_pc._launch_once(Path("emulator.exe"), "iisuwin", {}, [], False, profile, False, headless)
 
+    def _lines(self):
+        return [call.args[0] for call in self.printed.call_args_list]
+
     def test_a_headless_start_whose_emulator_dies_right_after_boot_fails(self):
-        self.assertIsNone(self._launch(True, FakeProcess(self.clock, lives=13, code=0xC0000005)))
+        self.assertIsNone(self._launch(True, FakeProcess(self.clock, lives=5, code=0xC0000005)))
+        self.assertTrue(any("0xC0000005" in line for line in self._lines()))
 
     def test_a_headless_start_that_stays_up_returns_the_pid(self):
         self.assertEqual(self._launch(True, FakeProcess(self.clock)), 4242)
         self.assertGreaterEqual(self.clock.now, 1000 + start_iisu_pc.HEADLESS_SETTLE_SECONDS)
+        self.ui_wait.assert_called_once()
+
+    def test_a_crash_while_android_starts_is_reported_with_its_exit_code(self):
+        process = FakeProcess(self.clock, lives=0, code=0xC0000005)
+        self.assertIsNone(self._launch(True, process, android_ui_up=False))
+        self.assertTrue(any("0xC0000005" in line for line in self._lines()))
+
+    def test_android_not_finishing_its_boot_is_reported(self):
+        self.assertIsNone(self._launch(True, FakeProcess(self.clock), android_ui_up=False))
+        self.assertIn("[start] Android did not finish starting in time.", self._lines())
 
     def test_a_windowed_start_does_not_wait(self):
         self.assertEqual(self._launch(False, FakeProcess(self.clock, lives=13, code=0xC0000005)), 4242)
         self.assertEqual(self.clock.now, 1000.0)
+        self.ui_wait.assert_not_called()
+
+
+class WaitForAndroidUiTests(unittest.TestCase):
+    def test_the_device_waits_for_the_boot_animation_within_the_limit(self):
+        with patch.object(start_iisu_pc.adb_client, "shell", return_value=(0, "")) as shell:
+            self.assertTrue(start_iisu_pc._wait_for_android_ui(42.7))
+        script = shell.call_args.args[0]
+        self.assertIn("+ 42 ))", script)
+        self.assertIn("init.svc.bootanim", script)
+        self.assertNotIn("boot_completed", script)
+
+    def test_a_timeout_or_lost_device_is_false(self):
+        for answer in ((1, ""), (None, "")):
+            with self.subTest(answer=answer), patch.object(start_iisu_pc.adb_client, "shell", return_value=answer):
+                self.assertFalse(start_iisu_pc._wait_for_android_ui(10))
+
+    def test_a_spent_deadline_still_checks_once(self):
+        with patch.object(start_iisu_pc.adb_client, "shell", return_value=(0, "")) as shell:
+            start_iisu_pc._wait_for_android_ui(-5)
+        self.assertIn("+ 1 ))", shell.call_args.args[0])
 
 
 class HeadlessLaunchTests(unittest.TestCase):
@@ -319,6 +363,7 @@ class HeadlessLaunchTests(unittest.TestCase):
         with patch.object(start_iisu_pc, "time", clock), \
              patch.object(start_iisu_pc.subprocess, "Popen", return_value=FakeProcess(clock)) as popen, \
              patch.object(start_iisu_pc, "is_avd_running", return_value=True), \
+             patch.object(start_iisu_pc, "_wait_for_android_ui", return_value=True), \
              patch("builtins.open", unittest.mock.mock_open()):
             start_iisu_pc._launch_once(Path("emulator.exe"), "iisuwin", {}, [], False, profile, False, headless)
             return popen.call_args.args[0]
