@@ -25,7 +25,7 @@ It also always launches from the portable SDK/AVD copy under
 android-sdk-portable/ (see portable_sdk.py) rather than the system-wide
 Android Studio install, see portable_sdk.py for why.
 
-Smart resume: a quickboot snapshot is only trusted (skip -no-snapshot,
+Smart resume: a quickboot snapshot is only trusted (skip -no-snapshot-load,
 let the AVD resume) when nothing that would make it stale has changed
 since it was captured, see compute_boot_fingerprint(). Anything that
 changes the virtual hardware or how the VM is launched forces a fresh cold
@@ -395,7 +395,7 @@ def _launch_once(
     (resolution) does. A changed profile does force one anyway, via the
     boot fingerprint, since the guest sees different hardware.
 
-    force_cold_boot decides whether -no-snapshot is passed at all, see
+    force_cold_boot decides whether -no-snapshot-load is passed at all, see
     compute_boot_fingerprint() in start_avd()'s caller. When it's False,
     the AVD attempts a quickboot resume instead of a full cold boot."""
     # Profile flags include -accel on when KVM is present on Linux (same
@@ -422,7 +422,11 @@ def _launch_once(
         args += ["-no-boot-anim", "-fixed-scale"]
     print(f"[start] emulator profile: {emulator_profiles.describe(profile)}")
     if force_cold_boot:
-        args.append("-no-snapshot")
+        # -no-snapshot also skips the save on exit, so the start after a cold boot found
+        # no snapshot and cold booted again. -no-snapshot-load cold boots and still saves,
+        # which is what lets the next start resume. A headless run never resumes (see
+        # _run_start_sequence), so it has nothing to save.
+        args.append("-no-snapshot" if headless else "-no-snapshot-load")
     if headless:
         # No emulator window at all; adb, the bridge and iiSU itself run as usual.
         args.append("-no-window")
@@ -669,9 +673,11 @@ def _run_start_sequence(
         # can save a fresh one.
         if headless:
             reasons = ["headless start"]
-        if headless or boot_mode_changed(old_parts, new_parts):
+        mode_changed = boot_mode_changed(old_parts, new_parts)
+        if headless or mode_changed:
             if clear_quickboot_snapshot(PORTABLE_AVD_HOME / f"{avd_name}.avd"):
-                print("[start] Removed the saved resume snapshot (the boot mode changed).")
+                why = "the boot mode changed" if mode_changed else "a headless start never resumes"
+                print(f"[start] Removed the saved resume snapshot ({why}).")
         force_cold_boot = bool(reasons)
         if force_cold_boot:
             print(f"[start] Starting {avd_name} (cold boot: {', '.join(reasons)})...")

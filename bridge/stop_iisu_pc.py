@@ -64,9 +64,9 @@ STATE_PATH = Path(__file__).parent / ".runtime_state.json"
 CONFIG_PATH = Path(__file__).parent / "config.json"
 GRACEFUL_STOP_TIMEOUT = 10  # seconds
 # adb loses the VM within a couple of seconds of `adb emu kill`, but the emulator
-# keeps running while it writes its quick-resume snapshot: about 20 seconds for
-# the 2.5 GB VM Setup creates (measured). Killing it sooner leaves a snapshot the
-# next start can't load, so every start silently cold booted.
+# keeps running while it writes its quick-resume snapshot: usually a few seconds
+# more, once about 20 (both measured on the 2.5 GB VM Setup creates). Killing it
+# sooner leaves a snapshot the next start can't load, so the start cold boots.
 SNAPSHOT_SAVE_TIMEOUT = 90  # seconds
 
 # This install's own emulator and bridge, by path. Matching only

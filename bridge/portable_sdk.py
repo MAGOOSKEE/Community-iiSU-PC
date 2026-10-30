@@ -124,7 +124,7 @@ def patch_config_ini(config_ini: Path, force_cold_boot: bool = True, extra_overr
     which is the one entry re-patched on every single start (not just the
     one-time bootstrap copy), see start_iisu_pc.py's boot-fingerprint
     check, which decides force_cold_boot each run. This is belt-and-
-    suspenders alongside the matching -no-snapshot/no launch flag in
+    suspenders alongside the matching -no-snapshot-load/no launch flag in
     start_iisu_pc.py, in case anything ever launches this AVD another
     way.
 
