@@ -39,6 +39,11 @@ Progress = Callable[[str], None]
 
 DISKSTATS_JOB = re.compile(r"JOB #1000/(\d+):.*DiskStatsLoggingService")
 DISKSTATS_WAIT_SECONDS = 60
+# Once the forced job has reported, per-app sizes follow within seconds if the
+# system image provides them at all. Some never do (the Android 16 image Setup
+# installs: the job finishes in about 6 seconds without them), and waiting for
+# them made every refresh take the full minute.
+DISKSTATS_SIZES_GRACE_SECONDS = 6
 
 
 class StorageError(Exception):
@@ -61,11 +66,18 @@ def _refresh_diskstats(adb: Adb, sleep, clock) -> str:
         return before
     adb("shell", f"cmd jobscheduler run -f android {match.group(1)}", timeout=30)
     deadline = clock() + DISKSTATS_WAIT_SECONDS
+    reported_at = None
     latest = before
     while clock() < deadline:
         sleep(3)
         latest = _text(adb("shell", "dumpsys diskstats", timeout=60))
-        if latest != before and bd.parse_diskstats(latest) is not None:
+        if latest == before:
+            continue
+        if bd.parse_diskstats(latest) is not None:
+            break
+        if reported_at is None:
+            reported_at = clock()
+        elif clock() - reported_at >= DISKSTATS_SIZES_GRACE_SECONDS:
             break
     return latest
 

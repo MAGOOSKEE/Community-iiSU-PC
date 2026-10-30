@@ -29,10 +29,11 @@ DISKSTATS = (
 
 
 class FakeAdb:
-    def __init__(self, state="device", job_listed=True, fresh_after=1):
+    def __init__(self, state="device", job_listed=True, fresh_after=1, app_sizes=True):
         self.state = state
         self.job_listed = job_listed
         self.fresh_after = fresh_after  # diskstats calls before the forced job shows new numbers
+        self.app_sizes = app_sizes  # False: the job reports, but without per-app sizes
         self.diskstats_calls = 0
         self.log = []
 
@@ -47,7 +48,9 @@ class FakeAdb:
             return done(f"{2 * GB}\t/sdcard/Android/media/com.iisulauncher\n1000\t/sdcard/Roms\n{3 * GB}\t/sdcard\n")
         if command == "shell dumpsys diskstats":
             self.diskstats_calls += 1
-            return done("Data-Free: 1K / 2K total\n" if self.diskstats_calls <= self.fresh_after else DISKSTATS)
+            if self.diskstats_calls <= self.fresh_after:
+                return done("Data-Free: 1K / 2K total\n")
+            return done(DISKSTATS if self.app_sizes else "Latency: 0ms [512B Data Write]\nData-Free: 1K / 2K total\n")
         if "grep -m1 DiskStatsLoggingService" in command:
             return done("  JOB #1000/1145656139: c96867a android/com.android.server.storage.DiskStatsLoggingService\n" if self.job_listed else "")
         return done()
@@ -75,6 +78,20 @@ class CollectBreakdownTests(unittest.TestCase):
         breakdown = self._collect(FakeAdb(job_listed=False))
         self.assertFalse(breakdown.itemised)
         self.assertEqual(breakdown.segment("iisu_art").kb, 2 * GB)
+
+    def test_a_job_that_reports_without_app_sizes_does_not_wait_the_full_minute(self):
+        adb = FakeAdb(app_sizes=False)
+        clock_ticks = []
+        ticks = iter(range(0, 100_000, 1))
+
+        def clock():
+            clock_ticks.append(1)
+            return next(ticks)
+
+        breakdown = svc.collect_breakdown(adb, sleep=lambda _s: None, clock=clock)
+        self.assertFalse(breakdown.itemised)
+        self.assertLessEqual(adb.diskstats_calls, 3 + svc.DISKSTATS_SIZES_GRACE_SECONDS)
+        self.assertLess(len(clock_ticks), svc.DISKSTATS_WAIT_SECONDS, "it gave up long before the minute was out")
 
     def test_a_stopped_vm_is_a_clear_error(self):
         with self.assertRaises(svc.StorageError) as caught:
