@@ -387,7 +387,7 @@ class WaitForAndroidUiTests(unittest.TestCase):
 
 
 class HeadlessLaunchTests(unittest.TestCase):
-    def _emulator_args(self, headless: bool) -> list[str]:
+    def _emulator_args(self, headless: bool, force_cold_boot: bool = False) -> list[str]:
         """The command line _launch_once builds, without starting anything."""
         profile = start_iisu_pc.emulator_profiles.normalize_profile({})
         clock = FakeClock()
@@ -396,8 +396,22 @@ class HeadlessLaunchTests(unittest.TestCase):
              patch.object(start_iisu_pc, "is_avd_running", return_value=True), \
              patch.object(start_iisu_pc, "_wait_for_android_ui", return_value=True), \
              patch("builtins.open", unittest.mock.mock_open()):
-            start_iisu_pc._launch_once(Path("emulator.exe"), "iisuwin", {}, [], False, profile, False, headless)
+            start_iisu_pc._launch_once(Path("emulator.exe"), "iisuwin", {}, [], False, profile, force_cold_boot, headless)
             return popen.call_args.args[0]
+
+    def test_a_windowed_cold_boot_still_saves_a_snapshot_for_the_next_start(self):
+        args = self._emulator_args(headless=False, force_cold_boot=True)
+        self.assertIn("-no-snapshot-load", args)
+        self.assertNotIn("-no-snapshot", args, "-no-snapshot also skips the save on exit")
+
+    def test_a_resume_passes_no_snapshot_flag(self):
+        args = self._emulator_args(headless=False, force_cold_boot=False)
+        self.assertFalse([arg for arg in args if arg.startswith("-no-snapshot")])
+
+    def test_a_headless_cold_boot_neither_loads_nor_saves(self):
+        args = self._emulator_args(headless=True, force_cold_boot=True)
+        self.assertIn("-no-snapshot", args)
+        self.assertNotIn("-no-snapshot-load", args)
 
     def test_headless_adds_no_window(self):
         self.assertIn("-no-window", self._emulator_args(headless=True))
