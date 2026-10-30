@@ -44,6 +44,37 @@ class DescribeBootFingerprintDiffTests(unittest.TestCase):
         )
 
 
+class FingerprintScopeTests(unittest.TestCase):
+    """Only what changes the VM's hardware or launch belongs in the fingerprint:
+    anything else in it forces a cold boot for nothing."""
+
+    BASE = {"avd_name": "iisuwin", "display": {"width": 1920}, "emulators": {"a": {"exe_names": ["a.exe"]}},
+            "usb_passthrough": [], "roms_dir": "C:/roms-a"}
+
+    def _diff(self, **changes):
+        changed = {**self.BASE, **changes}
+        return start_iisu_pc.describe_boot_fingerprint_diff(
+            start_iisu_pc.compute_boot_fingerprint_parts(self.BASE),
+            start_iisu_pc.compute_boot_fingerprint_parts(changed),
+        )
+
+    def test_changing_the_pc_emulator_mappings_still_resumes(self):
+        self.assertEqual(self._diff(emulators={"b": {"exe_names": ["b.exe"]}}), [])
+
+    def test_changing_the_rom_library_still_resumes(self):
+        self.assertEqual(self._diff(roms_dir="D:/roms-b"), [])
+
+    def test_hardware_changes_still_cold_boot(self):
+        self.assertEqual(self._diff(display={"width": 2560}), ["the display settings changed"])
+        self.assertEqual(self._diff(usb_passthrough=[{"vid": "1"}]), ["the USB passthrough list changed"])
+
+    def test_a_fingerprint_saved_with_the_old_parts_still_resumes(self):
+        old = {**start_iisu_pc.compute_boot_fingerprint_parts(self.BASE), "emulators": "x", "roms_dir": "y"}
+        self.assertEqual(
+            start_iisu_pc.describe_boot_fingerprint_diff(old, start_iisu_pc.compute_boot_fingerprint_parts(self.BASE)), [],
+        )
+
+
 class BootModeFingerprintTests(unittest.TestCase):
     CONFIG = {"avd_name": "iisuwin", "display": {}, "emulators": {}, "usb_passthrough": [], "roms_dir": "C:/nonexistent"}
 
