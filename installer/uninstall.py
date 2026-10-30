@@ -137,7 +137,7 @@ def stop_running_instance() -> None:
         # of android-sdk-portable/, which scopes this to just this AVD (see
         # the matching, normally-used sweep in stop_iisu_pc.py).
         import stop_iisu_pc
-        stop_iisu_pc.kill_by_cmdline_match("android-sdk-portable")
+        stop_iisu_pc.kill_by_cmdline_match(stop_iisu_pc.INSTALL_EMULATOR_NEEDLE)
 
 
 def detect_avd_name() -> str:

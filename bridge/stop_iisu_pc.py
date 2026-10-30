@@ -21,7 +21,12 @@ shutdown itself: start_iisu_pc.py's boot-fingerprint check decides on
 the *next* start whether that saved snapshot is still trustworthy (a
 quick resume) or stale (a fresh cold boot, which naturally overwrites
 it on exit). Clearing it here unconditionally would defeat quick resume
-before it ever got a chance to be used.
+before it ever got a chance to be used. For the same reason a graceful
+shutdown is given time to finish writing that snapshot, see
+wait_for_emulator_exit().
+
+Every sweep matches this install's own folder, so stopping one install
+never takes down another install's VM or bridge.
 """
 
 import json
@@ -44,7 +49,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 # sits next to bridge/, not inside it, and a raw script launch only gets its own folder.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from portable_sdk import PORTABLE_AVD_HOME
+from portable_sdk import PORTABLE_AVD_HOME, PORTABLE_SDK
 from shared import adb_client, app_version
 from shared.platform_compat import IS_WINDOWS, subprocess_creationflags
 from shared.vm_backend import BACKEND_WAYDROID, resolve_backend, vm_device_connected
@@ -58,6 +63,19 @@ CREATE_NO_WINDOW = subprocess_creationflags()
 STATE_PATH = Path(__file__).parent / ".runtime_state.json"
 CONFIG_PATH = Path(__file__).parent / "config.json"
 GRACEFUL_STOP_TIMEOUT = 10  # seconds
+# adb loses the VM within a couple of seconds of `adb emu kill`, but the emulator
+# keeps running while it writes its quick-resume snapshot: about 20 seconds for
+# the 2.5 GB VM Setup creates (measured). Killing it sooner leaves a snapshot the
+# next start can't load, so every start silently cold booted.
+SNAPSHOT_SAVE_TIMEOUT = 90  # seconds
+
+# This install's own emulator and bridge, by path. Matching only
+# "android-sdk-portable" or "launch_bridge.py" also hit every other install's.
+INSTALL_EMULATOR_NEEDLE = str(PORTABLE_SDK)
+INSTALL_BRIDGE_NEEDLE = str(Path(__file__).resolve().parent / "launch_bridge.py")
+# qemu is the process that writes the snapshot. netsimd and crashpad_handler run
+# from the same SDK folder but can outlive it, so the save wait watches qemu alone.
+INSTALL_QEMU_NEEDLE = str(PORTABLE_SDK / "emulator" / "qemu")
 
 
 def load_state() -> dict:
@@ -146,16 +164,53 @@ def kill_by_cmdline_match(needle: str) -> None:
     on "launch_bridge.py" specifically (never a bare python.exe sweep,
     which would also take down unrelated Python processes on the same
     PC) makes this self-healing regardless of how state.json got out of
-    sync with what's actually running."""
+    sync with what's actually running. Callers pass this install's own path
+    (INSTALL_BRIDGE_NEEDLE, INSTALL_EMULATOR_NEEDLE)."""
     if not IS_WINDOWS:
         subprocess.run(["pkill", "-f", needle], capture_output=True)
         return
-    script = (
-        "Get-CimInstance Win32_Process "
-        f"| Where-Object {{ $_.CommandLine -like '*{needle}*' }} "
-        "| ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
-    )
+    script = _matching_processes(needle) + " | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
     subprocess.run(["powershell", "-NoProfile", "-Command", script], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
+
+
+def _matching_processes(needle: str) -> str:
+    """A PowerShell pipeline of the processes whose command line contains
+    needle, compared literally (no wildcards) and ignoring case, as Windows
+    paths are. The PowerShell process itself is left out: needle is part of
+    its own command line, so it would always count itself and could stop
+    itself before reaching the rest."""
+    literal = needle.lower().replace("'", "''")
+    return (
+        "Get-CimInstance Win32_Process "
+        "| Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine "
+        f"-and $_.CommandLine.ToLowerInvariant().Contains('{literal}') }}"
+    )
+
+
+def count_processes_matching(needle: str) -> int:
+    if not IS_WINDOWS:
+        result = subprocess.run(["pgrep", "-f", "-c", needle], capture_output=True, text=True)
+        return int(result.stdout.strip() or 0)
+    result = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", f"@({_matching_processes(needle)}).Count"],
+        capture_output=True, text=True, creationflags=CREATE_NO_WINDOW,
+    )
+    try:
+        return int(result.stdout.strip())
+    except ValueError:
+        return 0
+
+
+def wait_for_emulator_exit(timeout: float = SNAPSHOT_SAVE_TIMEOUT) -> float | None:
+    """After a graceful shutdown request, waits for this install's emulator to
+    exit on its own, which is when its quick-resume snapshot is complete.
+    Returns the seconds it took, or None if it was still running at timeout."""
+    started = time.monotonic()
+    while time.monotonic() - started < timeout:
+        if count_processes_matching(INSTALL_QEMU_NEEDLE) == 0:
+            return time.monotonic() - started
+        time.sleep(1)
+    return None
 
 
 def _remove_path_with_retry(path: Path, attempts: int = 5, delay: float = 1.0) -> None:
@@ -216,7 +271,12 @@ def main() -> None:
         if is_avd_running():
             print(f"[stop] the AVD was still running after {GRACEFUL_STOP_TIMEOUT}s, killing it...")
         else:
-            print(f"[stop] the AVD shut down in {time.monotonic() - asked:.1f}s.")
+            print(f"[stop] the AVD shut down in {time.monotonic() - asked:.1f}s, waiting for it to save its quick-resume snapshot...")
+            saved_in = wait_for_emulator_exit()
+            if saved_in is None:
+                print(f"[stop] the emulator was still saving after {SNAPSHOT_SAVE_TIMEOUT}s, stopping it (the next start will cold boot).")
+            else:
+                print(f"[stop] snapshot saved, the emulator exited {time.monotonic() - asked:.1f}s after the request.")
 
     bridge_pid = state.get("bridge_pid")
     if bridge_pid is not None:
@@ -238,15 +298,13 @@ def main() -> None:
     # "qemu-system-x86_64.exe" without also risking a real Android Studio
     # emulator instance someone has open for unrelated app development, or
     # another qemu-based tool entirely (e.g. WSL2), every process this
-    # project launches runs out of android-sdk-portable/, which is a
-    # distinctive enough path to scope the sweep to just this AVD.
+    # project launches runs out of this install's own android-sdk-portable/,
+    # and matching that full path scopes the sweep to this install alone.
     print("[stop] sweeping for any orphaned launch_bridge.py process...")
-    kill_by_cmdline_match("launch_bridge.py")
+    kill_by_cmdline_match(INSTALL_BRIDGE_NEEDLE)
     if backend != BACKEND_WAYDROID:
         print("[stop] sweeping for any remaining emulator/qemu process for this AVD...")
-        kill_by_cmdline_match("android-sdk-portable")
-        if avd_name:
-            kill_by_cmdline_match(f"-avd {avd_name}")
+        kill_by_cmdline_match(INSTALL_EMULATOR_NEEDLE)
 
     # adb.exe runs as a persistent background server (any `adb` command
     # spawns it if it isn't already running) and never exits on its own
