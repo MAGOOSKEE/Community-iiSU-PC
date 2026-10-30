@@ -197,6 +197,7 @@ def clear_stale_locks(avd_name: str | None) -> None:
 
 
 def main() -> None:
+    started = time.monotonic()
     state = load_state()
     avd_name = load_avd_name(state)
     # What actually ran last time wins over what config would pick now, so
@@ -208,10 +209,15 @@ def main() -> None:
         stop_waydroid()
     elif is_avd_running():
         print("[stop] asking the AVD to shut down gracefully...")
+        asked = time.monotonic()
         subprocess.run(["adb", "emu", "kill"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
         deadline = time.time() + GRACEFUL_STOP_TIMEOUT
         while time.time() < deadline and is_avd_running():
             time.sleep(1)
+        if is_avd_running():
+            print(f"[stop] the AVD was still running after {GRACEFUL_STOP_TIMEOUT}s, killing it...")
+        else:
+            print(f"[stop] the AVD shut down in {time.monotonic() - asked:.1f}s.")
 
     bridge_pid = state.get("bridge_pid")
     if bridge_pid is not None:
@@ -258,7 +264,7 @@ def main() -> None:
     if STATE_PATH.is_file():
         STATE_PATH.unlink()
 
-    print("[stop] Done. Bridge and Android VM should both be fully stopped now.")
+    print(f"[stop] Done in {time.monotonic() - started:.0f}s. Bridge and Android VM should both be fully stopped now.")
 
 
 if __name__ == "__main__":

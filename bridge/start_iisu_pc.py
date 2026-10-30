@@ -71,6 +71,7 @@ from portable_sdk import (
 )
 from shared import app_version
 from shared.platform_compat import IS_WINDOWS, detached_popen_kwargs, new_console_creationflags, subprocess_creationflags
+from shared.stage_timer import StageTimer
 from shared.vm_backend import BACKEND_WAYDROID, resolve_backend, supports_headless_boot, vm_device_connected
 
 BRIDGE_SCRIPT = Path(__file__).parent / "launch_bridge.py"
@@ -568,6 +569,7 @@ def main(headless: bool = False) -> None:
     """headless=True boots the Android VM without its window and starts neither
     the boot overlay (nothing to cover) nor the launch bridge, for running it
     in the background or on a machine nobody is sitting at."""
+    timer = StageTimer()
     winapi.ensure_linux_kwin_rules()
     try:
         config = load_config()
@@ -609,7 +611,7 @@ def main(headless: bool = False) -> None:
     )
     overlay = boot_overlay.show("Booting Community-iiSU-PC, please wait...") if show_overlay else None
     try:
-        _run_start_sequence(config, avd_name, port, debug_console, state, headless)
+        _run_start_sequence(config, avd_name, port, debug_console, state, headless, timer)
     finally:
         boot_overlay.close(overlay)
 
@@ -630,7 +632,11 @@ def _start_waydroid(config: dict, state: dict) -> None:
     print("[start] Waydroid is up.")
 
 
-def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: bool, state: dict, headless: bool = False) -> None:
+def _run_start_sequence(
+    config: dict, avd_name: str, port: int, debug_console: bool, state: dict, headless: bool = False,
+    timer: StageTimer | None = None,
+) -> None:
+    timer = timer or StageTimer()
     if resolve_backend(config) == BACKEND_WAYDROID:
         _start_waydroid(config, state)
     elif is_avd_running(avd_name):
@@ -667,10 +673,12 @@ def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: b
         # Saved for both modes: the boot_mode part is what makes the next start in the
         # other mode cold boot, so a headless run no longer needs to wipe the whole file.
         save_boot_fingerprint(compute_boot_fingerprint(config, headless), new_parts)
-        print(f"[start] {avd_name} is up{' (headless, no window)' if headless else ''}.")
+        print(f"[start] {avd_name} is up{' (headless, no window)' if headless else ''} after {timer.elapsed:.1f}s.")
+    timer.mark("Android VM")
 
     print("[start] Syncing your ROM library into the AVD...")
     sync_rom_library()
+    timer.mark("ROM library")
 
     if headless:
         # The bridge exists to hand game launches to PC emulators and manage the
@@ -693,6 +701,7 @@ def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: b
         launch_iisu(config)
         if config.get("iisu_fullscreen"):
             show_iisu_window(config)
+        timer.mark("iiSU")
     else:
         if debug_console:
             print("[start] Starting the launch bridge in a visible console (debug_show_console_windows is on)...")
@@ -726,8 +735,9 @@ def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: b
             if is_port_open(port):
                 break
             time.sleep(0.5)
+        timer.mark("iiSU and the launch bridge")
         if is_port_open(port):
-            print("[start] Bridge is up.")
+            print(f"[start] Bridge is up, iiSU is on screen after {timer.elapsed:.1f}s.")
         elif debug_console:
             print("[start] Bridge didn't come up in time, check its console window for errors.")
         else:
@@ -743,10 +753,11 @@ def _run_start_sequence(config: dict, avd_name: str, port: int, debug_console: b
         # call here costs nothing (show_iisu_window() is idempotent) and
         # closes a real "launched but not fullscreen" gap seen there.
         show_iisu_window(config)
+    print(f"[start] Took {timer.elapsed:.1f}s: {timer.breakdown()}.")
     if headless:
-        print("[start] Ready (headless: the VM is up, the launch bridge is not running).")
+        print(f"[start] Ready in {timer.elapsed:.0f}s (headless: the VM is up, the launch bridge is not running).")
     else:
-        print("[start] Ready. Launching a game in iiSU will now hand off to the real PC emulator.")
+        print(f"[start] Ready in {timer.elapsed:.0f}s. Launching a game in iiSU will now hand off to the real PC emulator.")
 
 
 if __name__ == "__main__":
