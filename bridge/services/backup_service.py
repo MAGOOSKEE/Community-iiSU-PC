@@ -13,6 +13,9 @@ from pathlib import Path
 
 BRIDGE_DIR = Path(__file__).resolve().parent.parent
 PROJECT_ROOT = BRIDGE_DIR.parent
+# Where apply_restore keeps a copy of each file it overwrote. The Diagnostics
+# page reports on this same folder.
+RESTORE_SAFETY_DIR = PROJECT_ROOT / "restore_safety"
 
 _RESTORE_MAP = {
     "bridge/windows_apps.json": BRIDGE_DIR / "windows_apps.json",
@@ -105,7 +108,7 @@ def apply_restore(payloads: dict[str, bytes]) -> tuple[int, int, Path]:
     """Writes each payload to its real location, first copying whatever it
     would overwrite into a timestamped safety folder. Returns (restored
     count, safety-copy count, safety folder path)."""
-    safety_dir = PROJECT_ROOT / "restore_safety" / datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    safety_dir = RESTORE_SAFETY_DIR / datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     safety_count = 0
     for name in payloads:
         target = _RESTORE_MAP[name]

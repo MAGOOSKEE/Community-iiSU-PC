@@ -8,15 +8,18 @@ the next time Setup ran. Pure filesystem logic, no AVD or adb needed.
 """
 
 import os
+import stat
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "installer"))
 sys.path.insert(0, str(PROJECT_ROOT / "bridge"))
 
+import uninstall  # noqa: E402; path set up above
 from uninstall import _remove_tree_best_effort, remove_path  # noqa: E402; path set up above
 
 
@@ -75,6 +78,20 @@ class RemoveTreeBestEffortTests(unittest.TestCase):
         self.assertIn(nested, locked)
         self.assertTrue(nested.is_dir())
 
+    def test_a_read_only_file_is_removed_too(self):
+        # The emulator creates data/misc/pstore/pstore.bin read-only, which
+        # Windows refuses to delete as is.
+        nested = self.root / "data" / "misc" / "pstore"
+        nested.mkdir(parents=True)
+        read_only = nested / "pstore.bin"
+        read_only.write_bytes(b"x")
+        os.chmod(read_only, stat.S_IREAD)
+
+        locked = _remove_tree_best_effort(self.root)
+
+        self.assertEqual(locked, [])
+        self.assertFalse(self.root.exists())
+
 
 class RemovePathTests(unittest.TestCase):
     def setUp(self):
@@ -107,6 +124,41 @@ class RemovePathTests(unittest.TestCase):
         self.assertEqual(reclaimed, 100)
         self.assertFalse((self.root / "removable.txt").exists())
         self.assertTrue(locked_file.exists())
+
+    def test_a_read_only_single_file_is_removed(self):
+        single = self.root / "pstore.bin"
+        single.write_bytes(b"x" * 10)
+        os.chmod(single, stat.S_IREAD)
+        self.assertEqual(remove_path(single, attempts=1, delay=0), 10)
+        self.assertFalse(single.exists())
+
+
+class TargetListTests(unittest.TestCase):
+    def test_every_generated_file_in_bridge_is_removed(self):
+        targets = set(uninstall.collect_targets("iisuwin"))
+        bridge = uninstall.BRIDGE_DIR
+        for name in (
+            ".boot_fingerprint.json", ".iisu_installed.json", "windows_apps.json", "windows_stubs",
+            "dedupe_exceptions.json", "cache", "setup.log", "bridge_debug.log", "manager_debug.log",
+            "config.json", "android-sdk-portable",
+        ):
+            with self.subTest(name=name):
+                self.assertIn(bridge / name, targets)
+
+    def test_your_own_data_is_kept(self):
+        targets = set(uninstall.collect_targets("iisuwin"))
+        self.assertNotIn(uninstall.BRIDGE_DIR / "iidb", targets)
+        self.assertNotIn(uninstall.PROJECT_ROOT / "restore_safety", targets)
+        self.assertFalse(any(path.suffix == ".apk" for path in targets))
+
+    def test_the_kept_folders_are_listed_only_when_present(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "bridge" / "iidb").mkdir(parents=True)
+            with patch.object(uninstall, "BRIDGE_DIR", root / "bridge"), \
+                 patch.object(uninstall, "PROJECT_ROOT", root):
+                kept = [path for path, _what in uninstall.kept_user_data()]
+        self.assertEqual(kept, [root / "bridge" / "iidb"])
 
 
 if __name__ == "__main__":

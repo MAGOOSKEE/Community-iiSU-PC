@@ -5,9 +5,10 @@ no reused SDK download, no reused AVD, no leftover config.
 
 Stops the AVD/bridge first (if running) via bridge/stop_iisu_pc.py, then
 removes:
-  - bridge/'s generated state: the portable SDK+AVD copy, config.json,
-    caches, the extracted icon, and the last emulator.log/bridge.log/
-    stop.log/launch_history.log
+  - bridge/'s generated state: the portable SDK+AVD copy, config.json and
+    the other settings files the Manager writes (Windows apps, dedupe
+    exceptions), caches, the boot fingerprint, the installed-iiSU record,
+    the extracted icon, and every log it keeps
   - installer/'s generated state: its own SDK download, the patch
     keystore, the preserved build-tools copy, working directories
   - the actual AVD(s) under ~/.android/avd/ (and the stray per-AVD log
@@ -17,6 +18,9 @@ removes:
 Deliberately does NOT touch:
   - installer/input/*.apk, that's your own supplied file, not
     something this project installed
+  - bridge/iidb/, the saved artwork library, which is kept outside the VM
+    precisely so it outlives one, and restore_safety/, the copies of the
+    settings a restore overwrote (both listed as kept at the end)
   - installer/tools/apktool.jar, a bundled project asset, not
     generated state
   - %LOCALAPPDATA%\\Android\\Sdk, see the printed note at the end for
@@ -35,6 +39,7 @@ Usage:
 
 import os
 import shutil
+import stat
 import sys
 import time
 from pathlib import Path
@@ -58,6 +63,18 @@ def dir_size(path: Path) -> int:
     return sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
 
 
+def _unlink(path: Path) -> None:
+    """Deletes one file, clearing its read-only flag first if that is what
+    refused it: Windows won't delete a read-only file, and the emulator
+    creates the AVD's data/misc/pstore/pstore.bin read-only, which left the
+    whole android-sdk-portable/ folder behind on every uninstall."""
+    try:
+        path.unlink()
+    except PermissionError:
+        os.chmod(path, stat.S_IWRITE)
+        path.unlink()
+
+
 def _remove_tree_best_effort(root: Path) -> list[Path]:
     """Deletes everything under root bottom-up, collecting whatever
     couldn't be removed instead of aborting the whole operation the
@@ -73,7 +90,7 @@ def _remove_tree_best_effort(root: Path) -> list[Path]:
         for filename in filenames:
             file_path = current / filename
             try:
-                file_path.unlink()
+                _unlink(file_path)
             except OSError:
                 locked.append(file_path)
         try:
@@ -97,7 +114,7 @@ def remove_path(path: Path, attempts: int = 5, delay: float = 1.0) -> int:
     for attempt in range(attempts):
         if path.is_file():
             try:
-                path.unlink()
+                _unlink(path)
                 locked = []
             except OSError:
                 locked = [path]
@@ -160,10 +177,19 @@ def collect_targets(avd_name: str) -> list[Path]:
         BRIDGE_DIR / "config.json",
         BRIDGE_DIR / ".path_cache.json",
         BRIDGE_DIR / ".runtime_state.json",
+        BRIDGE_DIR / ".boot_fingerprint.json",
+        BRIDGE_DIR / ".iisu_installed.json",
+        BRIDGE_DIR / "windows_apps.json",
+        BRIDGE_DIR / "windows_stubs",
+        BRIDGE_DIR / "dedupe_exceptions.json",
+        BRIDGE_DIR / "cache",
         BRIDGE_DIR / "emulator.log",
         BRIDGE_DIR / "bridge.log",
         BRIDGE_DIR / "stop.log",
+        BRIDGE_DIR / "setup.log",
         BRIDGE_DIR / "launch_history.log",
+        BRIDGE_DIR / "bridge_debug.log",
+        BRIDGE_DIR / "manager_debug.log",
         BRIDGE_DIR / ".iisu_icon.ico",
         BRIDGE_DIR / ".iisu_icon.png",
         BRIDGE_DIR / "_icon_extract_tmp",
@@ -196,6 +222,16 @@ def collect_targets(avd_name: str) -> list[Path]:
         targets.append(Path.home() / "Desktop" / f"Community-iiSU-PC{fallback_ext}")
 
     return targets
+
+
+def kept_user_data() -> list[tuple[Path, str]]:
+    """The folders of your own data an uninstall leaves in place, the ones
+    that exist."""
+    candidates = [
+        (BRIDGE_DIR / "iidb", "your saved artwork library"),
+        (PROJECT_ROOT / "restore_safety", "copies of the settings a restore overwrote"),
+    ]
+    return [(path, what) for path, what in candidates if path.exists()]
 
 
 def print_preview(targets: list[Path]) -> None:
@@ -240,6 +276,8 @@ def main() -> None:
 
     print(f"\n=== Done, reclaimed {reclaimed / 1e9:.1f} GB ===")
     print(f"Kept: installer/input/*.apk (your own file) and installer/tools/apktool.jar (a project asset).")
+    for path, what in kept_user_data():
+        print(f"Kept: {path} ({what}), delete it yourself if you don't want it.")
     print(
         "\nNot touched: %LOCALAPPDATA%\\Android\\Sdk. Depending on how the SDK\n"
         "downloader's underlying tool resolves its install root, packages can end\n"

@@ -78,7 +78,7 @@ Source: "..\runtime\jre\*"; DestDir: "{app}\runtime\jre"; Flags: recursesubdirs 
 ; per-install generated-state entries, none of that is this project's
 ; source, all of it gets recreated by Setup/first run/normal use.
 Source: "..\bridge\*"; DestDir: "{app}\bridge"; Flags: recursesubdirs createallsubdirs ignoreversion; \
-    Excludes: "__pycache__,*.pyc,android-sdk-portable,config.json,.path_cache.json,.runtime_state.json,.boot_fingerprint.json,.iisu_icon.ico,_icon_extract_tmp,windows_apps.json,windows_stubs,dedupe_exceptions.json,manager_debug.log,bridge_debug.log,launch_history.log,cache,iidb,restore_safety,emulator.log,bridge.log,stop.log"
+    Excludes: "__pycache__,*.pyc,android-sdk-portable,config.json,.path_cache.json,.runtime_state.json,.boot_fingerprint.json,.iisu_installed.json,.iisu_icon.ico,.iisu_icon.png,_icon_extract_tmp,windows_apps.json,windows_stubs,dedupe_exceptions.json,manager_debug.log,bridge_debug.log,launch_history.log,cache,iidb,restore_safety,emulator.log,bridge.log,stop.log,setup.log"
 
 Source: "..\installer\*"; DestDir: "{app}\installer"; Flags: recursesubdirs createallsubdirs ignoreversion; \
     Excludes: "__pycache__,*.pyc,android-sdk,_work,_cmdline_tools_extract,commandlinetools.zip,keystore,input\*.apk,tools\build-tools,*.iss,*.bat"
