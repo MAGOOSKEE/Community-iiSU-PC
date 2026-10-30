@@ -15,15 +15,22 @@ create_shortcut.py already takes for iiSU's own icon.
 There is no Pillow dependency: Qt's QPixmap/QImage decode PNG/JPEG
 natively, and QPainter's antialiasing smooths a circular clip well at
 avatar sizes (64-96px).
+
+Fetched avatars are cached on disk, so the page shows them at once and only
+refreshes one that is missing or older than AVATAR_MAX_AGE_SECONDS. A stale
+copy is still better than a placeholder when the refresh fails.
 """
 
+import time
 import urllib.request
+from pathlib import Path
 
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPainterPath, QPixmap
 
 GITHUB_AVATAR_URL = "https://github.com/{username}.png"
 FETCH_TIMEOUT = 5.0
+AVATAR_MAX_AGE_SECONDS = 7 * 24 * 3600
 
 
 def fetch_avatar_bytes(username: str) -> bytes | None:
@@ -38,6 +45,36 @@ def fetch_avatar_bytes(username: str) -> bytes | None:
             return resp.read()
     except Exception:
         return None
+
+
+def _cache_path(cache_dir: Path, username: str) -> Path:
+    return cache_dir / f"{username}.avatar"
+
+
+def cached_avatar(username: str, cache_dir: Path, now: float | None = None) -> tuple[bytes | None, bool]:
+    """The cached avatar bytes for username (None when there are none) and
+    whether they are still fresh enough to skip a refresh."""
+    path = _cache_path(cache_dir, username)
+    try:
+        data = path.read_bytes()
+        age = (time.time() if now is None else now) - path.stat().st_mtime
+    except OSError:
+        return None, False
+    return data, age < AVATAR_MAX_AGE_SECONDS
+
+
+def fetch_and_cache_avatar(username: str, cache_dir: Path) -> bytes | None:
+    """fetch_avatar_bytes, saving a successful result to the cache. Runs on a
+    background thread like fetch_avatar_bytes. A cache write failure only
+    costs the next refresh, so it is ignored."""
+    data = fetch_avatar_bytes(username)
+    if data:
+        try:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            _cache_path(cache_dir, username).write_bytes(data)
+        except OSError:
+            pass
+    return data
 
 
 def make_circular_pixmap(image_bytes: bytes, size: int) -> QPixmap | None:

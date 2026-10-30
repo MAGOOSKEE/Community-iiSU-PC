@@ -2,6 +2,7 @@
 so this is one of the pages that gets PageBase's scrollable_body=True."""
 
 import webbrowser
+from pathlib import Path
 
 import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
@@ -11,8 +12,10 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QVBoxLayout, QWidget
 from bridge.ui.pages.base import PageBase
 from bridge.ui.widgets.card import Card
 from bridge.ui.workers.task_runner import run_in_background
-from shared.qt_avatars import fetch_avatar_bytes, make_circular_pixmap, make_placeholder_circle
+from shared.qt_avatars import cached_avatar, fetch_and_cache_avatar, make_circular_pixmap, make_placeholder_circle
 from shared.qt_theme import Fonts, GRADIENT_STOPS, TEXT, TEXT_DIM
+
+AVATAR_CACHE_DIR = Path(__file__).resolve().parents[2] / "cache" / "avatars"
 
 _CONTRIBUTORS = [
     {
@@ -64,20 +67,28 @@ _THIRD_PARTY = [
 
 
 class _AvatarLabel(QLabel):
-    """A clickable circular avatar: shows a placeholder immediately, swaps
-    in the real GitHub avatar once fetched (best-effort, degrades quietly
-    on any failure, see shared/qt_avatars.py)."""
+    """A clickable circular avatar: a placeholder until load() is called
+    (when the page is first shown), then the cached GitHub avatar, refreshed
+    in the background when missing or old (best-effort, degrades quietly on
+    any failure, see shared/qt_avatars.py)."""
 
     def __init__(self, username: str, display_name: str, size: int, tooltip: str = ""):
         super().__init__()
         self._username = username
         self._size = size
+        self._signals = None
         self.setFixedSize(size, size)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setPixmap(make_placeholder_circle(size, display_name, GRADIENT_STOPS[2], "#101010"))
         if tooltip:
             self.setToolTip(tooltip)
-        self._signals = run_in_background(fetch_avatar_bytes, self._apply, None, username)
+
+    def load(self) -> None:
+        data, fresh = cached_avatar(self._username, AVATAR_CACHE_DIR)
+        if data is not None:
+            self._apply(data)
+        if not fresh:
+            self._signals = run_in_background(fetch_and_cache_avatar, self._apply, None, self._username, AVATAR_CACHE_DIR)
 
     def _apply(self, data: bytes | None) -> None:
         if data is None:
@@ -95,6 +106,7 @@ class CreditsPage(PageBase):
         super().__init__(parent, scrollable_body=True)
         self.window = window
         self._avatar_refs: list[_AvatarLabel] = []
+        self._avatars_loaded = False
 
         self.add_header("Credits", "Who made this, and how.")
 
@@ -119,6 +131,15 @@ class CreditsPage(PageBase):
         disclaimer_layout.addWidget(disclaimer_label)
         self.body_layout.addWidget(disclaimer)
         self.body_layout.addStretch(1)
+
+    def on_shown(self) -> None:
+        """Avatars load the first time the page is opened, not at every
+        Manager start."""
+        if self._avatars_loaded:
+            return
+        self._avatars_loaded = True
+        for avatar in self._avatar_refs:
+            avatar.load()
 
     def _add_credit_row(self, username: str, display_name: str, role: str) -> None:
         row = Card()
