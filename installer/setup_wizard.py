@@ -24,6 +24,11 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+# The bundled Python (runtime/python) doesn't put a launched script's own folder
+# on sys.path the way a normal install does, so `python setup_wizard.py` with it
+# couldn't find the modules next to this file. Explicit, like the bridge scripts.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 import sdk_bootstrap
 from jre_env import java_exe, java_subprocess_env, keytool_exe
 from patch_iisu import patch_apk, validate_iisu_apk
