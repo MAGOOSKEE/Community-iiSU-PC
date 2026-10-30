@@ -358,7 +358,13 @@ def retroarch_core_dll_for_android_core(android_core_filename: str) -> str | Non
     per-console default, not necessarily what a given install actually
     has configured. Returns None if the filename doesn't look like a
     libretro-android core at all, so the caller can fall back to the
-    extension-based guess."""
+    extension-based guess.
+
+    iiSU 7.5 sends the core's full path on the device
+    (/data/data/com.retroarch/cores/snes9x_libretro_android.so) where 7.4 sent
+    the bare file name, so only the file name is used. The full path ended up
+    inside the PC's -L argument and every RetroArch launch exited at once."""
+    android_core_filename = android_core_filename.replace("\\", "/").rsplit("/", 1)[-1]
     if not android_core_filename.endswith("_libretro_android.so"):
         return None
     core_name = android_core_filename.removesuffix("_libretro_android.so")
