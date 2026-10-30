@@ -84,7 +84,7 @@ class Sidebar(QWidget):
         self.subnav_buttons: dict[str, dict[str, QPushButton]] = {}
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(0, 16, 0, 12)
+        root.setContentsMargins(0, 10, 0, 12)
         root.setSpacing(0)
 
         header = QPushButton(" Community-iiSU-PC")
@@ -93,10 +93,14 @@ class Sidebar(QWidget):
         header.setFlat(True)
         header.setIcon(icon("menu", TEXT, _ICON_SIZE))
         header.setIconSize(QSize(_ICON_SIZE, _ICON_SIZE))
-        header.setStyleSheet("text-align: left; padding: 4px 16px 14px 16px; font-weight: 600;")
+        # Even padding so the hover highlight sits evenly around the title. It was 4px
+        # above and 14px below, which made the highlight look cut off at the top. The
+        # gap before the first page lives outside the button instead.
+        header.setStyleSheet("text-align: left; padding: 10px 16px; font-weight: 600;")
         header.clicked.connect(self.toggle_clicked.emit)
         self._header_button = header
         root.addWidget(header)
+        root.addSpacing(4)
 
         for key, glyph, label in NAV_ITEMS:
             root.addWidget(self._make_nav_button(key, glyph, label))
