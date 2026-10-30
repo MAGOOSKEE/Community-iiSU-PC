@@ -72,7 +72,7 @@ class CreateAndRestoreBackupTests(unittest.TestCase):
             safety_root = Path(tmp) / "restore_safety"
 
             with patch.object(svc, "_RESTORE_MAP", {"bridge/config.json": target}), patch.object(
-                svc, "PROJECT_ROOT", Path(tmp)
+                svc, "RESTORE_SAFETY_DIR", safety_root
             ):
                 restored, safety_count, safety_dir = svc.apply_restore({"bridge/config.json": json.dumps({"new": True}).encode()})
 
@@ -85,7 +85,8 @@ class CreateAndRestoreBackupTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             target = Path(tmp) / "windows_apps.json"
 
-            with patch.object(svc, "_RESTORE_MAP", {"windows_apps.json": target}), patch.object(svc, "PROJECT_ROOT", Path(tmp)):
+            with patch.object(svc, "_RESTORE_MAP", {"windows_apps.json": target}), \
+                 patch.object(svc, "RESTORE_SAFETY_DIR", Path(tmp) / "restore_safety"):
                 restored, safety_count, _safety_dir = svc.apply_restore({"windows_apps.json": b"{}"})
 
             self.assertEqual(restored, 1)

@@ -15,7 +15,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from services import windows_apps_service
+from services import backup_service, windows_apps_service
 from shared import app_version, vm_storage
 
 BRIDGE_DIR = Path(__file__).resolve().parent.parent
@@ -186,7 +186,7 @@ def run_diagnostics(config_data: dict) -> list[tuple[str, str, str]]:
         else:
             add("WARNING", label, f"Not found yet: {path}")
 
-    safety = BRIDGE_DIR / "restore_safety"
+    safety = backup_service.RESTORE_SAFETY_DIR
     if safety.is_dir():
         try:
             count = sum(1 for p in safety.iterdir() if p.is_dir())

@@ -19,7 +19,11 @@
 /bridge/.boot_fingerprint.json
 /bridge/.iisu_installed.json
 /bridge/emulator.log
+/bridge/bridge.log
+/bridge/stop.log
+/bridge/setup.log
 /bridge/.iisu_icon.ico
+/bridge/.iisu_icon.png
 /bridge/_icon_extract_tmp/
 
 # Windows Apps / Manager runtime data
@@ -31,7 +35,7 @@
 /bridge/launch_history.log
 /bridge/cache/
 /bridge/iidb/
-/bridge/restore_safety/
+/restore_safety/
 
 # Python
 __pycache__/
@@ -41,9 +45,6 @@ __pycache__/
 # OS/editor cruft
 .DS_Store
 Thumbs.db
-/bridge/bridge.log
-/bridge/stop.log
-/bridge/setup.log
 
 # Local/build artifacts
 /.claude/
