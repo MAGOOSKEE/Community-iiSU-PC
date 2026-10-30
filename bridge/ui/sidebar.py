@@ -5,17 +5,34 @@ NAV_ITEMS/NAV_GROUPS/DANGER_NAV_ITEMS are the pure data the widgets read."""
 
 import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
-from PySide6.QtCore import QSize, Signal
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 import updater
 from bridge.ui.icon_font import icon
+from shared.platform_compat import open_uri
 from shared.qt_theme import FONT_FAMILY_UI, Fonts, PANEL_BG, PANEL_BG_HOVER, RED, TEXT, TEXT_DIM
 
 SIDEBAR_WIDTH_EXPANDED = 200
 SIDEBAR_WIDTH_COLLAPSED = 56
 _ICON_SIZE = 20
+
+
+def release_url(version: str | None) -> str:
+    """This version's release page on GitHub, or the list of releases for a
+    build with no version."""
+    releases = f"https://github.com/{updater.GITHUB_REPO}/releases"
+    return f"{releases}/tag/{version}" if version else releases
+
+
+class ClickableLabel(QLabel):
+    clicked = Signal()
+
+    def mouseReleaseEvent(self, event) -> None:  # noqa: N802; Qt's own name
+        super().mouseReleaseEvent(event)
+        if event.button() == Qt.MouseButton.LeftButton and self.rect().contains(event.position().toPoint()):
+            self.clicked.emit()
 
 
 def _no_mnemonic(text: str) -> str:
@@ -118,9 +135,12 @@ class Sidebar(QWidget):
             root.addWidget(self._make_nav_button(key, glyph, label, danger=True))
 
         version = updater.get_installed_version() or "dev"
-        self.version_label = QLabel(f" {version}")
+        self.version_label = ClickableLabel(f" {version}")
         self.version_label.setStyleSheet(f"color: {TEXT_DIM}; padding: 8px 16px 0 16px;")
         self.version_label.setFont(QFont(FONT_FAMILY_UI, 8))
+        self.version_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.version_label.setToolTip("Open this version's release page")
+        self.version_label.clicked.connect(lambda: open_uri(release_url(updater.get_installed_version())))
         root.addWidget(self.version_label)
 
     def _make_nav_button(self, key: str, glyph: str, label: str, danger: bool = False) -> QPushButton:
