@@ -194,6 +194,13 @@ def create_backup(destination: Path) -> BackupResult:
         if not trees:
             raise AndroidBackupError("Nothing could be read from the VM: " + result.summary())
         write_archive(destination, trees, result)
+        if result.total_files == 0:
+            # An archive with no files can't be restored (inspect_archive refuses
+            # it), so writing one and calling it a backup would only mislead.
+            destination.unlink(missing_ok=True)
+            raise AndroidBackupError(
+                "iiSU hasn't saved any artwork or media in the VM yet, so there's nothing to back up. No file was written."
+            )
     except OSError as exc:
         raise AndroidBackupError(f"Backup failed:\n{exc}") from exc
     finally:

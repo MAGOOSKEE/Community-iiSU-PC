@@ -115,8 +115,11 @@ class FakeAdb:
     DF_HEALTHY = "Filesystem Size Used Avail Use% Mounted on\n/dev/block/dm-55 16G 1.0G 15G 7% /data\n"
     DF_FULL = "Filesystem Size Used Avail Use% Mounted on\n/dev/block/dm-55 5.8G 5.8G 1M 100% /data\n"
 
-    def __init__(self, existing=("media",), push_ok=True, extract_ok=True, df=None):
+    PULLED = {"iiSULauncher/art/a.png": b"A", "iiSULauncher/mediabridge/inbox/t.png": b"t"}
+
+    def __init__(self, existing=("media",), push_ok=True, extract_ok=True, df=None, pulled=None):
         self.existing = existing
+        self.pulled = self.PULLED if pulled is None else pulled
         self.push_ok = push_ok
         self.extract_ok = extract_ok
         self.df = df or self.DF_HEALTHY
@@ -142,7 +145,8 @@ class FakeAdb:
         if args[0] == "pull":
             remote, dest = args[1], Path(args[2])
             folder = dest / Path(remote).name
-            _tree(folder, {"iiSULauncher/art/a.png": b"A", "iiSULauncher/mediabridge/inbox/t.png": b"t"})
+            folder.mkdir(parents=True, exist_ok=True)
+            _tree(folder, self.pulled)
             return _completed()
         if args[0] == "push":
             return _completed() if self.push_ok else _completed(1, stderr="adb: error: no space\n")
@@ -164,6 +168,23 @@ class BackupRestoreFlowTests(unittest.TestCase):
             self.assertEqual(result.backed_up, {"media": 1})  # the inbox file was excluded
             self.assertIn("data", result.skipped)
             self.assertEqual(list(svc.inspect_archive(out)), ["media"])
+
+    def test_a_fresh_iisu_with_nothing_saved_writes_no_archive_and_says_so(self):
+        fake = FakeAdb(existing=("media",), pulled={})
+        with tempfile.TemporaryDirectory() as tmp, self._patched(fake)[0], self._patched(fake)[1]:
+            out = Path(tmp) / "b.zip"
+            with self.assertRaises(svc.AndroidBackupError) as caught:
+                svc.create_backup(out)
+            self.assertFalse(out.exists())
+        self.assertIn("nothing to back up", str(caught.exception))
+
+    def test_only_excluded_files_count_as_nothing_too(self):
+        fake = FakeAdb(existing=("media",), pulled={"iiSULauncher/mediabridge/inbox/t.png": b"t"})
+        with tempfile.TemporaryDirectory() as tmp, self._patched(fake)[0], self._patched(fake)[1]:
+            out = Path(tmp) / "b.zip"
+            with self.assertRaises(svc.AndroidBackupError):
+                svc.create_backup(out)
+            self.assertFalse(out.exists())
 
     def test_backup_with_the_vm_down_raises_without_touching_adb_further(self):
         fake = FakeAdb()
