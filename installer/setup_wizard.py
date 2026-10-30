@@ -34,7 +34,7 @@ from jre_env import java_exe, java_subprocess_env, keytool_exe
 from patch_iisu import patch_apk, validate_iisu_apk
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from shared import app_version, vm_storage
+from shared import app_version, iisu_install_record, vm_storage
 from shared.steam_deck import STEAM_DECK_DISPLAY, is_steam_deck
 from shared.platform_compat import IS_WINDOWS, detached_popen_kwargs, subprocess_creationflags
 from shared.vm_backend import (
@@ -742,7 +742,9 @@ def ensure_waydroid_ready() -> None:
     print("[setup] Waydroid is installed and initialized.")
 
 
-def update_iisu(apk_path: Path, on_stage: Callable[[str, int, int], None] | None = None) -> None:
+def update_iisu(
+    apk_path: Path, on_stage: Callable[[str, int, int], None] | None = None, source_name: str | None = None,
+) -> None:
     """Re-patches and reinstalls iiSU from a newer (or manually-chosen,
     e.g. an official pre-release shared outside the normal release feed)
     APK, against an install that's already been through run_setup() once.
@@ -756,7 +758,10 @@ def update_iisu(apk_path: Path, on_stage: Callable[[str, int, int], None] | None
     PC-side emulators regardless of which iiSU build is patched in.
     write_bridge_config() is also skipped for the same reason: avd_name
     and the rest of config.json are already exactly right for an existing
-    install, this only ever replaces the APK on it."""
+    install, this only ever replaces the APK on it.
+
+    source_name is the APK's original file name (a release download is saved
+    under a temporary name), recorded for the next update check."""
     total = 3
 
     def stage(index: int, label: str) -> None:
@@ -788,7 +793,7 @@ def update_iisu(apk_path: Path, on_stage: Callable[[str, int, int], None] | None
         )
     keystore, keystore_password = ensure_keystore()
     patched_apk = WORK_DIR / "iisu-updated.apk"
-    patch_apk(
+    version_name = patch_apk(
         source_apk=apk_path,
         output_apk=patched_apk,
         work_dir=WORK_DIR / "update_patch",
@@ -814,6 +819,7 @@ def update_iisu(apk_path: Path, on_stage: Callable[[str, int, int], None] | None
         env.update(env_overrides)
         emulator_exe = portable_sdk.PORTABLE_SDK / "emulator" / portable_sdk.EMULATOR_BIN
         boot_avd_and_install(emulator_exe, avd_name, env, patched_apk)
+    iisu_install_record.save(source_name or apk_path.name, version_name)
 
     stage(2, "Done")
     print(f"\n=== iiSU updated ({apk_path.name}) ===")
@@ -1038,7 +1044,7 @@ def run_setup(
 
     stage(3)
     patched_apk = WORK_DIR / "iisu-patched.apk"
-    patch_apk(
+    version_name = patch_apk(
         source_apk=apk_path,
         output_apk=patched_apk,
         work_dir=WORK_DIR / "patch",
@@ -1067,6 +1073,7 @@ def run_setup(
 
         stage(5)
         boot_avd_and_install(emulator_exe, DEFAULT_AVD_NAME, env, patched_apk, lean=lean)
+    iisu_install_record.save(apk_path.name, version_name)
 
     stage(6)
     write_bridge_config(
