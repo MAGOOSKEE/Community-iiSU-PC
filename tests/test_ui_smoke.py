@@ -50,6 +50,15 @@ class ManagerWindowSmokeTests(unittest.TestCase):
             "display": {"width": 1080, "height": 1920, "density": 420}, "vm_backend": "avd",
         }
 
+        # iiSU counts as patched with the current patch, unless a test says otherwise.
+        from shared import iisu_install_record
+
+        self.record_path = Path(self._tmp.name) / ".iisu_installed.json"
+        iisu_install_record.save("iiSU-Alpha-7.5.apk", "0.1.6.1", self.record_path)
+        record_patch = unittest.mock.patch.object(iisu_install_record.load, "__defaults__", (self.record_path,))
+        record_patch.start()
+        self.addCleanup(record_patch.stop)
+
         self.main_window = main_window
         self._patched = [(module, "CONFIG_PATH", module.CONFIG_PATH) for module in (bridge_config, main_window, home)]
         for module, name, _ in self._patched:
@@ -195,6 +204,45 @@ class ManagerWindowSmokeTests(unittest.TestCase):
                 self.assertFalse(rect(label).intersects(button))
                 self.assertEqual(label.height(), label.fontMetrics().height(), "one line, never wrapped")
         self.assertIn("Bridge and Android VM", page.stage_label.toolTip(), "the full text is in the tooltip")
+
+    def test_an_iisu_on_an_older_patch_must_be_repatched_before_it_starts(self):
+        import bridge.ui.dialogs.repatch_wizard as repatch_wizard
+
+        self.config_path.write_text(json.dumps(self.config), encoding="utf-8")
+        # A record from before patch versions were kept: an install made before this update.
+        self.record_path.write_text(json.dumps({"apk_name": "iiSU-Alpha-7.4.apk", "version_name": "0.1.6.1"}), encoding="utf-8")
+        window = self._window()
+        window.last_avd_up = window.last_bridge_up = False
+        page = window.home_page
+        page.refresh_primary_button()
+        self.assertEqual(page.primary_button.text(), "Repatch iiSU")
+        with unittest.mock.patch.object(repatch_wizard.RepatchWizard, "exec") as shown, \
+             unittest.mock.patch.object(page, "_run_guarded") as started:
+            page._start()
+            page._start(headless=True)
+        self.assertEqual(shown.call_count, 2, "Start and Boot Headless both open the wizard")
+        started.assert_not_called()
+
+    def test_the_repatch_wizard_offers_each_source_and_waits_for_a_stopped_vm(self):
+        import bridge.ui.dialogs.repatch_wizard as repatch_wizard
+
+        apk = Path(self._tmp.name) / "iiSU-Alpha-7.4.apk"
+        apk.write_bytes(b"apk")
+        self.record_path.write_text(json.dumps({"apk_name": apk.name, "version_name": "0.1.6.1"}), encoding="utf-8")
+        running = {"vm": True}
+        with unittest.mock.patch.object(repatch_wizard.svc, "find_recorded_apk", return_value=apk), \
+             unittest.mock.patch.object(repatch_wizard, "run_in_background"):
+            wizard = repatch_wizard.RepatchWizard(lambda: running["vm"])
+        self.addCleanup(wizard.deleteLater)
+        self.assertTrue(wizard.recorded_option.isChecked())
+        self.assertEqual(wizard.selected_source(), apk)
+        self.assertFalse(wizard.repatch_button.isEnabled(), "the VM is running")
+        running["vm"] = False
+        wizard._refresh()
+        self.assertTrue(wizard.repatch_button.isEnabled())
+        wizard._on_latest(repatch_wizard.svc.IisuReleaseInfo("0.0.7.5", "https://x/iiSU-Alpha-7.5.apk", "iiSU-Alpha-7.5.apk", "https://x"))
+        wizard.latest_option.setChecked(True)
+        self.assertEqual(wizard.selected_source(), "https://x/iiSU-Alpha-7.5.apk", "a URL is downloaded first")
 
     def test_credits_avatars_load_on_first_visit_only(self):
         import bridge.ui.pages.credits as credits

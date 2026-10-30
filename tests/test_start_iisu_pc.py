@@ -198,10 +198,27 @@ class HeadlessWithWaydroidTests(unittest.TestCase):
              patch.object(start_iisu_pc, "resolve_backend", return_value=start_iisu_pc.BACKEND_WAYDROID), \
              patch.object(start_iisu_pc, "supports_headless_boot", return_value=False), \
              patch.object(start_iisu_pc.winapi, "ensure_linux_kwin_rules"), \
+             patch.object(start_iisu_pc.iisu_install_record, "needs_repatch", return_value=False), \
              patch.object(start_iisu_pc, "_run_start_sequence") as sequence, \
              patch.object(start_iisu_pc.boot_overlay, "close"):
             start_iisu_pc.main(headless=True)
         self.assertIs(sequence.call_args.args[5], False, "the headless argument")
+
+
+class RepatchGateTests(unittest.TestCase):
+    def test_an_older_patch_opens_the_manager_instead_of_starting(self):
+        # The desktop shortcut runs this script directly, past the Manager's own check.
+        config = {"vm_backend": "avd", "avd_name": "iisuwin", "bridge_port": 7737}
+        with patch.object(start_iisu_pc, "load_config", return_value=config), \
+             patch.object(start_iisu_pc.winapi, "ensure_linux_kwin_rules"), \
+             patch.object(start_iisu_pc.iisu_install_record, "needs_repatch", return_value=True), \
+             patch.object(start_iisu_pc, "open_manager") as manager, \
+             patch.object(start_iisu_pc, "_run_start_sequence") as sequence, \
+             patch("builtins.print"):
+            with self.assertRaises(SystemExit):
+                start_iisu_pc.main()
+        manager.assert_called_once()
+        sequence.assert_not_called()
 
 
 class HeadlessSnapshotTests(unittest.TestCase):

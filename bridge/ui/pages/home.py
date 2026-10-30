@@ -272,8 +272,11 @@ class HomePage(PageBase):
             self.primary_button.setText("Stop")
             self.primary_button.setEnabled(not self.busy)
         else:
-            self.primary_button.setText("Start iiSU")
+            self.primary_button.setText("Repatch iiSU" if self.window.needs_repatch() else "Start iiSU")
             self.primary_button.setEnabled(not self.busy)
+
+    def refresh_primary_button(self) -> None:
+        self._refresh_primary_button()
 
     def _on_primary_click(self) -> None:
         if not self.window.configured:
@@ -300,6 +303,11 @@ class HomePage(PageBase):
 
     def _start(self, headless: bool = False) -> None:
         if self.busy:
+            return
+        # A project update changed the patch: iiSU isn't started until it's
+        # repatched, from this button and the Boot Headless menu alike.
+        if self.window.needs_repatch():
+            self.window.open_repatch_wizard()
             return
         self._set_busy(True)
         self.stage_label.setText("Starting (headless)..." if headless else "Starting...")
