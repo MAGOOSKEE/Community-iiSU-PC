@@ -59,6 +59,16 @@ class RetroarchCoreTranslationTests(unittest.TestCase):
             "mupen64plus_next_libretro.dll",
         )
 
+    def test_the_full_device_path_iisu_7_5_sends_is_reduced_to_the_file_name(self):
+        # Seen live: -L cores//data/data/com.retroarch/cores/snes9x_libretro.dll,
+        # and RetroArch exited at once for every game.
+        for sent, expected in (
+            ("/data/data/com.retroarch/cores/snes9x_libretro_android.so", "snes9x_libretro.dll"),
+            ("/data/data/com.retroarch/cores/mupen64plus_next_gles3_libretro_android.so", "mupen64plus_next_libretro.dll"),
+        ):
+            with self.subTest(sent=sent):
+                self.assertEqual(retroarch_core_dll_for_android_core(sent), expected)
+
     def test_non_libretro_android_filename_returns_none(self):
         self.assertIsNone(retroarch_core_dll_for_android_core("not_a_core.so"))
         self.assertIsNone(retroarch_core_dll_for_android_core(""))
