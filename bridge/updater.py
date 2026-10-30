@@ -91,6 +91,21 @@ def get_installed_version() -> str | None:
     return VERSION_PATH.read_text(encoding="utf-8").strip() if VERSION_PATH.is_file() else None
 
 
+def commits_ahead_behind(branch: str) -> tuple[int, int] | None:
+    """(commits only in this checkout, commits only on GitHub) between HEAD and
+    origin/<branch> as of the last fetch, or None if git can't say. A copy that
+    is only ahead has nothing to update; one that is both ahead and behind
+    can't be fast-forwarded."""
+    result = _run_git(["rev-list", "--left-right", "--count", f"HEAD...origin/{branch}"])
+    if result is None or result.returncode != 0:
+        return None
+    try:
+        ahead, behind = (int(part) for part in result.stdout.split())
+    except ValueError:
+        return None
+    return ahead, behind
+
+
 def check_and_apply_git_update() -> tuple[str, bool]:
     """Returns (message, applied) - applied is True only when a pull
     actually landed new commits, the caller's cue that a restart is
@@ -122,8 +137,21 @@ def check_and_apply_git_update() -> tuple[str, bool]:
         print(f"[updater] {msg}")
         return msg, False
 
-    count = _run_git(["rev-list", "--count", f"HEAD..origin/{branch}"])
-    behind = count.stdout.strip() if count and count.returncode == 0 else "some"
+    position = commits_ahead_behind(branch)
+    if position is not None and position[1] == 0:
+        # Pulling would "succeed" without changing anything and the Manager would
+        # then ask for a restart on every start.
+        msg = f"already up to date ({branch}); this copy has {position[0]} commit(s) GitHub doesn't."
+        print(f"[updater] {msg}")
+        return msg, False
+    if position is not None and position[0] > 0:
+        msg = (
+            f"{position[1]} update(s) available on {branch}, but this copy also has {position[0]} commit(s) "
+            "of its own, so it can't fast-forward automatically. Update manually with `git pull` when convenient."
+        )
+        print(f"[updater] {msg}")
+        return msg, False
+    behind = str(position[1]) if position is not None else "some"
     print(f"[updater] {behind} new commit(s) on {branch}, pulling...")
 
     pull = _run_git(["pull", "--ff-only", "origin", branch])
