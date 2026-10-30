@@ -40,8 +40,11 @@ GET_PIP_URL = "https://bootstrap.pypa.io/get-pip.py"
 
 # Mirrors installer/setup_wizard.py's ensure_pyside6()/ensure_pillow(),
 # same two packages, same "no pinned version" approach that script already
-# uses for a system Python install.
-RUNTIME_PACKAGES = ["PySide6", "Pillow"]
+# uses for a system Python install. PySide6-Essentials, not PySide6: the app
+# only uses QtCore, QtGui and QtWidgets, and the full PySide6 also pulls in
+# PySide6-Addons (QtWebEngine and the rest), which made the bundled runtime
+# 692 MB instead of 261 MB with no visible difference.
+RUNTIME_PACKAGES = ["PySide6-Essentials", "Pillow"]
 
 
 def run(args: list[str], **kwargs) -> subprocess.CompletedProcess:

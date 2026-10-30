@@ -258,7 +258,9 @@ def ensure_pyside6() -> None:
     except ImportError:
         pass
     print("[setup] PySide6 isn't installed (this project's GUI toolkit), installing it now...")
-    result = _pip_install("PySide6")
+    # Essentials only: QtCore, QtGui and QtWidgets are all the app uses, see
+    # build_embedded_python.py's RUNTIME_PACKAGES.
+    result = _pip_install("PySide6-Essentials")
     if result.returncode == 0:
         print("[setup] PySide6 installed.")
     else:
