@@ -199,12 +199,8 @@ STANDALONE_DEFAULTS = [
         "package": "org.citron.citron_emu",
         "app_label": "Citron",
         # Citron is the actively-maintained continuation of Yuzu after
-        # Yuzu's takedown; both packages below are routed to the same
-        # citron.exe since that's the only Switch emulator this project
-        # can point to now. No Ryujinx entry exists here on purpose,
-        # iiSU's own bundled emulator list has no Ryujinx package at all,
-        # so iiSU would never report it as the launching package regardless
-        # of whether it's installed on the PC side.
+        # Yuzu's takedown; the Citron EA and Yuzu packages below are routed
+        # to the same citron.exe. Ryujinx comes through Kenji-NX, further down.
         "exe_names": ["citron.exe"],
         "pre_args": CITRON_PRE_ARGS,
     },
@@ -223,6 +219,20 @@ STANDALONE_DEFAULTS = [
         "app_label": "Citron",
         "exe_names": ["citron.exe"],
         "pre_args": CITRON_PRE_ARGS,
+    },
+    {
+        "console": "switch",
+        "console_label": "Nintendo Switch (Ryujinx)",
+        # iiSU has no Ryujinx package, but Kenji-NX is an Android fork of
+        # Ryujinx, so its slot is the Ryujinx one. iiSU sends its ROM as a
+        # bootPath extra (see launch_bridge.handle_request). Ryubing's builds
+        # keep the Ryujinx.exe name. Confirmed live with 1.3.277: --fullscreen
+        # then the game path boots the game, and Ryujinx relaunches itself
+        # into a new process (see launch_bridge.find_relaunched_emulator).
+        "package": "org.kenjinx.android",
+        "app_label": "Ryujinx",
+        "exe_names": ["Ryujinx.exe"],
+        "pre_args": ["--fullscreen"],
     },
     {
         "console": "xbox",
@@ -432,11 +442,20 @@ OUTDATED_DEFAULTS: list[tuple[dict, dict]] = [
 ]
 
 
+# Packages added to the defaults after installs already had a config.json,
+# which Setup writes once: upgrade_outdated_defaults() gives each to a config
+# that lacks it.
+NEW_DEFAULT_PACKAGES = ["org.kenjinx.android"]
+
+
 def upgrade_outdated_defaults(emulators: dict) -> dict:
     upgraded = {}
     for package, profile in emulators.items():
         fixed = next((new for old, new in OUTDATED_DEFAULTS if profile == old), None)
         upgraded[package] = copy.deepcopy(fixed) if fixed is not None else profile
+    defaults = build_emulators_map()
+    for package in NEW_DEFAULT_PACKAGES:
+        upgraded.setdefault(package, defaults[package])
     return upgraded
 
 

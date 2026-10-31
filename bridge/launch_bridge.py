@@ -106,6 +106,7 @@ from winapi import (
     wait_for_window_by_pid,
     wait_for_visible_window_by_pid,
     wait_for_window_to_close,
+    window_process_name,
 )
 
 STOP_SCRIPT = Path(__file__).parent / "stop_iisu_pc.py"
@@ -472,7 +473,7 @@ _LAUNCH_IISU_SCRIPT = (
 IISU_START_WAIT_SECONDS = 60
 # How long a launched emulator's window keeps being pushed to the front.
 EMULATOR_FOCUS_SECONDS = 6.0
-# A Windows game that quits this soon after its window was tracked may have
+# A Windows game or emulator that quits this soon after it was tracked may have
 # relaunched itself; the bridge waits this long for the new process's window.
 NATIVE_RELAUNCH_SECONDS = 30.0
 NATIVE_RELAUNCH_WAIT_SECONDS = 10.0
@@ -545,11 +546,38 @@ def bring_emulator_to_foreground(pid: int) -> bool:
     return True
 
 
-def wait_and_restore_iisu(process: subprocess.Popen, config: dict, emulator_name: str) -> None:
+def find_relaunched_emulator(existing_windows: set[int], exe_name: str, gone_pid: int) -> int | None:
+    """A new window of the same emulator from another process, when the one
+    the bridge started quit early.
+
+    Ryujinx quits the process it was started as about a second in and runs
+    the game in a new one (seen live with 1.3.277, whatever creation flags it
+    gets). Without this the bridge took that first exit as the game ending."""
+    deadline = time.monotonic() + NATIVE_RELAUNCH_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        for hwnd in list_visible_windows() - existing_windows:
+            pid = _window_pid(hwnd)
+            if pid and pid != gone_pid and window_process_name(hwnd).casefold() == exe_name.casefold():
+                return hwnd
+        time.sleep(0.25)
+    return None
+
+
+def wait_and_restore_iisu(
+    process: subprocess.Popen,
+    config: dict,
+    emulator_name: str,
+    existing_windows: set[int] | None = None,
+    exe_name: str | None = None,
+) -> None:
     """Runs on a background thread: waits for the emulator to close (whether
     normally or via the quit hotkey), then un-hides and refocuses the iiSU
     AVD window, mirroring how the real Android launcher reappears once a
     game exits.
+
+    With existing_windows (the windows open before the launch) and exe_name,
+    an emulator that quits cleanly within NATIVE_RELAUNCH_SECONDS is followed
+    into the process that replaces it, see find_relaunched_emulator.
 
     A non-zero exit code is only a heuristic for "this launch actually
     failed," not a certainty, some emulators exit non-zero on a normal
@@ -561,9 +589,27 @@ def wait_and_restore_iisu(process: subprocess.Popen, config: dict, emulator_name
     "crashed immediately" moment to catch, only the eventual exit code
     once they do). Logged either way; only notified when it looks like a
     real failure, worth interrupting someone over."""
+    global current_process, current_native_window, current_native_pid
+    started = time.monotonic()
     process.wait()
+    if (
+        existing_windows is not None and exe_name and process.returncode == 0
+        and time.monotonic() - started < NATIVE_RELAUNCH_SECONDS
+    ):
+        successor = find_relaunched_emulator(existing_windows, exe_name, process.pid)
+        if successor is not None:
+            with current_process_lock:
+                if current_process is not process:
+                    return
+                current_process = None
+                current_native_window = successor
+                current_native_pid = _window_pid(successor)
+            log_launch(f"TRACKING: {emulator_name} relaunched itself, HWND {successor}, PID {current_native_pid}")
+            force_foreground(successor)
+            # Its quit and exit are then a native game's: the PID is tracked.
+            wait_and_restore_iisu_for_window(successor, config, emulator_name, kind="emulator")
+            return
     with current_process_lock:
-        global current_process
         if current_process is process:
             current_process = None
     if process.returncode not in (0, None):
@@ -935,12 +981,13 @@ def wait_and_restore_iisu_for_window(
     app_name: str,
     existing_windows: set[int] | None = None,
     excluded_processes: set[str] | None = None,
+    kind: str = "Windows app",
 ) -> None:
     """Track a native game across HWND recreation and restore iiSU on exit.
 
     With existing_windows (the windows open before the launch), a game whose
     process quits within NATIVE_RELAUNCH_SECONDS is followed into the process
-    that replaces it."""
+    that replaces it. kind is what the launch log calls it."""
     global current_process, current_native_window, current_native_pid
 
     with current_process_lock:
@@ -971,7 +1018,7 @@ def wait_and_restore_iisu_for_window(
                     f"native app relaunched: {app_name!r}; old_pid={tracked_pid}; "
                     f"pid={successor_pid}; hwnd={successor}"
                 )
-                log_launch(f"TRACKING: Windows app {app_name} relaunched itself, HWND {successor}, PID {successor_pid}")
+                log_launch(f"TRACKING: {kind} {app_name} relaunched itself, HWND {successor}, PID {successor_pid}")
                 tracked_pid, tracked_hwnd, tracked_since = successor_pid, successor, time.time()
                 force_foreground(successor)
                 continue
@@ -1019,7 +1066,7 @@ def wait_and_restore_iisu_for_window(
         current_process = None
 
     debug_log(f"native app exited: {app_name!r}; tracked_pid={tracked_pid}")
-    log_launch(f"EXITED: Windows app {app_name} process ended")
+    log_launch(f"EXITED: {kind} {app_name} process ended")
     show_iisu_window(config)
 
 
@@ -1485,6 +1532,9 @@ def handle_request(raw_intent: str) -> None:
     elif "ROM" in extras:
         # Already a plain filesystem path, not URI-encoded, no unquote().
         rom_filename = extras["ROM"].rsplit("/", 1)[-1]
+    elif "bootPath" in extras:
+        # Kenji-NX (Switch, routed to Ryujinx) gets the ROM's URI as this extra.
+        rom_filename = unquote(extras["bootPath"]).rsplit("/", 1)[-1]
     else:
         rom_filename = None
 
@@ -1544,6 +1594,7 @@ def handle_request(raw_intent: str) -> None:
         print(f"[bridge] launching: {args}")
         log_launch(f"LAUNCHED: {friendly_emulator_name(executable)}, {args}")
         hold_iisu_behind_stub(package)
+        existing_windows = list_visible_windows()
         process = subprocess.Popen(
             args, cwd=str(executable.parent), env=game_overrides.launch_env(override) if override else None
         )
@@ -1556,7 +1607,7 @@ def handle_request(raw_intent: str) -> None:
         # already be a watcher capable of restoring iiSU when it exits.
         threading.Thread(
             target=wait_and_restore_iisu,
-            args=(process, config, friendly_emulator_name(executable)),
+            args=(process, config, friendly_emulator_name(executable), existing_windows, executable.name),
             daemon=True,
         ).start()
 

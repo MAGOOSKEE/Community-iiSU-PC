@@ -293,6 +293,81 @@ class RelaunchingWindowsGameTests(unittest.TestCase):
         restored.assert_called_once()
 
 
+class RelaunchingEmulatorTests(unittest.TestCase):
+    """Ryujinx quits the process the bridge started about a second in and runs
+    the game in a new one; the bridge took that as the game ending."""
+
+    def _watch(self, lives_for, returncode=0, windows=({1, 2}, {1, 2, 900})):
+        clock = FakeTime()
+        process = SimpleNamespace(pid=10, returncode=None)
+
+        def wait():
+            clock.now += lives_for
+            process.returncode = returncode
+
+        process.wait = wait
+        listings = iter(windows)
+        last = [set(windows[-1])]
+
+        def list_windows():
+            last[0] = next(listings, last[0])
+            return last[0]
+
+        with patch.object(launch_bridge, "time", clock), \
+             patch.object(launch_bridge, "current_process", process), \
+             patch.object(launch_bridge, "current_native_pid", None), \
+             patch.object(launch_bridge, "current_native_window", None), \
+             patch.object(launch_bridge, "list_visible_windows", side_effect=list_windows), \
+             patch.object(launch_bridge, "_window_pid", side_effect=lambda hwnd: {900: 20, 1: 5, 2: 6}.get(hwnd)), \
+             patch.object(launch_bridge, "window_process_name", side_effect=lambda hwnd: "Ryujinx.exe"), \
+             patch.object(launch_bridge, "force_foreground"), \
+             patch.object(launch_bridge, "wait_and_restore_iisu_for_window") as followed, \
+             patch.object(launch_bridge, "show_iisu_window") as restored, \
+             patch.object(launch_bridge, "log_launch") as log:
+            launch_bridge.wait_and_restore_iisu(process, {}, "Ryujinx", {1, 2}, "Ryujinx.exe")
+            tracked = (launch_bridge.current_native_pid, launch_bridge.current_native_window)
+        return followed, restored, log, tracked
+
+    def test_the_new_process_is_followed(self):
+        followed, restored, log, tracked = self._watch(1)
+        followed.assert_called_once()
+        self.assertEqual(followed.call_args.args[0], 900)
+        self.assertEqual(followed.call_args.kwargs, {"kind": "emulator"})
+        self.assertEqual(tracked, (20, 900), "its quit hotkey and exit go by the new PID")
+        restored.assert_not_called()
+        self.assertIn("relaunched itself", log.call_args.args[0])
+
+    def test_a_game_quit_after_a_while_returns_at_once(self):
+        followed, restored, _log, _tracked = self._watch(120)
+        followed.assert_not_called()
+        restored.assert_called_once()
+
+    def test_an_early_failure_is_not_followed(self):
+        followed, restored, _log, _tracked = self._watch(1, returncode=3)
+        followed.assert_not_called()
+        restored.assert_called_once()
+
+    def test_an_early_quit_with_no_new_window_still_returns(self):
+        followed, restored, _log, _tracked = self._watch(1, windows=({1, 2},))
+        followed.assert_not_called()
+        restored.assert_called_once()
+
+
+class KenjiNxRomTests(unittest.TestCase):
+    def test_the_rom_comes_from_the_boot_path_extra(self):
+        intent = (
+            "Intent { act=org.kenjinx.android.LAUNCH_GAME cmp=org.kenjinx.android/.MainActivity (has extras) }\n"
+            "EXTRA:bootPath=content://com.android.externalstorage.documents/document/primary%3ARoms%2Fswitch%2FARMS.nsp"
+        )
+        with patch.object(launch_bridge, "load_config", return_value={"emulators": {}, "search_roots": [], "roms_dir": "."}), \
+             patch.object(launch_bridge, "is_game_running", return_value=False), \
+             patch.object(launch_bridge, "find_emulator_for_package", return_value=None) as lookup, \
+             patch.object(launch_bridge, "log_launch"), \
+             patch("builtins.print"):
+            launch_bridge.handle_request(intent)
+        self.assertEqual(lookup.call_args.args[:3], ("org.kenjinx.android", {}, "ARMS.nsp"))
+
+
 class QuitTapTests(unittest.TestCase):
     def test_quitting_a_subprocess_emulator_is_logged_and_terminates_it(self):
         proc = SimpleNamespace(pid=4321, poll=lambda: None, terminated=False)
