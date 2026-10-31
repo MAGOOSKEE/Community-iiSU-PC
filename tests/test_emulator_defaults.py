@@ -21,7 +21,41 @@ from shared.emulator_defaults import (
     describe_profile,
     retroarch_core_dll_for_android_core,
     standalone_profile_for_core_dll,
+    upgrade_outdated_defaults,
 )
+
+
+class OutdatedDefaultTests(unittest.TestCase):
+    OLD_CITRON = {"exe_names": ["citron.exe"], "pre_args": ["-f"]}
+
+    def test_citron_gets_its_game_after_g(self):
+        # citron.exe -f <game> opened Citron without starting the game.
+        self.assertEqual(build_emulators_map()["org.citron.citron_emu"]["pre_args"], ["-f", "-g"])
+
+    def test_an_untouched_old_default_is_upgraded_and_an_edited_one_kept(self):
+        edited = {"exe_names": ["citron.exe"], "pre_args": ["-f", "--portable"]}
+        upgraded = upgrade_outdated_defaults({
+            "org.citron.citron_emu": dict(self.OLD_CITRON), "org.yuzu.yuzu_emu": edited,
+            "com.github.stenzek.duckstation": {"exe_names": ["duckstation.exe"], "pre_args": ["-fullscreen"]},
+        })
+        self.assertEqual(upgraded["org.citron.citron_emu"]["pre_args"], ["-f", "-g"])
+        self.assertIs(upgraded["org.yuzu.yuzu_emu"], edited)
+        self.assertEqual(upgraded["com.github.stenzek.duckstation"]["pre_args"], ["-fullscreen"])
+
+    def test_loading_the_config_applies_it(self):
+        import json
+        import tempfile
+        from unittest.mock import patch
+
+        sys.path.insert(0, str(PROJECT_ROOT / "bridge"))
+        import bridge_config
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "config.json"
+            path.write_text(json.dumps({"emulators": {"org.citron.citron_emu": self.OLD_CITRON}}), encoding="utf-8")
+            with patch.object(bridge_config, "CONFIG_PATH", path):
+                config = bridge_config.load_config()
+        self.assertEqual(config["emulators"]["org.citron.citron_emu"]["pre_args"], ["-f", "-g"])
 
 
 class EmulatorScanTests(unittest.TestCase):
@@ -32,6 +66,13 @@ class EmulatorScanTests(unittest.TestCase):
         self.assertNotIn("Steam", labels)
         self.assertIn("DuckStation", labels)
         self.assertIn("RetroArch", labels)
+
+    def test_winlator_gets_a_stub_so_iisu_hands_windows_games_their_path(self):
+        # Without it iiSU 7.5 fell through to GameNative, which reads a game ID
+        # out of the (empty) placeholder, and refused every Windows game.
+        self.assertIn(("com.winlator.cmod", "Winlator"), all_stub_packages())
+        self.assertNotIn("com.winlator.cmod", build_emulators_map(), "the bridge handles Winlator itself")
+        self.assertNotIn("Winlator", [label for label, _exe in all_emulator_exe_names()])
 
     def test_steam_still_gets_its_redirector_app_and_mapping(self):
         self.assertIn("app.gamenative", [package for package, _label in all_stub_packages()])

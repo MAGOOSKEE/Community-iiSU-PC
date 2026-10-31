@@ -12,6 +12,8 @@ FileNotFoundError.
 import json
 from pathlib import Path
 
+from shared.emulator_defaults import upgrade_outdated_defaults
+
 CONFIG_PATH = Path(__file__).parent / "config.json"
 
 
@@ -24,10 +26,16 @@ class ConfigMissingError(RuntimeError):
 
 
 def load_config() -> dict:
+    """The config, with any emulator default an earlier version got wrong and
+    nobody has edited since replaced by the fixed one (see
+    shared/emulator_defaults.OUTDATED_DEFAULTS). Saving writes the fix back."""
     if not CONFIG_PATH.is_file():
         raise ConfigMissingError()
     with open(CONFIG_PATH, encoding="utf-8") as f:
-        return json.load(f)
+        config = json.load(f)
+    if isinstance(config.get("emulators"), dict):
+        config["emulators"] = upgrade_outdated_defaults(config["emulators"])
+    return config
 
 
 def save_config(config: dict) -> None:
