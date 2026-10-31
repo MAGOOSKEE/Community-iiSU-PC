@@ -7,9 +7,10 @@ Uses iiSU's own launcher icon when it can get one, extracted from the APK
 you supplied for patching (installer/input/*.apk), never bundled or
 redistributed: the extraction runs locally against your own copy each
 time, and the resulting .ico is gitignored, so it's regenerated per
-install rather than shipped in this project. Falls back to a generic
-bundled icon if extraction isn't possible for any reason (see
-extract_iisu_icon()).
+install rather than shipped in this project. Uses this project's own iiPC
+icon instead when you choose it (config.json's "icon_choice", picked in
+bridge/ui/dialogs/icon_choice_dialog.py) or when extraction isn't possible
+for any reason (see extract_iisu_icon()).
 
 Shells out to PowerShell's WScript.Shell COM object to create the actual
 .lnk file, since that's the standard way to do it on Windows and needs no
@@ -17,6 +18,7 @@ extra Python package (pywin32/winshell) beyond what ships with Windows.
 """
 
 import ctypes
+import json
 import re
 import shutil
 import subprocess
@@ -45,7 +47,9 @@ MANAGER_SHORTCUT_NAME = "Community-iiSU-PC Manager.lnk" if IS_WINDOWS else "Comm
 
 # .ico only really renders correctly in a Windows shell context; Linux
 # desktop environments expect a .png (or svg) for a .desktop file's Icon=.
+# The iiPC icon, this project's own: the choice, or the fallback.
 FALLBACK_ICON_PATH = BRIDGE_DIR / "assets" / ("iisu_launch.ico" if IS_WINDOWS else "iisu_launch.png")
+IIPC_PNG_PATH = BRIDGE_DIR / "assets" / "iisu_launch.png"
 EXTRACTED_ICON_PATH = BRIDGE_DIR / (".iisu_icon.ico" if IS_WINDOWS else ".iisu_icon.png")
 EXTRACTED_ICO_PATH = BRIDGE_DIR / ".iisu_icon.ico"
 EXTRACTED_PNG_PATH = BRIDGE_DIR / ".iisu_icon.png"
@@ -55,6 +59,28 @@ INPUT_DIR = PROJECT_ROOT / "installer" / "input"
 ICON_DENSITY_ORDER = ["xxxhdpi", "xxhdpi", "xhdpi", "hdpi", "mdpi"]
 ICON_RASTER_EXTS = [".webp", ".png"]
 ICON_SIZES = [16, 24, 32, 48, 64, 128, 256]
+
+# config.json's "icon_choice": which icon the shortcuts and the Manager show.
+ICON_IISU = "iisu"
+ICON_IIPC = "iipc"
+CONFIG_PATH = BRIDGE_DIR / "config.json"
+
+
+def configured_icon_choice() -> str:
+    """iiSU's own unless config.json says iiPC, also when it can't be read."""
+    try:
+        config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ICON_IISU
+    return ICON_IIPC if isinstance(config, dict) and config.get("icon_choice") == ICON_IIPC else ICON_IISU
+
+
+def icon_path_for(choice: str) -> Path:
+    """The icon file a choice shows, without extracting anything: iiSU's own
+    only once it has been extracted, the iiPC icon otherwise."""
+    if choice != ICON_IIPC and EXTRACTED_ICON_PATH.is_file():
+        return EXTRACTED_ICON_PATH
+    return FALLBACK_ICON_PATH
 
 
 def _find_input_apk() -> Path | None:
@@ -249,9 +275,9 @@ def _update_manager_shortcut_icon(icon_path: Path) -> None:
     """Re-points the installer-created Manager shortcut's icon to match,
     only if that shortcut actually exists (it's optional, tied to Inno's
     desktopicon task) and only if it isn't already pointing at icon_path
-    (skips a pointless PowerShell call on every ordinary launch). Only
-    ever upgrades it away from the generic icon, never touches TargetPath/
-    Arguments/WorkingDirectory, those are Inno's to own. On Linux there's
+    (skips a pointless PowerShell call on every ordinary launch). Never
+    touches TargetPath/Arguments/WorkingDirectory, those are Inno's to
+    own. On Linux there's
     no separate installer-created shortcut to re-point, so this just
     (re)writes the Manager's own .desktop file directly."""
     if not IS_WINDOWS:
@@ -273,17 +299,31 @@ def _update_manager_shortcut_icon(icon_path: Path) -> None:
     )
 
 
-def create_desktop_shortcut(apk_path: Path | None = None) -> Path:
+def remove_desktop_shortcut(icon_choice: str | None = None) -> None:
+    """For someone who wants no launch shortcut on the desktop: deletes the
+    one Setup made and points the Manager's shortcut at the chosen icon. On
+    Linux the app menu entry stays, so it can still be found."""
+    (desktop_dir() / SHORTCUT_NAME).unlink(missing_ok=True)
+    _update_manager_shortcut_icon(icon_path_for(icon_choice or configured_icon_choice()))
+    _refresh_shell_icon_cache()
+
+
+def create_desktop_shortcut(apk_path: Path | None = None, icon_choice: str | None = None) -> Path:
+    """icon_choice is ICON_IISU or ICON_IIPC, config.json's when omitted.
+    iiSU's icon is extracted either way, so it can be picked later."""
+    icon_choice = icon_choice or configured_icon_choice()
     extracted = extract_iisu_icon(apk_path)
-    icon_path = extracted or FALLBACK_ICON_PATH
-    if extracted is None:
-        # extract_iisu_icon() already printed exactly why (missing Pillow,
-        # apktool failure, etc.), this makes the *consequence* visible
-        # too, since that diagnostic line is easy to miss buried in a long
-        # setup log, and the shortcut otherwise looks identical either way.
-        print("[shortcut] using the generic fallback icon, not iiSU's own, see the line above for why")
+    if icon_choice == ICON_IIPC:
+        icon_path = FALLBACK_ICON_PATH
     else:
-        _update_manager_shortcut_icon(icon_path)
+        icon_path = extracted or FALLBACK_ICON_PATH
+        if extracted is None:
+            # extract_iisu_icon() already printed exactly why (missing Pillow,
+            # apktool failure, etc.), this makes the *consequence* visible
+            # too, since that diagnostic line is easy to miss buried in a long
+            # setup log, and the shortcut otherwise looks identical either way.
+            print("[shortcut] using the iiPC fallback icon, not iiSU's own, see the line above for why")
+    _update_manager_shortcut_icon(icon_path)
 
     if not IS_WINDOWS:
         content = (

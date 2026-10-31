@@ -246,6 +246,54 @@ class ManagerWindowSmokeTests(unittest.TestCase):
         wizard.latest_option.setChecked(True)
         self.assertEqual(wizard.selected_source(), "https://x/iiSU-Alpha-7.5.apk", "a URL is downloaded first")
 
+    def test_recreate_shortcut_asks_for_the_icon_and_uses_the_choice(self):
+        import create_shortcut
+        import bridge.ui.dialogs.icon_choice_dialog as icon_choice_dialog
+        import bridge.ui.pages.home as home
+        from PySide6.QtWidgets import QDialog
+
+        self.config_path.write_text(json.dumps(self.config), encoding="utf-8")
+        window = self._window()
+        page = window.home_page
+        with unittest.mock.patch.object(create_shortcut, "CONFIG_PATH", self.config_path), \
+             unittest.mock.patch.object(icon_choice_dialog.IconChoiceDialog, "exec", return_value=QDialog.DialogCode.Rejected), \
+             unittest.mock.patch.object(home, "run_in_background") as remade:
+            page._recreate_desktop_shortcut()
+        remade.assert_not_called()
+        self.assertNotIn("icon_choice", json.loads(self.config_path.read_text(encoding="utf-8")), "Cancel changes nothing")
+
+        with unittest.mock.patch.object(create_shortcut, "CONFIG_PATH", self.config_path), \
+             unittest.mock.patch.object(icon_choice_dialog.IconChoiceDialog, "exec", return_value=QDialog.DialogCode.Accepted), \
+             unittest.mock.patch.object(icon_choice_dialog.IconChoiceDialog, "choice", return_value="iipc"), \
+             unittest.mock.patch.object(home, "run_in_background") as remade:
+            page._recreate_desktop_shortcut()
+        self.assertEqual(json.loads(self.config_path.read_text(encoding="utf-8"))["icon_choice"], "iipc")
+        self.assertEqual(remade.call_args.args[-1], "iipc", "the shortcuts are remade with the choice")
+
+    def test_the_icon_popup_offers_iisus_icon_only_once_extracted(self):
+        import create_shortcut
+        from bridge.ui.dialogs.icon_choice_dialog import IconChoiceDialog
+
+        missing = Path(self._tmp.name) / ".iisu_icon.png"
+        with unittest.mock.patch.object(create_shortcut, "EXTRACTED_PNG_PATH", missing):
+            dialog = IconChoiceDialog(None)
+        self.addCleanup(dialog.deleteLater)
+        self.assertFalse(dialog.iisu_option.isEnabled())
+        self.assertEqual(dialog.choice(), "iipc")
+
+        missing.write_bytes(create_shortcut.IIPC_PNG_PATH.read_bytes())
+        with unittest.mock.patch.object(create_shortcut, "EXTRACTED_PNG_PATH", missing):
+            dialog = IconChoiceDialog(None)
+        self.addCleanup(dialog.deleteLater)
+        self.assertTrue(dialog.iisu_option.isEnabled())
+        self.assertEqual(dialog.choice(), "iisu", "iiSU's own stays the default")
+        self.assertTrue(dialog.shortcut_check.isHidden(), "only Setup's popup offers no shortcut")
+
+        dialog = IconChoiceDialog(None, offer_no_shortcut=True)
+        self.addCleanup(dialog.deleteLater)
+        self.assertFalse(dialog.shortcut_check.isHidden())
+        self.assertTrue(dialog.wants_shortcut(), "a shortcut stays the default")
+
     def test_a_left_click_on_the_version_opens_its_release_page(self):
         from PySide6.QtCore import QPoint, Qt
         from PySide6.QtTest import QTest

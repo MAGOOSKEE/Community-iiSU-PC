@@ -194,13 +194,17 @@ class ManagerWindow(QMainWindow):
     def _apply_window_icon(self) -> None:
         import create_shortcut
 
-        icon_path = (
-            create_shortcut.EXTRACTED_ICON_PATH
-            if create_shortcut.EXTRACTED_ICON_PATH.is_file()
-            else create_shortcut.FALLBACK_ICON_PATH
-        )
+        # From the file: this runs before config_data is loaded.
+        icon_path = create_shortcut.icon_path_for(create_shortcut.configured_icon_choice())
         if icon_path.is_file():
             self.setWindowIcon(QIcon(str(icon_path)))
+
+    def set_icon_choice(self, choice: str) -> None:
+        """Saves the icon picked in IconChoiceDialog on its own, onto the last
+        saved config, so unsaved edits on the settings pages stay unsaved."""
+        self.config_data["icon_choice"] = choice
+        save_config(self.config_data)
+        self._apply_window_icon()
 
     # == Config state ==
 

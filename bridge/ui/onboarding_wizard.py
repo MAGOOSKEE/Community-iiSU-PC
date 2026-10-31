@@ -46,6 +46,7 @@ from shared.emulator_defaults import all_emulator_exe_names, describe_profile
 
 from bridge.ui.dialogs.emulator_dialog import EmulatorDialog
 from bridge.ui.dialogs.emulator_download_dialog import EmulatorDownloadDialog
+from bridge.ui.dialogs.icon_choice_dialog import IconChoiceDialog
 from bridge.ui.widgets.card import Card
 from bridge.ui.pages.settings.display import REFRESH_RATE_PRESETS, RESOLUTION_PRESETS
 from bridge.ui.widgets.display_preview import DisplayPreview
@@ -960,8 +961,18 @@ class OnboardingWizard(QMainWindow):
             return
 
         config = self._build_final_config()
+        # Setup made the shortcuts just before this, with iiSU's own icon.
+        icon_dialog = IconChoiceDialog(config.get("icon_choice"), self, offer_no_shortcut=True)
+        icon_chosen = icon_dialog.exec() == QDialog.DialogCode.Accepted
+        if icon_chosen:
+            config["icon_choice"] = icon_dialog.choice()
         save_config(config)
         self.config_data = config
+        if icon_chosen:
+            self._shortcut_signals = run_in_background(
+                self._remake_shortcuts, None, self._on_shortcuts_failed,
+                config["icon_choice"], icon_dialog.wants_shortcut(),
+            )
 
         self.back_button.setEnabled(False)
         self.next_button.setEnabled(False)
@@ -975,8 +986,12 @@ class OnboardingWizard(QMainWindow):
         if self._display_changed():
             self._write_avd_display_profile(config)
 
+        start_from = (
+            "the desktop shortcut or the Manager's Home page"
+            if not icon_chosen or icon_dialog.wants_shortcut() else "the Manager's Home page"
+        )
         self.finish_step.finish_status_label.setText(
-            "Saved. Start Community-iiSU-PC from the desktop shortcut or the Manager's Home page. "
+            f"Saved. Start Community-iiSU-PC from {start_from}. "
             "Check your ROM folder is reachable from inside the VM, and rescan \"Emulator Folders\" "
             "if you're unsure your emulators were found."
         )
@@ -988,6 +1003,18 @@ class OnboardingWizard(QMainWindow):
         self.next_button.setText("Close")
         self.next_button.clicked.connect(self.close)
         self.next_button.setEnabled(True)
+
+    @staticmethod
+    def _remake_shortcuts(icon_choice: str, wants_shortcut: bool):
+        import create_shortcut
+
+        if wants_shortcut:
+            return create_shortcut.create_desktop_shortcut(icon_choice=icon_choice)
+        return create_shortcut.remove_desktop_shortcut(icon_choice)
+
+    def _on_shortcuts_failed(self, message: str) -> None:
+        # Not worth stopping onboarding over: Recreate Shortcut on Home tries again.
+        print(f"[onboarding] couldn't remake the desktop shortcuts with the chosen icon: {message}")
 
     def _write_avd_display_profile(self, config: dict) -> None:
         """Best-effort: a failure here just leaves the AVD on its previous
