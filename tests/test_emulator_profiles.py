@@ -20,7 +20,7 @@ class NormalizeTests(unittest.TestCase):
         profile = ep.normalize_profile({"gpu_mode": "nonsense", "accel": 7, "audio": "loud", "cores": "x", "ram_mb": -5})
         self.assertEqual(profile["gpu_mode"], "auto")
         self.assertEqual(profile["accel"], "auto")
-        self.assertEqual(profile["audio"], "default")
+        self.assertEqual(profile["audio"], ep.DEFAULT_PROFILE["audio"])
         self.assertEqual(profile["cores"], 0)
         self.assertEqual(profile["ram_mb"], 0)
 
@@ -100,8 +100,11 @@ class BuildArgsTests(unittest.TestCase):
 
 
 class ConfigIniOverrideTests(unittest.TestCase):
-    def test_default_restores_audio_on(self):
-        self.assertEqual(ep.config_ini_overrides({}), {"hw.audioInput": "yes", "hw.audioOutput": "yes"})
+    def test_default_detaches_only_the_microphone(self):
+        self.assertEqual(ep.config_ini_overrides({}), {"hw.audioInput": "no", "hw.audioOutput": "yes"})
+
+    def test_microphone_and_speakers_restores_audio_on(self):
+        self.assertEqual(ep.config_ini_overrides({"audio": "default"}), {"hw.audioInput": "yes", "hw.audioOutput": "yes"})
 
     def test_no_input(self):
         self.assertEqual(ep.config_ini_overrides({"audio": "no_input"}), {"hw.audioInput": "no", "hw.audioOutput": "yes"})
@@ -114,6 +117,14 @@ class EnvTests(unittest.TestCase):
     def test_parses_key_values_and_skips_junk(self):
         text = "# comment\nFOO=bar\n\nBAD LINE\nQEMU_AUDIO_DRV = dsound\nbad key=1\n"
         self.assertEqual(ep.parse_env(text), {"FOO": "bar", "QEMU_AUDIO_DRV": "dsound"})
+
+    def test_every_launch_gets_the_audio_timer(self):
+        self.assertEqual(ep.launch_env({})["QEMU_AUDIO_TIMER_PERIOD"], "1000")
+
+    def test_a_profile_can_override_the_base_env(self):
+        env = ep.launch_env({"env": "QEMU_AUDIO_TIMER_PERIOD=250\nFOO=bar"})
+        self.assertEqual(env["QEMU_AUDIO_TIMER_PERIOD"], "250")
+        self.assertEqual(env["FOO"], "bar")
 
 
 class FingerprintTests(unittest.TestCase):
