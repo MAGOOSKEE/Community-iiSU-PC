@@ -39,10 +39,19 @@ DEFAULT_PROFILE: dict = {
     "accel": "auto",
     "cores": 0,  # 0 = whatever the AVD is configured with
     "ram_mb": 0,  # 0 = whatever the AVD is configured with
-    "audio": "default",
+    # iiSU has no use for a microphone.
+    "audio": "no_input",
     "extra_args": "",
     "env": "",
 }
+
+# Set for every launch; a profile's own env can still override them. The
+# emulator's audio timer runs at 100 Hz unless told otherwise, and its sound
+# crackled on Windows. Measured on one PC with Emulator 37, each on a fresh
+# boot: 250 and 500 Hz crackled less, 1000 Hz was the one kept. A bigger
+# DirectSound buffer, SDL audio, a fixed 48 kHz output, more cores, the host
+# GPU and a high process priority all crackled as before.
+BASE_ENV = {"QEMU_AUDIO_TIMER_PERIOD": "1000"}
 
 PRESETS: dict[str, dict] = {
     "Default": {},
@@ -130,6 +139,11 @@ def parse_env(text: str) -> dict[str, str]:
         if key and all(ch.isalnum() or ch == "_" for ch in key):
             result[key] = value.strip()
     return result
+
+
+def launch_env(profile: Mapping) -> dict[str, str]:
+    """The environment variables a launch with this profile adds."""
+    return {**BASE_ENV, **parse_env(normalize_profile(profile)["env"])}
 
 
 def split_extra_args(text: str, is_windows: bool) -> list[str]:

@@ -543,7 +543,7 @@ def start_avd(
     avd_dir = PORTABLE_AVD_HOME / f"{avd_name}.avd"
     env = os.environ.copy()
     env.update(env_overrides)
-    env.update(emulator_profiles.parse_env(profile["env"]))
+    env.update(emulator_profiles.launch_env(profile))
     if not IS_WINDOWS:
         # Qt (the boot overlay, and any Qt-based emulator UI) can pick up
         # a wrong HiDPI scale factor from some Linux desktop environments,
