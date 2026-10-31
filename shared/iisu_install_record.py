@@ -20,7 +20,7 @@ RECORD_PATH = Path(__file__).resolve().parent.parent / "bridge" / ".iisu_install
 # repatching: the Manager then won't start iiSU until it is (see
 # bridge/ui/dialogs/repatch_wizard.py). tests/test_iisu_install_record.py fails
 # when smali_patch/ changes and this hasn't.
-PATCH_VERSION = 4
+PATCH_VERSION = 5
 # A record from before patch versions were kept, or no record at all.
 UNVERSIONED_PATCH = 1
 PATCH_CHANGES = {
@@ -29,6 +29,8 @@ PATCH_CHANGES = {
     3: "iiSU notices when you return from a PC game, so its music and interface come back as they do on Android.",
     # Also through the repatch's stand-in apps: it adds Winlator's.
     4: "Windows games launch from iiSU again.",
+    # The repatch's stand-ins again: it adds Kenji-NX's, which Ryujinx is behind.
+    5: "Switch games can be played in Ryujinx.",
 }
 # What the user still has to change by hand after repatching to each version,
 # for what the repatch itself can't (iiSU's own settings). Every version needs
@@ -42,6 +44,11 @@ PATCH_STEPS: dict[int, list[str]] = {
         "In iiSU, open the Windows platform's menu, choose Override Emulator and pick "
         "Winlator Cmod (Standalone). If your Windows games still show GameNative, run "
         "Rescan full library.",
+    ],
+    # Only for those who want Ryujinx: iiSU keeps the Switch emulator it chose.
+    5: [
+        "To play Switch games in Ryujinx, open the Switch platform's menu in iiSU, choose "
+        "Override Emulator and pick Kenji-NX (Standalone).",
     ],
 }
 

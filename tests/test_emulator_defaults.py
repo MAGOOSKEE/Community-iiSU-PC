@@ -57,6 +57,19 @@ class OutdatedDefaultTests(unittest.TestCase):
                 config = bridge_config.load_config()
         self.assertEqual(config["emulators"]["org.citron.citron_emu"]["pre_args"], ["-f", "-g"])
 
+    def test_an_older_config_gets_ryujinx_and_keeps_an_edited_one(self):
+        upgraded = upgrade_outdated_defaults({"org.citron.citron_emu": dict(self.OLD_CITRON)})
+        self.assertEqual(upgraded["org.kenjinx.android"], {"exe_names": ["Ryujinx.exe"], "pre_args": ["--fullscreen"]})
+        edited = {"exe_names": ["Ryujinx.exe"], "pre_args": []}
+        self.assertIs(upgrade_outdated_defaults({"org.kenjinx.android": edited})["org.kenjinx.android"], edited)
+
+
+class RyujinxTests(unittest.TestCase):
+    def test_kenji_nx_gets_a_stub_and_routes_to_ryujinx(self):
+        # iiSU has no Ryujinx package; Kenji-NX, an Android fork of it, is its slot.
+        self.assertIn(("org.kenjinx.android", "Ryujinx"), all_stub_packages())
+        self.assertIn(("Ryujinx", ["Ryujinx.exe"]), all_emulator_exe_names())
+
 
 class EmulatorScanTests(unittest.TestCase):
     def test_steam_is_not_scanned_for_as_an_emulator(self):
