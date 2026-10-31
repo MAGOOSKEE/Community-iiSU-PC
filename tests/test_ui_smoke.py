@@ -176,7 +176,9 @@ class ManagerWindowSmokeTests(unittest.TestCase):
             window.home_page.refresh_resume_reason()
         self.assertEqual(label.text(), "Next start: cold boot (the display settings changed)")
         self.assertEqual(label.toolTip(), "")
-        with unittest.mock.patch.object(home.start_iisu_pc, "describe_boot_fingerprint_diff", return_value=[]):
+        # Quick resume also needs a complete snapshot, which a CI runner has none of.
+        with unittest.mock.patch.object(home.start_iisu_pc, "describe_boot_fingerprint_diff", return_value=[]), \
+                unittest.mock.patch.object(home.start_iisu_pc, "has_complete_quickboot_snapshot", return_value=True):
             window.home_page.refresh_resume_reason()
         self.assertEqual(label.text(), "Next start: quick resume")
 
