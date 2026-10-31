@@ -50,6 +50,8 @@ user32.BringWindowToTop.argtypes = [wintypes.HWND]
 user32.BringWindowToTop.restype = wintypes.BOOL
 user32.AttachThreadInput.argtypes = [wintypes.DWORD, wintypes.DWORD, wintypes.BOOL]
 user32.AttachThreadInput.restype = wintypes.BOOL
+user32.GetForegroundWindow.restype = wintypes.HWND
+user32.keybd_event.argtypes = [wintypes.BYTE, wintypes.BYTE, wintypes.DWORD, ctypes.c_void_p]
 user32.GetWindowRect.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]
 user32.GetWindowRect.restype = wintypes.BOOL
 user32.SetCursorPos.argtypes = [ctypes.c_int, ctypes.c_int]
@@ -84,7 +86,13 @@ SW_RESTORE = 9
 MOUSEEVENTF_LEFTDOWN = 0x0002
 MOUSEEVENTF_LEFTUP = 0x0004
 HWND_TOP = 0
+HWND_TOPMOST = -1
+HWND_NOTOPMOST = -2
+SWP_NOSIZE = 0x0001
+SWP_NOMOVE = 0x0002
 SWP_SHOWWINDOW = 0x0040
+VK_MENU = 0x12
+KEYEVENTF_KEYUP = 0x0002
 SWP_FRAMECHANGED = 0x0020
 SM_CXSCREEN = 0
 SM_CYSCREEN = 1
@@ -408,16 +416,36 @@ def get_primary_monitor_mode() -> tuple[int, int, int]:
     return dm.dmPelsWidth, dm.dmPelsHeight, refresh_hz
 
 
-def force_foreground(hwnd: int, show_state: int = SW_RESTORE) -> None:
-    """Windows normally blocks background processes from stealing focus;
-    this uses the standard AttachThreadInput workaround to get around that."""
+def force_foreground(hwnd: int, show_state: int = SW_RESTORE) -> bool:
+    """Brings hwnd to the front and gives it focus, returning whether it got
+    there. Windows only lets the process that has the foreground, or that
+    just received input, change it, and the bridge is a background process:
+    it used to attach to its own thread, which grants nothing, so games
+    opened behind the Manager or a terminal. Now it attaches to the thread
+    of the window currently in front and taps Alt, which Windows counts as
+    this process's input. Making the window topmost for a moment raises it
+    even if activation is still refused."""
     current_thread_id = kernel32.GetCurrentThreadId()
-    target_thread_id = user32.GetWindowThreadProcessId(hwnd, None)
-    user32.AttachThreadInput(target_thread_id, current_thread_id, True)
-    user32.ShowWindow(hwnd, show_state)
-    user32.SetForegroundWindow(hwnd)
-    user32.BringWindowToTop(hwnd)
-    user32.AttachThreadInput(target_thread_id, current_thread_id, False)
+    foreground = user32.GetForegroundWindow()
+    foreground_thread_id = user32.GetWindowThreadProcessId(foreground, None) if foreground else 0
+    attached = bool(
+        foreground_thread_id
+        and foreground_thread_id != current_thread_id
+        and user32.AttachThreadInput(current_thread_id, foreground_thread_id, True)
+    )
+    try:
+        user32.keybd_event(VK_MENU, 0, 0, None)
+        user32.keybd_event(VK_MENU, 0, KEYEVENTF_KEYUP, None)
+        user32.ShowWindow(hwnd, show_state)
+        flags = SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW
+        user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags)
+        user32.SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, flags)
+        user32.BringWindowToTop(hwnd)
+        user32.SetForegroundWindow(hwnd)
+    finally:
+        if attached:
+            user32.AttachThreadInput(current_thread_id, foreground_thread_id, False)
+    return user32.GetForegroundWindow() == hwnd
 
 
 def nudge_focus_with_click(hwnd: int) -> None:

@@ -92,6 +92,7 @@ from shared.vm_backend import BACKEND_WAYDROID, resolve_backend, vm_device_conne
 from winapi import (
     SW_MINIMIZE,
     SW_RESTORE,
+    find_window_by_pid,
     find_window_by_title,
     force_foreground,
     hide_emulator_toolbar,
@@ -469,6 +470,12 @@ _LAUNCH_IISU_SCRIPT = (
     "echo \"$out\"; exit 1"
 )
 IISU_START_WAIT_SECONDS = 60
+# How long a launched emulator's window keeps being pushed to the front.
+EMULATOR_FOCUS_SECONDS = 6.0
+# A Windows game that quits this soon after its window was tracked may have
+# relaunched itself; the bridge waits this long for the new process's window.
+NATIVE_RELAUNCH_SECONDS = 30.0
+NATIVE_RELAUNCH_WAIT_SECONDS = 10.0
 
 
 def set_volume_max() -> None:
@@ -518,7 +525,20 @@ def bring_emulator_to_foreground(pid: int) -> bool:
     if hwnd is None:
         print("[bridge] could not locate emulator window to focus")
         return False
-    force_foreground(hwnd)
+    # Tried again for a few seconds: an emulator often shows its main window or
+    # a splash first and the game's window just after. Linux answers None (it
+    # can't tell), which counts as done.
+    deadline = time.monotonic() + EMULATOR_FOCUS_SECONDS
+    in_front = force_foreground(hwnd)
+    while in_front is False and time.monotonic() < deadline:
+        time.sleep(0.5)
+        hwnd = find_window_by_pid(pid) or hwnd
+        in_front = force_foreground(hwnd)
+    if in_front is False:
+        # The focus click below lands wherever the window's centre is, which
+        # would be on whatever is still covering it.
+        print("[bridge] couldn't bring the emulator window to the front")
+        return True
     # Give the window a moment to finish becoming active before clicking it.
     time.sleep(0.3)
     nudge_focus_with_click(hwnd)
@@ -891,8 +911,36 @@ def load_windows_apps() -> dict:
     return {str(name).casefold(): entry for name, entry in data.items()}
 
 
-def wait_and_restore_iisu_for_window(hwnd: int, config: dict, app_name: str) -> None:
-    """Track a native game across HWND recreation and restore iiSU on exit."""
+def find_relaunched_window(existing_windows: set[int], excluded_processes: set[str], gone_pid: int) -> int | None:
+    """A new game window from another process, when the tracked one quit early.
+
+    Some Windows games (Bejeweled 3 through Steam, seen live) show a window,
+    then quit and start again as a new process. Without this the bridge took
+    the first exit as the game ending and brought iiSU back over the game.
+    """
+    hwnd = wait_for_new_visible_window_excluding_processes(
+        existing_windows,
+        excluded_processes,
+        timeout=NATIVE_RELAUNCH_WAIT_SECONDS,
+        stable_seconds=1.0,
+    )
+    if hwnd is None or not user32.IsWindow(hwnd) or _window_pid(hwnd) in (None, gone_pid):
+        return None
+    return hwnd
+
+
+def wait_and_restore_iisu_for_window(
+    hwnd: int,
+    config: dict,
+    app_name: str,
+    existing_windows: set[int] | None = None,
+    excluded_processes: set[str] | None = None,
+) -> None:
+    """Track a native game across HWND recreation and restore iiSU on exit.
+
+    With existing_windows (the windows open before the launch), a game whose
+    process quits within NATIVE_RELAUNCH_SECONDS is followed into the process
+    that replaces it."""
     global current_process, current_native_window, current_native_pid
 
     with current_process_lock:
@@ -904,8 +952,30 @@ def wait_and_restore_iisu_for_window(hwnd: int, config: dict, app_name: str) -> 
         wait_for_window_to_close(hwnd)
     else:
         tracked_hwnd = hwnd
+        tracked_since = time.time()
 
-        while _pid_is_running(tracked_pid):
+        while True:
+            if not _pid_is_running(tracked_pid):
+                if existing_windows is None or time.time() - tracked_since > NATIVE_RELAUNCH_SECONDS:
+                    break
+                successor = find_relaunched_window(existing_windows, excluded_processes or set(), tracked_pid)
+                successor_pid = _window_pid(successor) if successor is not None else None
+                if not successor_pid:
+                    break
+                with current_process_lock:
+                    if current_native_pid != tracked_pid:
+                        return
+                    current_native_window = successor
+                    current_native_pid = successor_pid
+                debug_log(
+                    f"native app relaunched: {app_name!r}; old_pid={tracked_pid}; "
+                    f"pid={successor_pid}; hwnd={successor}"
+                )
+                log_launch(f"TRACKING: Windows app {app_name} relaunched itself, HWND {successor}, PID {successor_pid}")
+                tracked_pid, tracked_hwnd, tracked_since = successor_pid, successor, time.time()
+                force_foreground(successor)
+                continue
+
             if tracked_hwnd is not None and user32.IsWindow(tracked_hwnd):
                 time.sleep(0.25)
                 continue
@@ -1099,7 +1169,7 @@ def launch_windows_app(app_name: str, config: dict) -> bool:
         # must already have an owner once the game is globally tracked.
         threading.Thread(
             target=wait_and_restore_iisu_for_window,
-            args=(hwnd, config, app_name),
+            args=(hwnd, config, app_name, existing_windows, excluded_processes),
             daemon=True,
         ).start()
 
@@ -1203,7 +1273,7 @@ def launch_steam_game(app_id: str, config: dict) -> None:
         # later foreground or queued-quit operation can raise.
         threading.Thread(
             target=wait_and_restore_iisu_for_window,
-            args=(hwnd, config, f"Steam app {app_id}"),
+            args=(hwnd, config, f"Steam app {app_id}", existing_windows, {"steam.exe", "steamwebhelper.exe"}),
             daemon=True,
         ).start()
 

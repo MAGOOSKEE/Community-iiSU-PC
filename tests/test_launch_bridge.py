@@ -215,6 +215,84 @@ class StandInTests(unittest.TestCase):
         self.assertEqual(shell.call_args.args[0], "am start -n org.ppsspp.ppsspp/com.iisupc.stub.RedirectorActivity")
 
 
+class EmulatorToFrontTests(unittest.TestCase):
+    """Windows let the bridge's old focus call fail silently, so games opened
+    behind the Manager or a terminal."""
+
+    def _bring(self, answers):
+        clock = FakeTime()
+        with patch.object(launch_bridge, "time", clock), \
+             patch.object(launch_bridge, "wait_for_window_by_pid", return_value=111), \
+             patch.object(launch_bridge, "find_window_by_pid", return_value=222), \
+             patch.object(launch_bridge, "force_foreground", side_effect=answers) as forced, \
+             patch.object(launch_bridge, "nudge_focus_with_click") as clicked, \
+             patch("builtins.print"):
+            found = launch_bridge.bring_emulator_to_foreground(4242)
+        return found, forced, clicked
+
+    def test_it_keeps_trying_until_the_game_window_is_in_front(self):
+        found, forced, clicked = self._bring([False, False, True])
+        self.assertTrue(found)
+        self.assertEqual(forced.call_count, 3)
+        self.assertEqual(forced.call_args.args[0], 222, "picks up the window the emulator shows next")
+        clicked.assert_called_once_with(222)
+
+    def test_no_focus_click_while_something_else_covers_it(self):
+        found, forced, clicked = self._bring(lambda _hwnd: False)
+        self.assertTrue(found)
+        self.assertGreater(forced.call_count, 3)
+        clicked.assert_not_called()
+
+    def test_a_platform_that_cant_tell_is_done_after_one_try(self):
+        _found, forced, clicked = self._bring([None])
+        forced.assert_called_once()
+        clicked.assert_called_once_with(111)
+
+
+class RelaunchingWindowsGameTests(unittest.TestCase):
+    """Bejeweled 3 through Steam quit its first process 2 s in and started
+    again; the bridge took that as the game ending and brought iiSU back."""
+
+    def _track(self, first_pid_lives_for, successors):
+        clock = FakeTime()
+        clock.time = clock.monotonic
+        lifetimes = {10: clock.now + first_pid_lives_for, 20: clock.now + 60}
+        searches = iter(successors)
+        with patch.object(launch_bridge, "time", clock), \
+             patch.object(launch_bridge, "current_native_pid", 10), \
+             patch.object(launch_bridge, "current_native_window", 500), \
+             patch.object(launch_bridge, "user32", SimpleNamespace(IsWindow=lambda hwnd: True)), \
+             patch.object(launch_bridge, "_pid_is_running", side_effect=lambda pid: clock.now < lifetimes.get(pid, 0)), \
+             patch.object(launch_bridge, "_window_pid", side_effect=lambda hwnd: {900: 20}.get(hwnd)), \
+             patch.object(launch_bridge, "wait_for_new_visible_window_excluding_processes",
+                          side_effect=lambda *a, **k: next(searches)) as searched, \
+             patch.object(launch_bridge, "force_foreground"), \
+             patch.object(launch_bridge, "show_iisu_window") as restored, \
+             patch.object(launch_bridge, "log_launch") as log, \
+             patch.object(launch_bridge, "debug_log"):
+            launch_bridge.wait_and_restore_iisu_for_window(500, {}, "Bejeweled 3", {1, 2}, {"steam.exe"})
+            seen_pid = launch_bridge.current_native_pid
+        return clock, searched, restored, log, seen_pid
+
+    def test_the_new_process_is_followed_and_iisu_waits_for_it(self):
+        clock, searched, restored, log, _pid = self._track(2, [900, None])
+        self.assertEqual(searched.call_count, 1, "the successor lived past the relaunch window")
+        self.assertGreaterEqual(clock.now, 62, "iiSU came back only after the relaunched game ended")
+        restored.assert_called_once()
+        self.assertIn("relaunched itself", log.call_args_list[0].args[0])
+
+    def test_a_game_quit_after_a_while_returns_to_iisu_at_once(self):
+        clock, searched, restored, _log, _pid = self._track(120, [])
+        searched.assert_not_called()
+        restored.assert_called_once()
+        self.assertLess(clock.now, 171)
+
+    def test_an_early_quit_with_no_new_window_still_returns(self):
+        _clock, searched, restored, _log, _pid = self._track(2, [None])
+        searched.assert_called_once()
+        restored.assert_called_once()
+
+
 class QuitTapTests(unittest.TestCase):
     def test_quitting_a_subprocess_emulator_is_logged_and_terminates_it(self):
         proc = SimpleNamespace(pid=4321, poll=lambda: None, terminated=False)
