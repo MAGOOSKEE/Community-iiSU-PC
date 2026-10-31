@@ -195,17 +195,32 @@ def get_fingerprint(adb: Adb) -> str:
     return _text(adb("shell", "getprop ro.build.fingerprint", timeout=30)).strip()
 
 
-def reboot_and_wait(adb: Adb, timeout: int = BOOT_TIMEOUT, sleep=time.sleep, clock=time.monotonic) -> bool:
+class EmulatorExited(RuntimeError):
+    """The emulator process itself closed during a reboot check."""
+
+    def __init__(self):
+        super().__init__("The Android emulator closed unexpectedly while checking the VM still starts.")
+
+
+def reboot_and_wait(
+    adb: Adb, timeout: int = BOOT_TIMEOUT, sleep=time.sleep, clock=time.monotonic, alive: Callable[[], bool] | None = None,
+) -> bool:
     """Reboots the guest and waits for Android to finish booting. False if it
-    doesn't within the timeout (a boot loop)."""
+    doesn't within the timeout (a boot loop).
+
+    alive, when given, says whether the emulator process is still running. If
+    it closes, EmulatorExited is raised right away: that is the emulator
+    crashing, not Android failing to boot. Seen live in Setup with Emulator
+    37.2.13, on a reboot after a tier that removed nothing; eight reboots in
+    the same mode, trimmed and not, came back fine, so it's an occasional
+    emulator crash. Setup waited out the whole timeout, then threw away the
+    trim as if it had broken the VM."""
     adb("reboot", timeout=30)
     sleep(10)
     deadline = clock() + timeout
-    try:
-        adb("wait-for-device", timeout=timeout)
-    except subprocess.TimeoutExpired:
-        return False
     while clock() < deadline:
+        if alive is not None and not alive():
+            raise EmulatorExited()
         try:
             if _text(adb("shell", "getprop sys.boot_completed", timeout=15)).strip() == "1":
                 return True
@@ -215,6 +230,24 @@ def reboot_and_wait(adb: Adb, timeout: int = BOOT_TIMEOUT, sleep=time.sleep, clo
     return False
 
 
+def _rebooted(adb: Adb, sleep, alive, restart, progress: Progress) -> bool:
+    """reboot_and_wait, given one more go in a fresh emulator when the first
+    closes or Android doesn't come back in time. Only a VM that still won't
+    boot after that counts as broken by the change."""
+    try:
+        if reboot_and_wait(adb, timeout=BOOT_TIMEOUT, sleep=sleep, alive=alive):
+            return True
+        why = "Android didn't come back in time"
+    except EmulatorExited:
+        if restart is None:
+            raise
+        why = "the emulator closed during the reboot"
+    if restart is None:
+        return False
+    progress(f"{why}, starting the emulator again to check...")
+    return restart()
+
+
 def make_lean(
     adb: Adb,
     keyboard_apk: Path | None = None,
@@ -222,12 +255,20 @@ def make_lean(
     progress: Progress = lambda _m: None,
     verify_reboot: bool = True,
     sleep=time.sleep,
+    alive: Callable[[], bool] | None = None,
+    restart: Callable[[], bool] | None = None,
 ) -> TrimReport:
     """The whole profile. Keyboard first (so Gboard can go), then one tier at a
     time. Each tier is given time to persist and, by default, verified across a
     reboot, because some dependencies only show up at boot. A tier that leaves
     the VM unhealthy is rolled back; one that stops it booting at all flags the
     report as needing a rebuild and ends the run.
+
+    alive and restart let the caller that runs the emulator handle it closing
+    during a reboot, or Android not coming back in time (see reboot_and_wait):
+    restart stops it, starts it again and returns whether Android booted. If
+    it did, the check carries on; if not, the VM needs a rebuild. Without
+    restart, a closed emulator raises EmulatorExited.
 
     tiers=None picks them from the image build: the full profile only on builds
     it has been verified on, just the low-risk user-facing apps otherwise."""
@@ -248,7 +289,7 @@ def make_lean(
         sleep(PERSIST_SECONDS)
         if verify_reboot:
             progress("rebooting to check the VM still starts...")
-            if not reboot_and_wait(adb, timeout=BOOT_TIMEOUT, sleep=sleep):
+            if not _rebooted(adb, sleep, alive, restart, progress):
                 result.problems = ["Android did not boot after the change"]
                 report.needs_rebuild = True
                 return report

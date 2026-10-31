@@ -217,13 +217,68 @@ class RebootTests(unittest.TestCase):
         ticks = iter(range(0, 10_000, 50))
         self.assertFalse(svc.reboot_and_wait(vm, timeout=100, sleep=lambda _s: None, clock=lambda: next(ticks)))
 
-    def test_a_hung_wait_for_device_is_a_failure_not_an_exception(self):
+    def test_a_hung_adb_is_a_failure_not_an_exception(self):
         def adb(*args, timeout=30):
-            if args[0] == "wait-for-device":
+            if args[0] == "shell":
                 raise subprocess.TimeoutExpired(args, timeout)
             return done()
 
-        self.assertFalse(svc.reboot_and_wait(adb, sleep=lambda _s: None))
+        ticks = iter(range(0, 10_000, 50))
+        self.assertFalse(svc.reboot_and_wait(adb, timeout=100, sleep=lambda _s: None, clock=lambda: next(ticks)))
+
+    def test_an_emulator_that_closes_is_reported_at_once(self):
+        # Seen in Setup: the emulator crashed on a reboot, and Setup waited out
+        # the whole timeout before blaming the trim.
+        vm = FakeVm({"a"}, bootloop_on_reboot=True)
+        with self.assertRaises(svc.EmulatorExited):
+            svc.reboot_and_wait(vm, sleep=lambda _s: None, alive=lambda: False)
+        self.assertNotIn("shell getprop sys.boot_completed", vm.log, "no waiting on a dead emulator")
+
+
+class EmulatorRestartTests(unittest.TestCase):
+    """A reboot check whose emulator closes, or whose Android doesn't come back
+    in time, gets one more go in a fresh emulator before the trim is blamed."""
+
+    INSTALLED = MakeLeanTests.INSTALLED
+
+    def _run(self, vm, alive, restart):
+        # Long enough for a check or two on the real clock (sleep is a no-op here).
+        with patch.object(svc, "BOOT_TIMEOUT", 0.2):
+            return svc.make_lean(vm, None, sleep=lambda _s: None, alive=alive, restart=restart)
+
+    def test_a_crash_restarts_the_emulator_and_keeps_the_trim(self):
+        vm = FakeVm(self.INSTALLED)
+        crashed = iter([False])  # the first reboot's emulator closes, later ones are fine
+        restarts = []
+
+        def restart():
+            restarts.append(1)
+            return True
+
+        report = self._run(vm, alive=lambda: next(crashed, True), restart=restart)
+        self.assertEqual(len(restarts), 1)
+        self.assertFalse(report.needs_rebuild)
+        self.assertEqual([t.tier for t in report.tiers], ["apps", "services"])
+        self.assertNotIn("com.google.android.apps.maps", vm.installed)
+
+    def test_android_not_coming_back_in_time_restarts_too(self):
+        vm = FakeVm(self.INSTALLED, bootloop_on_reboot=True)
+
+        def restart():
+            vm.booted = True
+            return True
+
+        report = self._run(vm, alive=lambda: True, restart=restart)
+        self.assertFalse(report.needs_rebuild)
+
+    def test_a_vm_that_still_wont_boot_after_the_restart_needs_a_rebuild(self):
+        report = self._run(FakeVm(self.INSTALLED, bootloop_on_reboot=True), alive=lambda: True, restart=lambda: False)
+        self.assertTrue(report.needs_rebuild)
+        self.assertEqual(len(report.tiers), 1)
+
+    def test_without_a_restart_a_closed_emulator_is_an_error(self):
+        with self.assertRaises(svc.EmulatorExited):
+            self._run(FakeVm(self.INSTALLED), alive=lambda: False, restart=None)
 
 
 class KeyboardInstallTests(unittest.TestCase):

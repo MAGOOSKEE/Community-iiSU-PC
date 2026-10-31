@@ -76,5 +76,38 @@ class ShutDownAndroidTests(unittest.TestCase):
         self.assertIn(["adb", "emu", "kill"], commands)
 
 
+class TrimRetryTests(unittest.TestCase):
+    """A trimmed VM that won't boot is rebuilt and trimmed once more before
+    Setup gives up on the trim: an emulator crash had cost a whole install it."""
+
+    def _install(self, broken_trims):
+        lean_args = []
+        reports = iter([SimpleNamespace(needs_rebuild=True)] * broken_trims)
+
+        def install(_apk, lean=False, alive=None, restart=None):
+            lean_args.append(lean)
+            return next(reports, SimpleNamespace(needs_rebuild=False)) if lean else None
+
+        with patch.object(setup_wizard, "is_avd_connected", return_value=True), \
+             patch.object(setup_wizard, "wait_for_avd", return_value=True), \
+             patch.object(setup_wizard, "install_iisu_into_running_vm", side_effect=install), \
+             patch.object(setup_wizard, "stop_avd"), \
+             patch.object(portable_sdk, "reset_avd_data") as rebuilt, \
+             patch.object(setup_wizard, "shut_down_android"), \
+             patch.object(setup_wizard, "forget_resume_state"), \
+             patch("builtins.print"):
+            setup_wizard.boot_avd_and_install(Path("emulator"), "iisuwin", {}, Path("iiSU.apk"), lean=True)
+        return lean_args, rebuilt.call_count
+
+    def test_a_trim_that_fails_once_is_tried_again(self):
+        self.assertEqual(self._install(1), ([True, True], 1))
+
+    def test_a_trim_that_fails_twice_is_skipped(self):
+        self.assertEqual(self._install(2), ([True, True, False], 2))
+
+    def test_a_working_trim_is_not_rebuilt(self):
+        self.assertEqual(self._install(0), ([True], 0))
+
+
 if __name__ == "__main__":
     unittest.main()
