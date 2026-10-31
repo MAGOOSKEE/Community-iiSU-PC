@@ -110,6 +110,8 @@ DEFAULT_DISPLAY = {"width": 1920, "height": 1080, "density": 240, "refresh_rate"
 # partition from scratch, not just resuming one, can genuinely take
 # several minutes there instead of well under one.
 AVD_BOOT_TIMEOUT = 420
+# Android powers off and the emulator exits in about 5 seconds (measured).
+ANDROID_POWER_OFF_TIMEOUT = 60
 MIN_FREE_DISK_GB = 15
 # Waydroid needs only adb + build-tools here, its own image is stored system-wide.
 WAYDROID_MIN_FREE_DISK_GB = 4
@@ -666,16 +668,37 @@ def boot_avd_and_install(
         after_install()
 
     print("[setup] shutting the AVD back down (Community-iiSU-PC Manager.bat will bring it up properly from here on)...")
-    subprocess.run(["adb", "emu", "kill"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
-    deadline = time.time() + 15
-    while time.time() < deadline and is_avd_connected():
+    shut_down_android(process)
+    forget_resume_state(avd_name)
+
+
+def shut_down_android(process: subprocess.Popen | None) -> None:
+    """Powers Android off the normal way and waits for the emulator to exit.
+    This boot runs without a snapshot, so whatever Android hasn't written to
+    disk when it stops is lost, and adb emu kill stops it at once: an iiSU
+    update lost every redirector app after the first four it installed (their
+    APKs were never written, so those emulators had nothing to hold iiSU
+    with). A real power-off makes Android write everything out first; adb emu
+    kill is only the fallback if it doesn't finish."""
+    subprocess.run(["adb", "shell", "sync"], capture_output=True, text=True, timeout=30, creationflags=CREATE_NO_WINDOW)
+    subprocess.run(
+        ["adb", "shell", "svc", "power", "shutdown"], capture_output=True, text=True, timeout=30,
+        creationflags=CREATE_NO_WINDOW,
+    )
+    deadline = time.time() + ANDROID_POWER_OFF_TIMEOUT
+    while time.time() < deadline and (is_avd_connected() or (process is not None and process.poll() is None)):
         time.sleep(1)
+    if is_avd_connected():
+        print("[setup] Android didn't power off in time, stopping the AVD...")
+        subprocess.run(["adb", "emu", "kill"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
+        stopped_by = time.time() + 15
+        while time.time() < stopped_by and is_avd_connected():
+            time.sleep(1)
     if process is not None and process.poll() is None:
         process.terminate()
     if process is not None:
         with contextlib.suppress(subprocess.TimeoutExpired):
             process.wait(timeout=30)
-    forget_resume_state(avd_name)
 
 
 def forget_resume_state(avd_name: str) -> None:
