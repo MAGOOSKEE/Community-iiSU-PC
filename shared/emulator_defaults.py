@@ -41,7 +41,13 @@ automatically), same as RetroArch itself needs to be already installed
 for this to do anything.
 """
 
+import copy
 from collections import Counter
+
+# Citron is a Yuzu fork: it takes a bare game path only as its sole argument.
+# After -f (fullscreen) the path needs -g in front, or Citron opens without
+# starting the game.
+CITRON_PRE_ARGS = ["-f", "-g"]
 
 STANDALONE_DEFAULTS = [
     {
@@ -200,7 +206,7 @@ STANDALONE_DEFAULTS = [
         # so iiSU would never report it as the launching package regardless
         # of whether it's installed on the PC side.
         "exe_names": ["citron.exe"],
-        "pre_args": ["-f"],
+        "pre_args": CITRON_PRE_ARGS,
     },
     {
         "console": "switch",
@@ -208,7 +214,7 @@ STANDALONE_DEFAULTS = [
         "package": "org.citron.citron_emu.ea",
         "app_label": "Citron",
         "exe_names": ["citron.exe"],
-        "pre_args": ["-f"],
+        "pre_args": CITRON_PRE_ARGS,
     },
     {
         "console": "switch",
@@ -216,7 +222,7 @@ STANDALONE_DEFAULTS = [
         "package": "org.yuzu.yuzu_emu",
         "app_label": "Citron",
         "exe_names": ["citron.exe"],
-        "pre_args": ["-f"],
+        "pre_args": CITRON_PRE_ARGS,
     },
     {
         "console": "xbox",
@@ -394,8 +400,8 @@ def build_emulators_map() -> dict:
     emulators = {}
     for entry in STANDALONE_DEFAULTS:
         profile = {
-            "exe_names": entry["exe_names"],
-            "pre_args": entry["pre_args"],
+            "exe_names": list(entry["exe_names"]),
+            "pre_args": list(entry["pre_args"]),
         }
         if entry.get("rom_before_args"):
             profile["rom_before_args"] = True
@@ -415,6 +421,36 @@ def build_emulators_map() -> dict:
     return emulators
 
 
+# Defaults an earlier version wrote into config.json that turned out wrong.
+# upgrade_outdated_defaults() swaps an entry still exactly as written then for
+# the fixed one when the config loads; an entry someone edited is left alone.
+OUTDATED_DEFAULTS: list[tuple[dict, dict]] = [
+    (
+        {"exe_names": ["citron.exe"], "pre_args": ["-f"]},
+        {"exe_names": ["citron.exe"], "pre_args": CITRON_PRE_ARGS},
+    ),
+]
+
+
+def upgrade_outdated_defaults(emulators: dict) -> dict:
+    upgraded = {}
+    for package, profile in emulators.items():
+        fixed = next((new for old, new in OUTDATED_DEFAULTS if profile == old), None)
+        upgraded[package] = copy.deepcopy(fixed) if fixed is not None else profile
+    return upgraded
+
+
+# Stubs with no emulator mapping of their own (launch_bridge handles these
+# packages itself). iiSU 7.5's Windows platform uses the first installed of
+# Winlator Cmod, Glibc, PRoot, then GameNative and GameHub (its
+# emuladores_default.json). Only Winlator is handed the placeholder's path,
+# which the Windows Apps launch needs; GameNative and GameHub read a game ID out
+# of the file, and these placeholders are empty. With no Winlator stub iiSU fell
+# through to the GameNative stub (installed for Steam) and refused every Windows
+# game with a toast.
+EXTRA_STUBS: list[tuple[str, str]] = [("com.winlator.cmod", "Winlator")]
+
+
 def all_stub_packages() -> list[tuple[str, str]]:
     """Every (package, app_label) that needs a redirector stub installed
     for these defaults to actually resolve in iiSU, one per unique
@@ -423,6 +459,8 @@ def all_stub_packages() -> list[tuple[str, str]]:
     for entry in STANDALONE_DEFAULTS:
         seen.setdefault(entry["package"], entry["app_label"])
     seen.setdefault(RETROARCH_PACKAGE, RETROARCH_APP_LABEL)
+    for package, label in EXTRA_STUBS:
+        seen.setdefault(package, label)
     return list(seen.items())
 
 

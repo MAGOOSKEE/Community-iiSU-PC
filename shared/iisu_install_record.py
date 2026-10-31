@@ -20,13 +20,15 @@ RECORD_PATH = Path(__file__).resolve().parent.parent / "bridge" / ".iisu_install
 # repatching: the Manager then won't start iiSU until it is (see
 # bridge/ui/dialogs/repatch_wizard.py). tests/test_iisu_install_record.py fails
 # when smali_patch/ changes and this hasn't.
-PATCH_VERSION = 3
+PATCH_VERSION = 4
 # A record from before patch versions were kept, or no record at all.
 UNVERSIONED_PATCH = 1
 PATCH_CHANGES = {
     2: "Android apps such as Chrome and the Play Store open from iiSU, also after a headless start.",
     # The repatch reinstalls the emulator stand-in apps, which is what this needs.
     3: "iiSU notices when you return from a PC game, so its music and interface come back as they do on Android.",
+    # Also through the repatch's stand-in apps: it adds Winlator's.
+    4: "Windows games launch from iiSU again.",
 }
 
 

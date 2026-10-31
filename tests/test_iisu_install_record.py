@@ -23,6 +23,8 @@ PATCH_HASHES = {
     2: "d54594b86ec6e4cae15330e2f4dafd0922b54c3f22fed14714710ea275c8ebc1",
     # Same smali patch; version 3 changed the stand-in apps the repatch reinstalls.
     3: "d54594b86ec6e4cae15330e2f4dafd0922b54c3f22fed14714710ea275c8ebc1",
+    # Same smali patch; version 4 added the Winlator stand-in.
+    4: "d54594b86ec6e4cae15330e2f4dafd0922b54c3f22fed14714710ea275c8ebc1",
 }
 
 
