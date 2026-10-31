@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -49,6 +50,30 @@ class ForgetResumeStateTests(unittest.TestCase):
     def test_nothing_to_drop_is_fine(self):
         self._forget()
         self._forget()
+
+
+class ShutDownAndroidTests(unittest.TestCase):
+    """The install boot has no snapshot, so adb emu kill lost every redirector
+    app Android hadn't written to disk yet."""
+
+    def _shut_down(self, connected_answers):
+        process = SimpleNamespace(poll=lambda: 0, terminate=lambda: None, wait=lambda timeout: 0)
+        with patch.object(setup_wizard.subprocess, "run") as run, \
+             patch.object(setup_wizard, "is_avd_connected", side_effect=connected_answers), \
+             patch.object(setup_wizard.time, "sleep"), \
+             patch("builtins.print"):
+            setup_wizard.shut_down_android(process)
+        return [call.args[0] for call in run.call_args_list]
+
+    def test_android_is_flushed_and_powered_off_not_killed(self):
+        commands = self._shut_down(lambda: False)
+        self.assertEqual(commands, [["adb", "shell", "sync"], ["adb", "shell", "svc", "power", "shutdown"]])
+
+    def test_a_power_off_that_never_finishes_falls_back_to_a_kill(self):
+        clock = iter(range(0, 10_000, 5))
+        with patch.object(setup_wizard.time, "time", side_effect=lambda: next(clock)):
+            commands = self._shut_down(lambda: True)
+        self.assertIn(["adb", "emu", "kill"], commands)
 
 
 if __name__ == "__main__":

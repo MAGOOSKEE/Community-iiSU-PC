@@ -263,6 +263,9 @@ def main() -> None:
         stop_waydroid()
     elif is_avd_running():
         print("[stop] asking the AVD to shut down gracefully...")
+        # A headless session has no snapshot to keep what Android hasn't
+        # written to disk yet, so flush it first. Cheap either way.
+        subprocess.run(["adb", "shell", "sync"], capture_output=True, text=True, timeout=30, creationflags=CREATE_NO_WINDOW)
         asked = time.monotonic()
         subprocess.run(["adb", "emu", "kill"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
         deadline = time.time() + GRACEFUL_STOP_TIMEOUT
