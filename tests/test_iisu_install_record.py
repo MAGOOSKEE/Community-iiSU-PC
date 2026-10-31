@@ -49,6 +49,16 @@ class PatchVersionTests(unittest.TestCase):
             with self.subTest(version=version):
                 self.assertTrue(record.PATCH_CHANGES.get(version))
 
+    def test_every_version_says_what_to_change_by_hand(self):
+        # An empty list is fine, but it has to be decided for each version.
+        for version in range(record.UNVERSIONED_PATCH + 1, record.PATCH_VERSION + 1):
+            with self.subTest(version=version):
+                self.assertIsInstance(record.PATCH_STEPS.get(version), list)
+
+    def test_steps_are_only_those_of_newer_versions(self):
+        self.assertIn("Winlator Cmod", " ".join(record.steps_since({"apk_name": "x.apk", "patch_version": 3})))
+        self.assertEqual(record.steps_since({"apk_name": "x.apk", "patch_version": record.PATCH_VERSION}), [])
+
     def test_a_new_install_is_recorded_with_the_current_patch(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "record.json"

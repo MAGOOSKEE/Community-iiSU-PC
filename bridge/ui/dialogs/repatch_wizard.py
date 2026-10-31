@@ -12,7 +12,7 @@ file picked by hand. It installs over the existing iiSU, so its data stays.
 from pathlib import Path
 
 from PySide6.QtWidgets import (
-    QButtonGroup, QDialog, QFileDialog, QHBoxLayout, QLabel, QPushButton, QRadioButton, QVBoxLayout,
+    QButtonGroup, QDialog, QFileDialog, QHBoxLayout, QLabel, QMessageBox, QPushButton, QRadioButton, QVBoxLayout,
 )
 
 from bridge.services import iisu_update_service as svc
@@ -55,6 +55,14 @@ class RepatchWizard(QDialog):
         changes.setWordWrap(True)
         changes.setProperty("role", "dim")
         layout.addWidget(changes)
+
+        self.steps = iisu_install_record.steps_since(record)
+        if self.steps:
+            layout.addSpacing(SPACING_SM)
+            layout.addWidget(QLabel("After repatching, change this in iiSU:"))
+            steps = QLabel(self.steps_text())
+            steps.setWordWrap(True)
+            layout.addWidget(steps)
 
         layout.addSpacing(SPACING_SM)
         layout.addWidget(QLabel("Repatch from:"))
@@ -156,4 +164,12 @@ class RepatchWizard(QDialog):
         dialog.exec()
         if dialog.succeeded:
             self.repatched = True
+            if self.steps:
+                QMessageBox.information(
+                    self, "One more step",
+                    "iiSU is repatched. Start it and change this so everything works:\n\n" + self.steps_text(),
+                )
             self.accept()
+
+    def steps_text(self) -> str:
+        return "\n".join(f"• {step}" for step in self.steps)

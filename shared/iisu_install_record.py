@@ -16,7 +16,7 @@ RECORD_PATH = Path(__file__).resolve().parent.parent / "bridge" / ".iisu_install
 
 # The version of the patch this project applies to iiSU (installer/smali_patch/
 # and how installer/patch_iisu.py rewrites iiSU). Bump it, and add a line to
-# PATCH_CHANGES, whenever an iiSU patched with the previous version needs
+# PATCH_CHANGES and PATCH_STEPS, whenever an iiSU patched with the previous version needs
 # repatching: the Manager then won't start iiSU until it is (see
 # bridge/ui/dialogs/repatch_wizard.py). tests/test_iisu_install_record.py fails
 # when smali_patch/ changes and this hasn't.
@@ -29,6 +29,20 @@ PATCH_CHANGES = {
     3: "iiSU notices when you return from a PC game, so its music and interface come back as they do on Android.",
     # Also through the repatch's stand-in apps: it adds Winlator's.
     4: "Windows games launch from iiSU again.",
+}
+# What the user still has to change by hand after repatching to each version,
+# for what the repatch itself can't (iiSU's own settings). Every version needs
+# an entry, an empty list when there's nothing, so each bump decides it.
+PATCH_STEPS: dict[int, list[str]] = {
+    2: [],
+    3: [],
+    # iiSU keeps the emulator it chose for a platform, and before this patch
+    # it could only find GameNative for Windows, which can't open our games.
+    4: [
+        "In iiSU, open the Windows platform's menu, choose Override Emulator and pick "
+        "Winlator Cmod (Standalone). If your Windows games still show GameNative, run "
+        "Rescan full library.",
+    ],
 }
 
 
@@ -58,6 +72,12 @@ def changes_since(record: dict | None) -> list[str]:
     """What repatching brings, oldest change first."""
     installed = patch_version_of(record)
     return [PATCH_CHANGES[version] for version in sorted(PATCH_CHANGES) if version > installed]
+
+
+def steps_since(record: dict | None) -> list[str]:
+    """What to change by hand after repatching, oldest version's first."""
+    installed = patch_version_of(record)
+    return [step for version in sorted(PATCH_STEPS) if version > installed for step in PATCH_STEPS[version]]
 
 
 def load(path: Path = RECORD_PATH) -> dict | None:
