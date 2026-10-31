@@ -452,12 +452,13 @@ def is_avd_connected() -> bool:
     return vm_device_connected(result.stdout)
 
 
-def install_iisu_into_running_vm(patched_apk: Path, lean: bool = False):
+def install_iisu_into_running_vm(patched_apk: Path, lean: bool = False, alive=None, restart=None):
     """Installs the patched iiSU, makes it the home app, and installs the
     redirector stubs into whichever Android VM is currently reachable over
     adb (the AVD or Waydroid, the commands are identical). With lean=True the
     VM is then trimmed to what iiSU needs (see apply_lean_profile) and the
-    trim's report is returned; None otherwise."""
+    trim's report is returned; None otherwise. alive and restart are passed on
+    to the trim, see vm_trim_service.make_lean."""
     print("[setup] installing the patched iiSU...")
     result = None
     for attempt in range(5):
@@ -504,10 +505,10 @@ def install_iisu_into_running_vm(patched_apk: Path, lean: bool = False):
         )
 
     install_default_redirectors()
-    return apply_lean_profile() if lean else None
+    return apply_lean_profile(alive, restart) if lean else None
 
 
-def apply_lean_profile():
+def apply_lean_profile(alive=None, restart=None):
     """Trims the running AVD down to the Files app, Chrome, the Play Store
     with its Google services, LeanKeyboard and the core system (see
     shared/vm_trim.py for what and why). Always safe to call: if the keyboard
@@ -530,14 +531,62 @@ def apply_lean_profile():
     except Exception as e:  # noqa: BLE001; offline or a bad download must not fail Setup, Gboard just stays
         print(f"[setup] couldn't get LeanKeyboard ({e}), keeping the default keyboard")
     print("[setup] trimming the Android VM down to what iiSU needs (this includes a reboot to check it still starts)...")
-    report = trim.make_lean(adb, keyboard_apk, progress=lambda m: print(f"[setup]   {m}"))
+    report = trim.make_lean(adb, keyboard_apk, progress=lambda m: print(f"[setup]   {m}"), alive=alive, restart=restart)
     print(f"[setup] lean profile: {report.summary()}")
     return report
 
 
+def _launch_install_emulator(emulator_exe: Path, avd_name: str, env: dict, log_path: Path, append: bool = False) -> subprocess.Popen:
+    log_file = open(log_path, "ab" if append else "wb")
+    log_file.write((app_version.banner("setup first boot") + "\n").encode("utf-8"))
+    log_file.flush()
+    try:
+        return subprocess.Popen(
+            # -no-window: nothing here needs the user to see or touch
+            # this boot, it only installs the patched APK and the
+            # redirector stubs over adb, then shuts back down. The
+            # emulator still runs and responds to adb identically
+            # headless; only the visible window is skipped.
+            [str(emulator_exe), "-avd", avd_name, "-no-snapshot", "-no-window"]
+            # Without a window, -gpu auto renders in software on Windows, and that
+            # emulator crashes about 13 seconds after Android boots (see the headless
+            # note in start_iisu_pc.py). Seen here too: an iiSU update lost the VM
+            # one redirector app into installing them. The host GPU doesn't crash.
+            + (["-gpu", "host"] if IS_WINDOWS else [])
+            + (["-accel", "on"] if not IS_WINDOWS and Path("/dev/kvm").exists() else []),
+            **detached_popen_kwargs(),
+            stdin=subprocess.DEVNULL,
+            stdout=log_file,
+            stderr=subprocess.STDOUT,
+            close_fds=True,
+            env=env,
+        )
+    finally:
+        log_file.close()
+
+
+def stop_avd(process: subprocess.Popen | None) -> None:
+    """Stops the install boot's emulator at once, for a VM about to be
+    restarted or rebuilt (nothing in it needs saving)."""
+    subprocess.run(["adb", "emu", "kill"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
+    deadline = time.time() + 30
+    while time.time() < deadline and is_avd_connected():
+        time.sleep(1)
+    if process is not None and process.poll() is None:
+        process.terminate()
+        with contextlib.suppress(subprocess.TimeoutExpired):
+            process.wait(timeout=30)
+
+
+# How many times Setup trims a VM before installing without the trim. A
+# trimmed VM that won't boot is rebuilt and trimmed again once: the boot can
+# fail for reasons that have nothing to do with the trim.
+TRIM_ATTEMPTS = 2
+
+
 def boot_avd_and_install(
     emulator_exe: Path, avd_name: str, env: dict, patched_apk: Path, lean: bool = False,
-    after_install: Callable[[], None] | None = None,
+    after_install: Callable[[], None] | None = None, trim_attempt: int = 1,
 ) -> None:
     process = None
     log_path = WORK_DIR / "first_boot_emulator.log"
@@ -553,32 +602,7 @@ def boot_avd_and_install(
         print("[setup] booting the AVD once to install iiSU (this can take a minute)...")
         import portable_sdk
         portable_sdk.set_quickboot_autosave(portable_sdk.PORTABLE_AVD_HOME / f"{avd_name}.avd", enabled=False)
-        log_file = open(log_path, "wb")
-        log_file.write((app_version.banner("setup first boot") + "\n").encode("utf-8"))
-        log_file.flush()
-        try:
-            process = subprocess.Popen(
-                # -no-window: nothing here needs the user to see or touch
-                # this boot, it only installs the patched APK and the
-                # redirector stubs over adb, then shuts back down. The
-                # emulator still runs and responds to adb identically
-                # headless; only the visible window is skipped.
-                [str(emulator_exe), "-avd", avd_name, "-no-snapshot", "-no-window"]
-                # Without a window, -gpu auto renders in software on Windows, and that
-                # emulator crashes about 13 seconds after Android boots (see the headless
-                # note in start_iisu_pc.py). Seen here too: an iiSU update lost the VM
-                # one redirector app into installing them. The host GPU doesn't crash.
-                + (["-gpu", "host"] if IS_WINDOWS else [])
-                + (["-accel", "on"] if not IS_WINDOWS and Path("/dev/kvm").exists() else []),
-                **detached_popen_kwargs(),
-                stdin=subprocess.DEVNULL,
-                stdout=log_file,
-                stderr=subprocess.STDOUT,
-                close_fds=True,
-                env=env,
-            )
-        finally:
-            log_file.close()
+        process = _launch_install_emulator(emulator_exe, avd_name, env, log_path)
 
     if not wait_for_avd(avd_name, AVD_BOOT_TIMEOUT, process=process):
         crashed_early = process is not None and process.poll() is not None
@@ -645,22 +669,40 @@ def boot_avd_and_install(
             f"{setup_script} resumes from here rather than starting over."
         )
 
-    report = install_iisu_into_running_vm(patched_apk, lean=lean)
+    # The trim's reboot checks can see the emulator crash (see
+    # vm_trim_service.reboot_and_wait); this starts it again the same way, and
+    # everything after uses whichever process is running by then.
+    running = {"process": process}
+
+    def emulator_alive() -> bool:
+        # An emulator reused from an earlier attempt isn't ours to watch.
+        return running["process"] is None or running["process"].poll() is None
+
+    def restart_emulator() -> bool:
+        # A hung emulator (Android never came back) has to go first.
+        stop_avd(running["process"])
+        running["process"] = _launch_install_emulator(emulator_exe, avd_name, env, log_path, append=True)
+        return wait_for_avd(avd_name, AVD_BOOT_TIMEOUT, process=running["process"])
+
+    report = install_iisu_into_running_vm(patched_apk, lean=lean, alive=emulator_alive, restart=restart_emulator)
+    process = running["process"]
     if report is not None and report.needs_rebuild:
-        # A trimmed VM that no longer boots can't be repaired in place (no
-        # package manager without a booted system). On a fresh install there's
-        # nothing in it worth keeping, so start the data over and install
-        # again without the trim.
-        print("[setup] the trimmed VM stopped booting, so the trim is being skipped: rebuilding the VM and installing normally...")
-        subprocess.run(["adb", "emu", "kill"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
-        deadline = time.time() + 30
-        while time.time() < deadline and is_avd_connected():
-            time.sleep(1)
-        if process is not None and process.poll() is None:
-            process.terminate()
+        # A trimmed VM that no longer boots, even in a fresh emulator, can't be
+        # repaired in place (no package manager without a booted system). On a
+        # fresh install there's nothing in it worth keeping, so start the data
+        # over: once more with the trim, then without it.
+        retry_trim = trim_attempt < TRIM_ATTEMPTS
+        if retry_trim:
+            print("[setup] the trimmed VM stopped booting, rebuilding it and trying the trim once more...")
+        else:
+            print("[setup] the trimmed VM stopped booting again, so the trim is being skipped: rebuilding the VM and installing normally...")
+        stop_avd(process)
         import portable_sdk
         portable_sdk.reset_avd_data(portable_sdk.PORTABLE_AVD_HOME / f"{avd_name}.avd")
-        return boot_avd_and_install(emulator_exe, avd_name, env, patched_apk, lean=False, after_install=after_install)
+        return boot_avd_and_install(
+            emulator_exe, avd_name, env, patched_apk, lean=retry_trim, after_install=after_install,
+            trim_attempt=trim_attempt + 1,
+        )
 
     if after_install is not None:
         # The VM is up and fully set up at this point; callers that need it
