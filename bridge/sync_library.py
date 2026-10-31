@@ -42,6 +42,7 @@ there, never by a guess about it.
 import hashlib
 import io
 import json
+import os
 import re
 import shlex
 import subprocess
@@ -82,6 +83,16 @@ IGNORE_TOP_LEVEL = {"folder.ico", "sync.ffs_lock"}
 # passed through to iiSU as a placeholder, but the real file on disk is
 # untouched, the emulator still finds it right where it always was.
 NEVER_PLACEHOLDER_EXTENSIONS = {".sbi"}
+
+# Files that are part of an emulator/tool install or its data, never a game.
+# Console folders often double as an emulator's home (RPCS3 under ps3/, PCSX2
+# under ps2/, a Dolphin mod pack under wii/), so without this a single
+# install can add tens of thousands of bogus "games" and balloon the archive.
+NON_ROM_EXTENSIONS = {
+    ".dll", ".exe", ".ini", ".json", ".log", ".txt", ".yml", ".yaml", ".xml", ".cfg", ".conf",
+    ".pdb", ".lib", ".so", ".dylib", ".pak", ".dat", ".db", ".sqlite", ".png", ".jpg", ".jpeg",
+    ".ico", ".lnk", ".url", ".bat", ".cmd", ".sh", ".py", ".md", ".pdf", ".ffs_lock",
+}
 
 CUE_FILE_LINE = re.compile(r'^\s*FILE\s+"([^"]+)"', re.IGNORECASE)
 
@@ -194,17 +205,98 @@ def referenced_disc_filenames(
     return referenced
 
 
-def adb(*args: str, check: bool = True) -> subprocess.CompletedProcess:
+# Every adb call is time-limited. Without one, a single wedged adb call
+# hung the whole start sequence, and with it the boot overlay, forever.
+ADB_DEFAULT_TIMEOUT = 60  # seconds
+ADB_PUSH_TIMEOUT = 300
+ADB_EXTRACT_TIMEOUT = 600
+# adb shell's own exit code when the connection to the device drops.
+ADB_CONNECTION_LOST = 255
+
+
+def adb(*args: str, check: bool = True, timeout: float = ADB_DEFAULT_TIMEOUT) -> subprocess.CompletedProcess:
     # adb.exe is console-subsystem; every caller of this runs from the GUI
     # (pythonw.exe, no console of its own), so without CREATE_NO_WINDOW
     # each call here would flash its own console window.
     return subprocess.run(
-        ["adb", *args], capture_output=True, text=True, check=check, creationflags=subprocess_creationflags()
+        ["adb", *args], capture_output=True, text=True, check=check, creationflags=subprocess_creationflags(),
+        timeout=timeout,
     )
 
 
+# Where the previous sync's tree is moved before it's deleted.
+AVD_OLD_ROMS_PREFIX = f"{AVD_SDCARD_ROOT}/.{AVD_ROMS_DIRNAME}_old_"
+
+
+def build_extract_command() -> str:
+    """The old tree has to go so a console removed from the real library
+    (or renamed) doesn't leave its placeholders behind, since tar only ever
+    adds and overwrites. Deleting it first with rm -rf was slow: /sdcard
+    goes through Android's FUSE layer at roughly 200 files a second, so a
+    big leftover tree held up the whole start for minutes. Instead the old
+    tree is renamed out of the way (one operation), the new one extracted,
+    and the old one deleted by a detached background job that outlives
+    this adb shell. Any trees left by earlier interrupted runs go with it.
+    The command's exit code is tar's."""
+    roms = shlex.quote(AVD_ROMS_ROOT)
+    old = shlex.quote(AVD_OLD_ROMS_PREFIX) + "$(date +%s)"
+    old_glob = shlex.quote(AVD_OLD_ROMS_PREFIX) + "*"
+    return (
+        f"if [ -e {roms} ]; then mv {roms} {old} || rm -rf {roms}; fi; "
+        f"cd {shlex.quote(AVD_SDCARD_ROOT)} && tar xf {shlex.quote(AVD_TAR_PUSH_PATH)}; rc=$?; "
+        f"setsid nohup sh -c 'rm -rf {old_glob}' </dev/null >/dev/null 2>&1 & "
+        f"exit $rc"
+    )
+
+
+def _run_extract(extract_cmd: str) -> subprocess.CompletedProcess:
+    """Runs the extract, retrying once if adb lost the device partway
+    (exit 255): that's a dropped connection, not a tar error, and the
+    archive is still sitting on the device to try again."""
+    result = None
+    for attempt in range(2):
+        try:
+            result = adb("shell", extract_cmd, check=False, timeout=ADB_EXTRACT_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            return subprocess.CompletedProcess(["adb", "shell"], 1, "", f"timed out after {ADB_EXTRACT_TIMEOUT}s")
+        if result.returncode != ADB_CONNECTION_LOST or attempt == 1:
+            return result
+        print("The AVD's adb connection dropped during the extract, reconnecting and retrying once...")
+        try:
+            adb("wait-for-device", check=False, timeout=60)
+        except subprocess.TimeoutExpired:
+            return result
+        time.sleep(2)
+    return result
+
+
+def load_excluded_roots() -> set[Path]:
+    """config.json's search_roots are where emulators live; any of them that
+    sit under the ROM folder must never be mirrored as games."""
+    try:
+        config = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    return {Path(p) for p in config.get("search_roots", [])}
+
+
+def _is_emulator_install(directory: Path, filenames: list[str], excluded_roots: set[Path], shortname: str) -> bool:
+    """A subfolder that is a configured emulator root, or that holds an .exe
+    directly, is an emulator/tool install rather than a ROM folder. Windows
+    Apps keep their executables under the "windows" console on purpose."""
+    if directory in excluded_roots:
+        return True
+    if shortname == "windows":
+        return False
+    return any(name.lower().endswith(".exe") for name in filenames)
+
+
 def scan_library(
-    roms_dir: Path, exact: dict, by_compact: dict, dedupe_exceptions: set[str] | None = None
+    roms_dir: Path,
+    exact: dict,
+    by_compact: dict,
+    dedupe_exceptions: set[str] | None = None,
+    excluded_roots: set[Path] | None = None,
 ) -> tuple[dict[str, list[tuple[str, int, int]]], list[str]]:
     """Walks roms_dir once, grouping recognized console folders' files by
     iiSU short name with (relative path, size, mtime) for each, both
@@ -212,6 +304,8 @@ def scan_library(
     for change detection come from this one walk."""
     if dedupe_exceptions is None:
         dedupe_exceptions = load_dedupe_exceptions()
+    if excluded_roots is None:
+        excluded_roots = load_excluded_roots()
     consoles: dict[str, list[tuple[str, int, int]]] = {}
     skipped = []
     for console_folder in sorted(roms_dir.iterdir()):
@@ -224,10 +318,17 @@ def scan_library(
             continue
 
         by_directory: dict[Path, list[Path]] = {}
-        for file_path in console_folder.rglob("*"):
-            if file_path.is_dir():
+        for dirpath, dirnames, filenames in os.walk(console_folder):
+            current = Path(dirpath)
+            if current != console_folder and _is_emulator_install(current, filenames, excluded_roots, shortname):
+                dirnames.clear()
                 continue
-            by_directory.setdefault(file_path.parent, []).append(file_path)
+            dirnames[:] = [d for d in dirnames if (current / d) not in excluded_roots]
+            for name in filenames:
+                file_path = current / name
+                if file_path.suffix.lower() in NON_ROM_EXTENSIONS:
+                    continue
+                by_directory.setdefault(current, []).append(file_path)
 
         entries = []
         for directory, files in by_directory.items():
@@ -375,21 +476,18 @@ def main() -> None:
     push_size_mb = tar_path.stat().st_size / 1e6
     print(f"Pushing the archive ({push_size_mb:.1f} MB) to the AVD and extracting it in one shot...")
     push_start = time.time()
-    adb("push", str(tar_path), AVD_TAR_PUSH_PATH)
+    adb("push", str(tar_path), AVD_TAR_PUSH_PATH, timeout=ADB_PUSH_TIMEOUT)
     push_elapsed = max(time.time() - push_start, 0.01)
     print(f"Pushed in {push_elapsed:.1f}s ({push_size_mb / push_elapsed:.1f} MB/s).")
-    # rm -rf first so a console removed from the real library (or renamed)
-    # doesn't leave its old placeholders behind, tar only ever adds/
-    # overwrites, it never removes what a previous sync left there.
-    extract_cmd = (
-        f"rm -rf {shlex.quote(AVD_ROMS_ROOT)} && "
-        f"cd {shlex.quote(AVD_SDCARD_ROOT)} && tar xf {shlex.quote(AVD_TAR_PUSH_PATH)}"
-    )
-    result = adb("shell", extract_cmd, check=False)
-    adb("shell", f"rm -f {shlex.quote(AVD_TAR_PUSH_PATH)}", check=False)
+    extract_cmd = build_extract_command()
+    result = _run_extract(extract_cmd)
+    try:
+        adb("shell", f"rm -f {shlex.quote(AVD_TAR_PUSH_PATH)}", check=False)
+    except subprocess.TimeoutExpired:
+        pass
     tar_path.unlink(missing_ok=True)
     if result.returncode != 0:
-        print("Extracting the archive on the AVD failed:")
+        print(f"Extracting the archive on the AVD failed (exit code {result.returncode}):")
         print(result.stdout)
         print(result.stderr)
         sys.exit(1)
