@@ -13,6 +13,7 @@ import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/instal
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QTextCursor
 from PySide6.QtWidgets import (
+    QDialog,
     QHBoxLayout,
     QLabel,
     QMenu,
@@ -379,16 +380,25 @@ class HomePage(PageBase):
         open_uri(str(bridge_dir))
 
     def _recreate_desktop_shortcut(self) -> None:
+        from bridge.ui.dialogs.icon_choice_dialog import IconChoiceDialog
+
+        dialog = IconChoiceDialog(self.window.config_data.get("icon_choice"), self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        choice = dialog.choice()
+        self.window.set_icon_choice(choice)
         # A one-shot menu action now rather than its own always-visible
         # button, so the advanced-options button itself is the "busy"
         # indicator that stops a second click starting a second run.
         self.advanced_button.setEnabled(False)
-        self._shortcut_signals = run_in_background(self._recreate_shortcut_worker, self._on_shortcut_recreated, self._on_shortcut_error)
+        self._shortcut_signals = run_in_background(
+            self._recreate_shortcut_worker, self._on_shortcut_recreated, self._on_shortcut_error, choice,
+        )
 
-    def _recreate_shortcut_worker(self):
+    def _recreate_shortcut_worker(self, choice: str):
         import create_shortcut
 
-        return create_shortcut.create_desktop_shortcut()
+        return create_shortcut.create_desktop_shortcut(icon_choice=choice)
 
     def _on_shortcut_recreated(self, path) -> None:
         self.advanced_button.setEnabled(True)
