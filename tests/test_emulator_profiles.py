@@ -12,6 +12,34 @@ sys.path.insert(0, str(PROJECT_ROOT / "bridge"))
 import emulator_profiles as ep  # noqa: E402; path set up above
 
 
+class StoredDefaultsTests(unittest.TestCase):
+    """An install from before "speakers only" became the default has
+    "audio": "default" written out, and kept the microphone attached."""
+
+    OLD = {"gpu_mode": "auto", "accel": "auto", "cores": 0, "ram_mb": 0, "audio": "default", "extra_args": "", "env": ""}
+
+    def _config(self, profiles, **block):
+        return {"emulator_profiles": {"active": "Default", "profiles": profiles, **block}}
+
+    def test_an_untouched_old_profile_gets_the_new_audio_default(self):
+        profile = ep.active_profile(self._config({"Default": dict(self.OLD)}))
+        self.assertEqual(profile["audio"], "no_input")
+        self.assertEqual(ep.config_ini_overrides(profile)["hw.audioInput"], "no")
+
+    def test_a_profile_someone_changed_keeps_its_microphone(self):
+        profile = ep.active_profile(self._config({"Default": {**self.OLD, "cores": 6}}))
+        self.assertEqual(profile["audio"], "default")
+
+    def test_choosing_the_microphone_after_the_upgrade_sticks(self):
+        saved = ep.with_profiles({}, "Default", {"Default": dict(self.OLD)})
+        self.assertEqual(saved["emulator_profiles"]["defaults_version"], ep.DEFAULTS_VERSION)
+        self.assertEqual(ep.active_profile(saved)["audio"], "default")
+
+    def test_a_damaged_version_counts_as_the_oldest(self):
+        profile = ep.active_profile(self._config({"Default": dict(self.OLD)}, defaults_version="x"))
+        self.assertEqual(profile["audio"], "no_input")
+
+
 class NormalizeTests(unittest.TestCase):
     def test_empty_gives_defaults(self):
         self.assertEqual(ep.normalize_profile(None), ep.DEFAULT_PROFILE)

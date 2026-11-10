@@ -45,6 +45,19 @@ DEFAULT_PROFILE: dict = {
     "env": "",
 }
 
+# What config.json's "emulator_profiles" block records as "defaults_version"
+# once a version's defaults have reached it. Version 2 made "speakers only"
+# the default audio setting. A profiles block is written out in full the
+# first time the Manager saves, so every install from before then had
+# "audio": "default" stored and went on attaching the microphone that the
+# new default was meant to detach. upgrade_stored_defaults() moves a profile
+# nobody has changed onto the current default, once.
+DEFAULTS_VERSION = 2
+_UNCHANGED_BEFORE_V2 = {
+    "gpu_mode": "auto", "accel": "auto", "cores": 0, "ram_mb": 0,
+    "audio": "default", "extra_args": "", "env": "",
+}
+
 # Set for every launch; a profile's own env can still override them. The
 # emulator's audio timer runs at 100 Hz unless told otherwise, and its sound
 # crackled on Windows. Measured on one PC with Emulator 37, each on a fresh
@@ -90,6 +103,15 @@ def normalize_profile(raw: Mapping | None) -> dict:
     return profile
 
 
+def upgrade_stored_defaults(profile: dict, stored_version: int) -> dict:
+    """A stored profile brought up to the current defaults: one still exactly
+    as an older version wrote it gets what that default has become. A profile
+    with any setting changed is the user's own and is left alone."""
+    if stored_version < 2 and profile == _UNCHANGED_BEFORE_V2:
+        return {**profile, "audio": DEFAULT_PROFILE["audio"]}
+    return profile
+
+
 def get_profiles(config: Mapping) -> tuple[str, dict[str, dict]]:
     """(active profile name, {name: normalized profile}). Always returns at
     least one profile and an active name that exists."""
@@ -98,10 +120,13 @@ def get_profiles(config: Mapping) -> tuple[str, dict[str, dict]]:
     active = DEFAULT_PROFILE_NAME
     if isinstance(block, Mapping):
         raw_profiles = block.get("profiles")
+        stored_version = _as_int(block.get("defaults_version"), 1, 1, DEFAULTS_VERSION)
         if isinstance(raw_profiles, Mapping):
             for name, raw in raw_profiles.items():
                 if isinstance(name, str) and name.strip():
-                    profiles[name.strip()] = normalize_profile(raw if isinstance(raw, Mapping) else None)
+                    profiles[name.strip()] = upgrade_stored_defaults(
+                        normalize_profile(raw if isinstance(raw, Mapping) else None), stored_version
+                    )
         active = str(block.get("active") or DEFAULT_PROFILE_NAME)
     if not profiles:
         legacy_gpu = (config.get("display") or {}).get("gpu_mode")
@@ -120,6 +145,7 @@ def with_profiles(config: Mapping, active: str, profiles: Mapping[str, Mapping])
     """A copy of config with the profiles block replaced (normalized)."""
     updated = dict(config)
     updated["emulator_profiles"] = {
+        "defaults_version": DEFAULTS_VERSION,
         "active": active,
         "profiles": {name: normalize_profile(profile) for name, profile in profiles.items()},
     }
