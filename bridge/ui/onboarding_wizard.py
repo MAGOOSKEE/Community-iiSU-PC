@@ -39,7 +39,7 @@ from PySide6.QtWidgets import (
 )
 
 import winapi
-from bridge_config import CONFIG_PATH, ConfigMissingError, load_config
+from bridge_config import CONFIG_PATH, ConfigMissingError, load_config, save_config  # noqa: F401
 from console_names import load_console_lookup, resolve_console_shortname
 from launch_bridge import find_executable
 from shared.emulator_defaults import all_emulator_exe_names, describe_profile
@@ -71,12 +71,6 @@ _NAMED_KEYS = {
     **{getattr(Qt.Key, f"Key_F{n}"): f"f{n}" for n in range(1, 13)},
 }
 _MODIFIER_KEYS = {Qt.Key.Key_Control, Qt.Key.Key_Alt, Qt.Key.Key_Shift, Qt.Key.Key_Meta, Qt.Key.Key_AltGr}
-
-
-def save_config(config: dict) -> None:
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(config, f, indent=2)
-        f.write("\n")
 
 
 def read_avd_display(avd_name: str) -> dict:

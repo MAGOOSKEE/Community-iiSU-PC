@@ -14,6 +14,9 @@
 # bridge/: per-install config, caches, and the portable SDK/AVD copy
 /bridge/android-sdk-portable/
 /bridge/config.json
+/bridge/config.json.bak
+/bridge/config.json.tmp
+/bridge/config.damaged-*.json
 /bridge/.path_cache.json
 /bridge/.runtime_state.json
 /bridge/.boot_fingerprint.json

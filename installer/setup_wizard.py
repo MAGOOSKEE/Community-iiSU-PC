@@ -861,7 +861,12 @@ def update_iisu(
     config_path = BRIDGE_DIR / "config.json"
     if not config_path.is_file():
         raise RuntimeError(f"{config_path} not found, run Setup first before updating iiSU.")
-    saved_config = json.loads(config_path.read_text(encoding="utf-8"))
+    try:
+        saved_config = json.loads(config_path.read_text(encoding="utf-8-sig"))
+    except ValueError as e:
+        raise RuntimeError(
+            f"{config_path} is damaged and can't be read ({e}). Open the Manager's Home page to repair it, then update iiSU again."
+        ) from None
     avd_name = saved_config["avd_name"]
     backend = resolve_backend(saved_config)
 
@@ -969,9 +974,21 @@ def write_bridge_config(avd_name: str, backend: str = BACKEND_AVD, storage_gb: i
     from shared.emulator_defaults import build_emulators_map
 
     config_path = BRIDGE_DIR / "config.json"
+    config = None
     if config_path.is_file():
-        config = json.loads(config_path.read_text(encoding="utf-8"))
-    else:
+        try:
+            config = json.loads(config_path.read_text(encoding="utf-8-sig"))
+        except ValueError:
+            config = None
+        if not isinstance(config, dict):
+            # Damaged (cut short mid-save, or a bad hand edit). Setup used to
+            # stop here with a JSON error; it keeps the file under another
+            # name and starts from the template instead.
+            config = None
+            kept = config_path.with_name(f"config.damaged-{time.strftime('%Y%m%d-%H%M%S')}.json")
+            config_path.replace(kept)
+            print(f"[setup] {config_path.name} was damaged and couldn't be read; kept it as {kept.name} and started from default settings.")
+    if config is None:
         config = json.loads((INSTALLER_DIR / "config.template.json").read_text(encoding="utf-8"))
         if not IS_WINDOWS:
             # Best-guess Linux ROM/emulator locations: a couple of common

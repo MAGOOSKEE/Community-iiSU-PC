@@ -55,6 +55,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import portable_sdk  # noqa: F401; imported for its import-time PATH fix (adb), not used directly here
+from bridge_config import ConfigMissingError, read_config_file
 from console_names import load_console_lookup, resolve_console_shortname
 from shared import adb_client
 from shared.platform_compat import subprocess_creationflags
@@ -198,13 +199,13 @@ def referenced_disc_filenames(
 # hung the whole start sequence, and with it the boot overlay, forever.
 ADB_DEFAULT_TIMEOUT = 60  # seconds
 ADB_PUSH_TIMEOUT = 300
-ADB_EXTRACT_TIMEOUT = 600
 # The extract writes every placeholder through Android's FUSE layer, measured
 # at roughly 70 files a second, so a flat limit caps how big a library can
 # ever be: it would time out at the same point on every start. The limit
 # grows with the archive instead, see extract_timeout().
-# adb shell's own exit code when the connection to the device drops.
+ADB_EXTRACT_TIMEOUT = 600
 ADB_EXTRACT_FILES_PER_EXTRA_SECOND = 50
+# adb shell's own exit code when the connection to the device drops.
 ADB_CONNECTION_LOST = 255
 
 
@@ -407,8 +408,11 @@ def build_placeholder_tar(consoles: dict[str, list[tuple[str, int, int]]], curre
 
 
 def main() -> None:
-    with open(CONFIG_PATH, encoding="utf-8") as f:
-        config = json.load(f)
+    try:
+        config = read_config_file(CONFIG_PATH)
+    except (ConfigMissingError, OSError) as e:  # damaged, or not there
+        print(e)
+        sys.exit(1)
 
     roms_dir = Path(config["roms_dir"])
     if not roms_dir.is_dir():

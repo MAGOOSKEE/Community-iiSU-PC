@@ -36,6 +36,7 @@ from shared.platform_compat import open_uri
 from shared.vm_backend import supports_headless_boot
 from bridge.ui.workers.log_stream import LogStreamRedirector
 from bridge.ui.workers.task_runner import run_in_background
+import bridge_config
 from bridge_config import CONFIG_PATH
 from shared.qt_theme import Fonts, INPUT_BG, LOG_TEXT, TEXT_DIM
 
@@ -223,6 +224,13 @@ class HomePage(PageBase):
     # == Home state ==
 
     def refresh_home_state(self) -> None:
+        self.setup_intro_label.setText(
+            "The settings file is damaged, so Community-iiSU-PC can't start. Your Android VM, "
+            "iiSU and your games are not affected."
+            if self.window.config_problem else
+            "Not set up yet. Setup installs a self-contained Android VM and patches your copy "
+            "of iiSU to hand game launches to PC emulators."
+        )
         self.setup_intro_label.setVisible(not self.window.configured)
         self.status_row.setVisible(self.window.configured)
         self._refresh_primary_button()
@@ -260,7 +268,10 @@ class HomePage(PageBase):
         QMessageBox.information(self, "Clear Resume State", "Done. The next start will cold boot.")
 
     def _refresh_primary_button(self) -> None:
-        if not self.window.configured:
+        if self.window.config_problem:
+            self.primary_button.setText("Repair Settings")
+            self.primary_button.setEnabled(True)
+        elif not self.window.configured:
             running = self._setup_process is not None and self._setup_process.poll() is None
             self.primary_button.setText("Setup running..." if running else "Run Setup")
             try:
@@ -280,7 +291,9 @@ class HomePage(PageBase):
         self._refresh_primary_button()
 
     def _on_primary_click(self) -> None:
-        if not self.window.configured:
+        if self.window.config_problem:
+            self.window.offer_config_recovery()
+        elif not self.window.configured:
             self._start_setup_flow()
         elif self.window.last_bridge_up or self.window.last_avd_up:
             self._stop()
@@ -422,7 +435,10 @@ class HomePage(PageBase):
                 bridge_up = start_iisu_pc.is_port_open(config["bridge_port"])
             except Exception:
                 pass
-        now_configured = CONFIG_PATH.is_file()
+        # A damaged file counts as not configured, the same as the window
+        # sees it. Counting it as configured made this poll reload and rebuild
+        # every settings page every two seconds for as long as it stayed damaged.
+        now_configured = CONFIG_PATH.is_file() and bridge_config.config_problem() is None
         return (avd_up, bridge_up, now_configured)
 
     def _apply_status(self, result) -> None:
@@ -441,6 +457,8 @@ class HomePage(PageBase):
             self.window.refresh_nav_enabled()
             self.refresh_home_state()
             self.window.rebuild_settings_pages()
+            if self.window.config_problem and not self._hidden_for_setup:
+                self.window.offer_config_recovery()
 
         if setup_just_exited:
             self._hidden_for_setup = False

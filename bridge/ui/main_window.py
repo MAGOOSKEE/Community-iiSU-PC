@@ -47,7 +47,7 @@ from bridge.ui.pages.updates import UpdatesPage
 from bridge.ui.widgets.transitions import fade_in
 from bridge.ui.workers.task_runner import run_in_background
 from bridge.ui.sidebar import DANGER_NAV_ITEMS, LOCKED_NAV, NAV_GROUPS, NAV_ITEMS, Sidebar
-from bridge_config import CONFIG_PATH, load_config, save_config
+from bridge_config import CONFIG_PATH, ConfigInvalidError, load_config, save_config
 import emulator_profiles
 from shared.platform_compat import detached_popen_kwargs
 from shared.qt_theme import GREEN, PANEL_BG_HOVER, RED
@@ -67,6 +67,10 @@ class ManagerWindow(QMainWindow):
 
         self.config_data: dict = {}
         self.configured = False
+        # Why config.json can't be read, when it exists but is damaged. Not
+        # the same as "not set up": Home offers a repair instead of Setup.
+        self.config_problem: str | None = None
+        self._config_recovery_open = False
         self._config_mtime: float | None = None
         self.last_avd_up: bool | None = None
         self.last_bridge_up: bool | None = None
@@ -188,6 +192,7 @@ class ManagerWindow(QMainWindow):
         QTimer.singleShot(500, self._run_startup_update_check)
         self._repatch_wizard = None
         QTimer.singleShot(700, self._prompt_repatch_if_needed)
+        QTimer.singleShot(300, self.offer_config_recovery)
 
     # == Style / icon ==
 
@@ -209,6 +214,7 @@ class ManagerWindow(QMainWindow):
     # == Config state ==
 
     def _reload_config(self) -> None:
+        self.config_problem = None
         if CONFIG_PATH.is_file():
             try:
                 self.config_data = load_config()
@@ -217,14 +223,16 @@ class ManagerWindow(QMainWindow):
                 # so the VM Profiles page isn't "dirty" the moment it opens.
                 active, profiles = emulator_profiles.get_profiles(self.config_data)
                 self.config_data = emulator_profiles.with_profiles(self.config_data, active, profiles)
+                # Same for the startup volume, added after installs existed.
+                self.config_data.setdefault("startup_volume", 100)
                 self.configured = True
                 self._config_mtime = CONFIG_PATH.stat().st_mtime
                 return
+            except ConfigInvalidError as e:
+                self.config_problem = e.reason
             except Exception:
                 pass
         self.config_data = {}
-                # Same for the startup volume, added after installs existed.
-                self.config_data.setdefault("startup_volume", 100)
         self.configured = False
         self._config_mtime = None
 
@@ -275,6 +283,7 @@ class ManagerWindow(QMainWindow):
             settings["controller_quit_chord"] = self.advanced_page.get_controller_quit_chord()
             settings["show_boot_overlay"] = self.advanced_page.get_show_boot_overlay()
             settings["debug_show_console_windows"] = self.advanced_page.get_debug_show_console_windows()
+            settings["startup_volume"] = self.advanced_page.get_startup_volume()
 
         if hasattr(self, "emulator_page"):
             settings["emulator_profiles"] = self.emulator_page.get_emulator_profiles()
@@ -283,7 +292,6 @@ class ManagerWindow(QMainWindow):
             display = self.display_page.get_display()
             if display is None:
                 if silent:
-            settings["startup_volume"] = self.advanced_page.get_startup_volume()
                     return None
                 QMessageBox.critical(self, "Invalid display settings", "Width, height, density, and refresh rate must be numbers.")
                 return None
@@ -507,6 +515,27 @@ class ManagerWindow(QMainWindow):
         elif self.save_status_label.text() == "Stop Community-iiSU-PC to change settings":
             self.save_status_label.setText("")
             self.save_status_label.setStyleSheet(f"color: {GREEN};")
+
+    # == Damaged settings file ==
+
+    def offer_config_recovery(self) -> None:
+        """Offers to repair a config.json that can't be read. Called at
+        startup, when Home's status poll finds the file has gone bad, and from
+        Home's Repair Settings button."""
+        if not self.config_problem or self._config_recovery_open:
+            return
+        from bridge.ui.dialogs.config_recovery_dialog import run_config_recovery
+
+        self._config_recovery_open = True
+        try:
+            repaired = run_config_recovery(self, self.config_problem)
+        finally:
+            self._config_recovery_open = False
+        if repaired:
+            self._reload_config()
+            self.refresh_nav_enabled()
+            self.home_page.refresh_home_state()
+            self.rebuild_settings_pages()
 
     # == Required iiSU repatch ==
 

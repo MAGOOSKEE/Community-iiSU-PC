@@ -91,10 +91,9 @@ def load_state() -> dict:
 def load_avd_name(state: dict) -> str | None:
     if "avd_name" in state:
         return state["avd_name"]
-    if CONFIG_PATH.is_file():
-        with open(CONFIG_PATH, encoding="utf-8") as f:
-            return json.load(f).get("avd_name")
-    return None
+    # Through load_config_safely: Stop has to work with a damaged config too,
+    # and reading it directly here raised before anything was stopped.
+    return load_config_safely().get("avd_name")
 
 
 def is_avd_running() -> bool:
@@ -105,10 +104,11 @@ def load_config_safely() -> dict:
     if not CONFIG_PATH.is_file():
         return {}
     try:
-        with open(CONFIG_PATH, encoding="utf-8") as f:
-            return json.load(f)
-    except (json.JSONDecodeError, OSError):
+        with open(CONFIG_PATH, encoding="utf-8-sig") as f:
+            config = json.load(f)
+    except (ValueError, OSError):
         return {}
+    return config if isinstance(config, dict) else {}
 
 
 def stop_waydroid() -> None:
