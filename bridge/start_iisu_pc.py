@@ -113,8 +113,10 @@ class StartLog:
     A start's output used to exist only in the Manager's log drawer. Started
     from the desktop shortcut there is no Manager and no console, so a start
     that failed left nothing to look at. start.log holds the last start,
-    whichever way it was begun. Used as `with StartLog(progress):`, it stands
-    in for sys.stdout for the duration and puts the original back after."""
+    whichever way it was begun. Used as `with StartLog() as log:`, it stands
+    in for sys.stdout for the duration and puts the original back after. The
+    loading screen only exists once the config has been read, so it is
+    attached afterwards and given the lines printed before it."""
 
     def __init__(self, progress=None, path: Path | None = None):
         self._progress = progress
@@ -122,6 +124,13 @@ class StartLog:
         self._original = None
         self._file = None
         self._pending = ""
+        self._earlier: list[str] = []
+
+    def attach(self, progress) -> None:
+        self._progress = progress
+        for line in self._earlier:
+            progress.log(line)
+        self._earlier = []
 
     def __enter__(self):
         self._original = sys.stdout
@@ -162,8 +171,12 @@ class StartLog:
                 self._file.flush()
             except (OSError, ValueError):
                 pass
-        if self._progress is not None and line.strip():
+        if not line.strip():
+            return
+        if self._progress is not None:
             self._progress.log(line)
+        else:
+            self._earlier.append(line)
 
 
 def forward_new_lines(path: Path, offset: int, progress) -> int:
@@ -701,6 +714,13 @@ def main(headless: bool = False) -> None:
     """headless=True boots the Android VM without its window and starts neither
     the boot overlay (nothing to cover) nor the launch bridge, for running it
     in the background or on a machine nobody is sitting at."""
+    # From the very first line, so start.log also has a start that stopped
+    # early (no config, a repatch needed).
+    with StartLog() as log:
+        _start(headless, log)
+
+
+def _start(headless: bool, log: StartLog) -> None:
     timer = StageTimer()
     winapi.ensure_linux_kwin_rules()
     try:
@@ -756,10 +776,10 @@ def main(headless: bool = False) -> None:
     )
     overlay = boot_overlay.show("Getting ready", progress.path) if show_overlay else None
     try:
-        with StartLog(progress):
-            for line in system_info.summary_lines():
-                print(f"[start] {line}")
-            _run_start_sequence(config, avd_name, port, debug_console, state, headless, timer, progress=progress)
+        log.attach(progress)
+        for line in system_info.summary_lines():
+            print(f"[start] {line}")
+        _run_start_sequence(config, avd_name, port, debug_console, state, headless, timer, progress=progress)
         if overlay is not None:
             # Long enough for the bar to be seen reaching 100%.
             time.sleep(0.4)

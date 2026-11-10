@@ -59,11 +59,27 @@ def disk_free_gb(path: Path = PROJECT_ROOT) -> tuple[float, float] | None:
     return usage.free / GB, usage.total / GB
 
 
+def system_name(system: str | None = None, release: str | None = None, version: str | None = None) -> str:
+    """"Windows 11", "Linux 6.8.0". Windows 11 still calls itself version 10
+    and is told apart by its build number, 22000 and up, so a log read on
+    its own would otherwise name the wrong Windows."""
+    system = platform.system() if system is None else system
+    release = platform.release() if release is None else release
+    version = platform.version() if version is None else version
+    if system == "Windows" and release == "10":
+        try:
+            if int(version.split(".")[2]) >= 22000:
+                release = "11"
+        except (IndexError, ValueError):
+            pass
+    return f"{system} {release}"
+
+
 def summary_lines(install_root: Path = PROJECT_ROOT) -> list[str]:
     """Ready-to-print lines, without a prefix."""
     lines = []
     try:
-        lines.append(f"System: {platform.system()} {platform.release()} ({platform.version()}), {platform.machine()}")
+        lines.append(f"System: {system_name()} ({platform.version()}), {platform.machine()}")
     except Exception:  # noqa: BLE001
         pass
     parts = []

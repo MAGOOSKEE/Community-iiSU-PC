@@ -9,32 +9,49 @@ log: there was no telling whether two lines were a second or a minute apart.
 from __future__ import annotations
 
 import sys
+import threading
 import time
 
 
 class TimestampedStream:
-    """Wraps a text stream, writing "HH:MM:SS " at the start of each line."""
+    """Wraps a text stream, writing "HH:MM:SS.mmm " at the start of each line.
+
+    Lines are written whole. print() hands over its text and its line end as
+    two separate writes, and the bridge prints from several threads (the
+    hotkeys, the controller, the launches), so two lines could end up run
+    together on one line with an empty one after it. Each thread's text is
+    held until its line is complete and then written in one piece."""
 
     def __init__(self, stream, clock=time.time):
         self._stream = stream
         self._clock = clock
-        self._at_line_start = True
+        self._lock = threading.Lock()
+        self._pending = threading.local()
+
+    def _stamp(self) -> str:
+        now = self._clock()
+        return time.strftime("%H:%M:%S", time.localtime(now)) + f".{int(now * 1000) % 1000:03d} "
 
     def write(self, text: str) -> int:
         if not text:
             return 0
-        pieces = []
-        for part in text.splitlines(keepends=True):
-            if self._at_line_start:
-                now = self._clock()
-                pieces.append(time.strftime("%H:%M:%S", time.localtime(now)) + f".{int(now * 1000) % 1000:03d} ")
-            pieces.append(part)
-            self._at_line_start = part.endswith("\n")
-        self._stream.write("".join(pieces))
+        *lines, rest = (getattr(self._pending, "text", "") + text).split("\n")
+        self._pending.text = rest
+        if lines:
+            stamp = self._stamp()
+            with self._lock:
+                self._stream.write("".join(f"{stamp}{line}\n" for line in lines))
         return len(text)
 
     def flush(self) -> None:
-        self._stream.flush()
+        """Also writes out this thread's unfinished line, so nothing printed
+        without a line end is lost when the process ends."""
+        rest = getattr(self._pending, "text", "")
+        with self._lock:
+            if rest:
+                self._pending.text = ""
+                self._stream.write(f"{self._stamp()}{rest}\n")
+            self._stream.flush()
 
     def __getattr__(self, name):
         return getattr(self._stream, name)

@@ -36,12 +36,42 @@ class TimestampedStreamTests(unittest.TestCase):
         lines = target.getvalue().splitlines()
         self.assertTrue(lines[0].endswith(" [bridge] launching"))
         self.assertEqual(lines[0].count(":"), 2)
+        self.assertEqual(len(lines), 2)
         self.assertTrue(lines[1].endswith(" next"))
 
     def test_print_works_through_it(self):
         target, stream = self._stream()
         print("hello", "there", file=stream)
         self.assertTrue(target.getvalue().endswith(" hello there\n"))
+
+    def test_lines_from_two_threads_never_share_a_line(self):
+        import threading
+
+        target, stream = self._stream()
+        barrier = threading.Barrier(2)
+
+        def chatter(name: str) -> None:
+            barrier.wait()
+            for number in range(200):
+                # print() writes the text and the line end separately.
+                print(f"[{name}] line {number}", file=stream)
+
+        threads = [threading.Thread(target=chatter, args=(name,)) for name in ("bridge", "controller")]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        lines = target.getvalue().splitlines()
+        self.assertEqual(len(lines), 400)
+        for line in lines:
+            self.assertRegex(line, r"^\d\d:\d\d:\d\d\.250 \[(bridge|controller)\] line \d+$")
+
+    def test_an_unfinished_line_is_written_on_flush(self):
+        target, stream = self._stream()
+        stream.write("no line end yet")
+        self.assertEqual(target.getvalue(), "")
+        stream.flush()
+        self.assertTrue(target.getvalue().endswith(" no line end yet\n"))
 
     def test_no_output_at_all_is_left_alone(self):
         with patch.object(sys, "stdout", None):
@@ -65,6 +95,12 @@ class SystemInfoTests(unittest.TestCase):
         self.assertIn("logical processors", text)
         self.assertIn(f"Install folder: {PROJECT_ROOT}", text)
         self.assertIn("GB free", text)
+
+    def test_windows_11_is_named_by_its_build_number(self):
+        self.assertEqual(system_info.system_name("Windows", "10", "10.0.26200"), "Windows 11")
+        self.assertEqual(system_info.system_name("Windows", "10", "10.0.19045"), "Windows 10")
+        self.assertEqual(system_info.system_name("Windows", "10", "odd"), "Windows 10")
+        self.assertEqual(system_info.system_name("Linux", "6.8.0", "#1 SMP"), "Linux 6.8.0")
 
     def test_memory_is_read_and_plausible(self):
         total, free = system_info.memory_gb()

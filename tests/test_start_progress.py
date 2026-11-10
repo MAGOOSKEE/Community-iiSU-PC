@@ -192,6 +192,17 @@ class StartLogTests(TempDirTestCase):
         self.assertTrue(lines[1].endswith("[start] second"))
         self.assertEqual(sp.read_status(self.status)["log"], ["[start] first", "[start] second"])
 
+    def test_lines_printed_before_the_screen_exists_reach_it_once_attached(self):
+        log_path = self.root / "start.log"
+        with patch("sys.stdout", None):
+            with start_iisu_pc.StartLog(path=log_path) as log:
+                print("[start] banner")
+                progress = self._progress()
+                log.attach(progress)
+                print("[start] after")
+        self.assertEqual(sp.read_status(self.status)["log"], ["[start] banner", "[start] after"])
+        self.assertEqual(len(log_path.read_text(encoding="utf-8").splitlines()), 2)
+
     def test_what_was_there_before_still_gets_the_output_and_comes_back(self):
         class Sink:
             def __init__(self):
