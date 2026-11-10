@@ -675,10 +675,17 @@ class ControllerBridge:
         self._sony_controllers_prompted = found
 
     def run(self) -> None:
-        if _xinput is None:
-            print("[controller] XInput not available on this system; controller support disabled")
+        # Linux has no XInput and reads /dev/input/js* through
+        # _linux_gamepad_manager instead. This used to return whenever XInput
+        # was missing, which is always on Linux, so neither menu navigation
+        # nor the quit chord ever ran there.
+        if _xinput is None and _linux_gamepad_manager is None:
+            print("[controller] no controller interface on this system; controller support disabled")
             return
-        print("[controller] watching for Xbox-compatible controllers (wired or Bluetooth)")
+        if _xinput is not None:
+            print("[controller] watching for Xbox-compatible controllers (wired or Bluetooth)")
+        else:
+            print("[controller] watching /dev/input/js* for controllers")
         if self._quit_chord_mask:
             print(f"[controller] {self._quit_chord_label} on any pad triggers the same action as the keyboard quit hotkey")
         while True:
