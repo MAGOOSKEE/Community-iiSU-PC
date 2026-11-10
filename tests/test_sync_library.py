@@ -200,7 +200,8 @@ class ExtractRetryTests(unittest.TestCase):
 
     def test_retries_once_when_adb_drops_the_device(self):
         results = [self._completed(255), self._completed(0), self._completed(0)]
-        with patch.object(sync_library, "adb", side_effect=results) as adb,              patch.object(sync_library.time, "sleep"):
+        with patch.object(sync_library, "adb", side_effect=results) as adb, \
+                patch.object(sync_library.time, "sleep"):
             result = sync_library._run_extract("tar xf x")
         self.assertEqual(result.returncode, 0)
         self.assertEqual([c.args[0] for c in adb.call_args_list], ["shell", "wait-for-device", "shell"])
@@ -217,6 +218,15 @@ class ExtractRetryTests(unittest.TestCase):
             result = sync_library._run_extract("tar xf x")
         self.assertNotEqual(result.returncode, 0)
 
+    def test_the_time_limit_grows_with_the_library(self):
+        self.assertEqual(sync_library.extract_timeout(0), sync_library.ADB_EXTRACT_TIMEOUT)
+        # 100,000 placeholders at the measured 70 files a second take about 1,430s.
+        self.assertGreater(sync_library.extract_timeout(100_000), 1430)
+
+    def test_the_grown_limit_reaches_adb(self):
+        with patch.object(sync_library, "adb", return_value=self._completed(0)) as adb:
+            sync_library._run_extract("tar xf x", timeout=sync_library.extract_timeout(50_000))
+        self.assertEqual(adb.call_args.kwargs["timeout"], 1600)
 
 
 class ExtractCommandTests(unittest.TestCase):
@@ -229,6 +239,7 @@ class ExtractCommandTests(unittest.TestCase):
         self.assertLess(extract, background_rm)
         self.assertTrue(cmd.rstrip().endswith("exit $rc"))
         self.assertNotIn("rm -rf /sdcard/Roms &&", cmd)
+
 
 if __name__ == "__main__":
     unittest.main()

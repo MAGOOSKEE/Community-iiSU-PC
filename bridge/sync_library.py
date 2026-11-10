@@ -199,7 +199,12 @@ def referenced_disc_filenames(
 ADB_DEFAULT_TIMEOUT = 60  # seconds
 ADB_PUSH_TIMEOUT = 300
 ADB_EXTRACT_TIMEOUT = 600
+# The extract writes every placeholder through Android's FUSE layer, measured
+# at roughly 70 files a second, so a flat limit caps how big a library can
+# ever be: it would time out at the same point on every start. The limit
+# grows with the archive instead, see extract_timeout().
 # adb shell's own exit code when the connection to the device drops.
+ADB_EXTRACT_FILES_PER_EXTRA_SECOND = 50
 ADB_CONNECTION_LOST = 255
 
 
@@ -238,16 +243,24 @@ def build_extract_command() -> str:
     )
 
 
-def _run_extract(extract_cmd: str) -> subprocess.CompletedProcess:
+def extract_timeout(file_count: int) -> int:
+    """Seconds the extract may take for an archive of file_count placeholders:
+    the base limit plus a second for every 50 files, about a third faster
+    than the slowest extract measured, so a large but healthy library always
+    finishes while a wedged adb call still gives up."""
+    return ADB_EXTRACT_TIMEOUT + max(0, file_count) // ADB_EXTRACT_FILES_PER_EXTRA_SECOND
+
+
+def _run_extract(extract_cmd: str, timeout: float = ADB_EXTRACT_TIMEOUT) -> subprocess.CompletedProcess:
     """Runs the extract, retrying once if adb lost the device partway
     (exit 255): that's a dropped connection, not a tar error, and the
     archive is still sitting on the device to try again."""
     result = None
     for attempt in range(2):
         try:
-            result = adb("shell", extract_cmd, check=False, timeout=ADB_EXTRACT_TIMEOUT)
+            result = adb("shell", extract_cmd, check=False, timeout=timeout)
         except subprocess.TimeoutExpired:
-            return subprocess.CompletedProcess(["adb", "shell"], 1, "", f"timed out after {ADB_EXTRACT_TIMEOUT}s")
+            return subprocess.CompletedProcess(["adb", "shell"], 1, "", f"timed out after {timeout:.0f}s")
         if result.returncode != ADB_CONNECTION_LOST or attempt == 1:
             return result
         print("The AVD's adb connection dropped during the extract, reconnecting and retrying once...")
@@ -435,7 +448,7 @@ def main() -> None:
     push_elapsed = max(time.time() - push_start, 0.01)
     print(f"Pushed in {push_elapsed:.1f}s ({push_size_mb / push_elapsed:.1f} MB/s).")
     extract_cmd = build_extract_command()
-    result = _run_extract(extract_cmd)
+    result = _run_extract(extract_cmd, timeout=extract_timeout(file_count))
     try:
         adb("shell", f"rm -f {shlex.quote(AVD_TAR_PUSH_PATH)}", check=False)
     except subprocess.TimeoutExpired:
