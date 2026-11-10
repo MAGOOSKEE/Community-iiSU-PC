@@ -71,7 +71,7 @@ from portable_sdk import (
     patch_config_ini,
     set_quickboot_autosave,
 )
-from shared import adb_client, app_version, iisu_install_record, system_info
+from shared import adb_client, app_version, emulation_info, iisu_install_record, system_info
 from shared.platform_compat import IS_WINDOWS, detached_popen_kwargs, new_console_creationflags, subprocess_creationflags
 from shared.stage_timer import StageTimer
 from shared.vm_backend import BACKEND_WAYDROID, resolve_backend, supports_headless_boot, vm_device_connected
@@ -197,6 +197,21 @@ def forward_new_lines(path: Path, offset: int, progress) -> int:
         if line.strip():
             progress.log(line.rstrip())
     return offset + end + 1
+
+
+def log_emulation_features(probe, debug_console: bool = False) -> None:
+    """Writes what is known about hardware acceleration to the start log: the
+    processor, whether virtualization and a hypervisor are available, the
+    emulator's own acceleration check, and what emulator.log says it is
+    actually using (accelerator, graphics, memory, snapshot). Most "the VM is
+    slow" and "it won't start" reports are answered by these lines."""
+    lines = probe.lines(timeout=5.0)
+    if not debug_console:
+        # With the debug console on, the emulator's output is in its own
+        # window and there is no emulator.log from this run to read.
+        lines += emulation_info.emulator_log_lines_from(EMULATOR_LOG_PATH)
+    for line in lines:
+        print(f"[start] {line}")
 
 
 def save_state(state: dict) -> None:
@@ -844,6 +859,9 @@ def _run_start_sequence(
             print(f"[start] Starting {avd_name} (cold boot: {', '.join(reasons)})...")
         else:
             print(f"[start] Starting {avd_name} (quick resume)...")
+        # Asked while the VM boots, so it costs the start no time: what the
+        # system and the emulator say about hardware acceleration.
+        probe = emulation_info.FeatureProbe(PORTABLE_SDK / "emulator" / EMULATOR_BIN).start()
         pid = start_avd(
             avd_name, config.get("usb_passthrough", []), debug_console,
             force_cold_boot=force_cold_boot, profile=emulator_profiles.active_profile(config), headless=headless,
@@ -855,6 +873,7 @@ def _run_start_sequence(
         # other mode cold boot, so a headless run no longer needs to wipe the whole file.
         save_boot_fingerprint(compute_boot_fingerprint(config, headless), new_parts)
         print(f"[start] {avd_name} is up{' (headless, no window)' if headless else ''} after {timer.elapsed:.1f}s.")
+        log_emulation_features(probe, debug_console)
     timer.mark("Android VM")
 
     progress.step("library")

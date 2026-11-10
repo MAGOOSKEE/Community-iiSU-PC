@@ -34,7 +34,7 @@ from jre_env import java_exe, java_subprocess_env, keytool_exe
 from patch_iisu import patch_apk, validate_iisu_apk
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from shared import app_version, iisu_install_record, system_info, vm_storage
+from shared import app_version, emulation_info, iisu_install_record, system_info, vm_storage
 from shared.steam_deck import STEAM_DECK_DISPLAY, is_steam_deck
 from shared.platform_compat import IS_WINDOWS, detached_popen_kwargs, subprocess_creationflags
 from shared.vm_backend import (
@@ -395,23 +395,6 @@ def virtualization_diagnostics() -> dict:
     return result
 
 
-def describe_virtualization(diag: dict) -> str:
-    """One log line saying whether the Android VM can be hardware accelerated,
-    written at the start of Setup so the answer is in setup.log before the
-    multi-GB download, not only after a first boot has failed."""
-    if diag.get("hypervisor_present"):
-        return "Hardware virtualization: available, a hypervisor is active."
-    if diag.get("cpu_virtualization_enabled"):
-        return (
-            "Hardware virtualization: enabled in the firmware, but no hypervisor is active yet. "
-            "Setup turns on what the Android VM needs if its first boot fails."
-        )
-    return (
-        "Hardware virtualization: not available. The Android VM will be very slow or fail to start "
-        "until virtualization (Intel VT-x or AMD-V/SVM) is enabled in the BIOS/UEFI settings."
-    )
-
-
 def format_duration(seconds: float) -> str:
     """"42s" or "3m 05s", for the Setup log."""
     seconds = max(0, int(round(seconds)))
@@ -625,6 +608,9 @@ def boot_avd_and_install(
         print("[setup] booting the AVD once to install iiSU (this can take a minute)...")
         import portable_sdk
         portable_sdk.set_quickboot_autosave(portable_sdk.PORTABLE_AVD_HOME / f"{avd_name}.avd", enabled=False)
+        accel_line = emulation_info.accel_check_line(emulator_exe)
+        if accel_line:
+            print(f"[setup] {accel_line}")
         process = _launch_install_emulator(emulator_exe, avd_name, env, log_path)
 
     if not wait_for_avd(avd_name, AVD_BOOT_TIMEOUT, process=process):
@@ -1149,7 +1135,9 @@ def run_setup(
     for line in system_info.summary_lines(PROJECT_ROOT):
         print(f"[setup] {line}")
     if backend == BACKEND_AVD:
-        print(f"[setup] {describe_virtualization(virtualization_diagnostics())}")
+        # Before the multi-GB download, not only after a first boot has failed.
+        for line in emulation_info.system_lines():
+            print(f"[setup] {line}")
     if backend == BACKEND_AVD:
         print(f"[setup] Android VM internal storage: {storage_gb} GB (a maximum, it only uses what's filled), lean profile: {'on' if lean else 'off'}")
     print("=== Community-iiSU-PC first-time setup ===\n")

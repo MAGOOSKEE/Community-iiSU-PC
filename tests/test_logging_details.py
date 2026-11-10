@@ -113,12 +113,6 @@ class SystemInfoTests(unittest.TestCase):
 
 
 class SetupDetailTests(unittest.TestCase):
-    def test_virtualization_is_described_for_each_state(self):
-        describe = setup_wizard.describe_virtualization
-        self.assertIn("available", describe({"hypervisor_present": True, "cpu_virtualization_enabled": False}))
-        self.assertIn("no hypervisor is active", describe({"hypervisor_present": False, "cpu_virtualization_enabled": True}))
-        self.assertIn("BIOS/UEFI", describe({"hypervisor_present": False, "cpu_virtualization_enabled": False}))
-
     def test_durations_read_naturally(self):
         self.assertEqual(setup_wizard.format_duration(0.4), "0s")
         self.assertEqual(setup_wizard.format_duration(42.4), "42s")
