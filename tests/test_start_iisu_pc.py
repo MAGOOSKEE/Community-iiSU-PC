@@ -19,6 +19,20 @@ sys.path.insert(0, str(PROJECT_ROOT / "bridge"))
 import portable_sdk  # noqa: E402; path set up above
 import start_iisu_pc  # noqa: E402; path set up above
 
+# main() keeps a start log. Tests that run it must never write the real
+# bridge/start.log of the checkout they run in.
+_START_LOG_DIR = tempfile.TemporaryDirectory()
+_START_LOG_PATCH = patch.object(start_iisu_pc, "START_LOG_PATH", Path(_START_LOG_DIR.name) / "start.log")
+
+
+def setUpModule():
+    _START_LOG_PATCH.start()
+
+
+def tearDownModule():
+    _START_LOG_PATCH.stop()
+    _START_LOG_DIR.cleanup()
+
 
 class DescribeBootFingerprintDiffTests(unittest.TestCase):
     def test_no_saved_state_yet(self):
@@ -200,7 +214,7 @@ class HeadlessWithWaydroidTests(unittest.TestCase):
              patch.object(start_iisu_pc.winapi, "ensure_linux_kwin_rules"), \
              patch.object(start_iisu_pc.iisu_install_record, "needs_repatch", return_value=False), \
              patch.object(start_iisu_pc, "_run_start_sequence") as sequence, \
-             patch.object(start_iisu_pc, "START_LOG_PATH", Path(tempfile.gettempdir()) / "iisupc-test-start.log"), \
+\
              patch.object(start_iisu_pc.boot_overlay, "close"):
             start_iisu_pc.main(headless=True)
         self.assertIs(sequence.call_args.args[5], False, "the headless argument")
