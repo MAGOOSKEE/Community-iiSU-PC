@@ -77,6 +77,7 @@ from emulator_lookup import (
     find_rom,
     friendly_emulator_name,
     load_path_cache,
+    rom_location_in_vm,
     save_path_cache,
 )
 from hotkey_keys import MODIFIER_FLAGS, MODIFIER_VK, resolve_vk
@@ -1529,15 +1530,16 @@ def handle_request(raw_intent: str) -> None:
     roms_dir = Path(config["roms_dir"])
 
     if data_uri:
-        rom_filename = unquote(data_uri).rsplit("/", 1)[-1]
+        rom_address = unquote(data_uri)
     elif "ROM" in extras:
         # Already a plain filesystem path, not URI-encoded, no unquote().
-        rom_filename = extras["ROM"].rsplit("/", 1)[-1]
+        rom_address = extras["ROM"]
     elif "bootPath" in extras:
         # Kenji-NX (Switch, routed to Ryujinx) gets the ROM's URI as this extra.
-        rom_filename = unquote(extras["bootPath"]).rsplit("/", 1)[-1]
+        rom_address = unquote(extras["bootPath"])
     else:
-        rom_filename = None
+        rom_address = None
+    rom_filename = rom_address.rsplit("/", 1)[-1] if rom_address else None
 
     profile = find_emulator_for_package(package, config["emulators"], rom_filename, extras.get("LIBRETRO"))
     if profile is None:
@@ -1572,7 +1574,7 @@ def handle_request(raw_intent: str) -> None:
 
     rom_path = None
     if rom_filename:
-        rom_path = find_rom(rom_filename, roms_dir, path_cache)
+        rom_path = find_rom(rom_filename, roms_dir, path_cache, rom_location_in_vm(rom_address))
         if rom_path is None:
             log_launch(f"FAILED: rom '{rom_filename}' not found under {roms_dir}", notify=True, notify_title=friendly_emulator_name(executable))
 

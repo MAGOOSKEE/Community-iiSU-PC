@@ -228,6 +228,38 @@ class FindExecutableAndRomTests(unittest.TestCase):
         self.assertEqual(find_rom("Game.sfc", self.root, cache), rom)
         self.assertEqual(cache["roms"], {f"Game.sfc::{self.root}": str(rom)})
 
+    def test_rom_location_is_read_from_a_document_uri_and_a_plain_path(self):
+        uri = "content://com.android.externalstorage.documents/tree/primary:Roms/document/primary:Roms/psx/Ridge Racer (Europe).chd"
+        self.assertEqual(emulator_lookup.rom_location_in_vm(uri), ("psx", "Ridge Racer (Europe).chd"))
+        self.assertEqual(
+            emulator_lookup.rom_location_in_vm("/storage/emulated/0/Roms/snes/hacks/Zelda.sfc"), ("snes", "hacks/Zelda.sfc")
+        )
+
+    def test_an_address_outside_the_rom_tree_has_no_location(self):
+        for address in (None, "", "content://other/primary:Download/Game.sfc", "/sdcard/Roms/snes", "/sdcard/Roms/snes/../x"):
+            self.assertIsNone(emulator_lookup.rom_location_in_vm(address), address)
+
+    def test_the_same_file_name_in_two_consoles_launches_the_one_asked_for(self):
+        gb = self._touch("gb", "Tetris (World).zip")
+        nes = self._touch("nes", "Tetris (World).zip")
+        for console, expected in (("gb", gb), ("nes", nes)):
+            found = find_rom("Tetris (World).zip", self.root, self._cache(), (console, "Tetris (World).zip"))
+            self.assertEqual(found, expected)
+
+    def test_a_console_folder_named_differently_on_disk_is_followed(self):
+        rom = self._touch("Playstation 1", "Game.chd")
+        self._touch("aaa-other", "Game.chd")
+        self.assertEqual(find_rom("Game.chd", self.root, self._cache(), ("psx", "Game.chd")), rom)
+
+    def test_a_rom_deeper_than_the_name_search_goes_is_found_by_its_path(self):
+        deep = self._touch("snes", "a", "b", "c", "d", "Game.sfc")
+        self.assertIsNone(find_rom("Game.sfc", self.root, self._cache()))
+        self.assertEqual(find_rom("Game.sfc", self.root, self._cache(), ("snes", "a/b/c/d/Game.sfc")), deep)
+
+    def test_a_location_that_is_not_there_falls_back_to_the_name(self):
+        rom = self._touch("snes", "Game.sfc")
+        self.assertEqual(find_rom("Game.sfc", self.root, self._cache(), ("gba", "Game.sfc")), rom)
+
     def test_find_rom_with_a_missing_folder_or_file_is_none(self):
         self.assertIsNone(find_rom("Game.sfc", self.root / "nope", self._cache()))
         self.assertIsNone(find_rom("Game.sfc", self.root, self._cache()))

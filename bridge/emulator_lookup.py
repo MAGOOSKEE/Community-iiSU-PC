@@ -171,17 +171,74 @@ def find_executable(
     return None
 
 
-def find_rom(rom_filename: str, roms_dir: Path, cache: dict) -> Path | None:
+# The folder the ROM placeholders are synced into inside the VM (see
+# sync_library.AVD_ROMS_DIRNAME). Whatever follows it in a launch's ROM
+# address is "<console>/<path inside that console's folder>".
+VM_ROMS_FOLDER = "Roms"
+
+
+def rom_location_in_vm(address: str | None) -> tuple[str, str] | None:
+    """(iiSU console short name, path inside that console's folder) from the
+    ROM address iiSU launched with, already URL-decoded: a document URI
+    ending "primary:Roms/psx/Ridge Racer.chd" or a plain path
+    "/storage/emulated/0/Roms/snes/Zelda.sfc". None when the address doesn't
+    point into the synced ROM tree."""
+    if not address:
+        return None
+    normalized = address.replace("\\", "/")
+    for marker in (f":{VM_ROMS_FOLDER}/", f"/{VM_ROMS_FOLDER}/"):
+        index = normalized.rfind(marker)
+        if index == -1:
+            continue
+        console, _, relative = normalized[index + len(marker):].partition("/")
+        parts = relative.split("/")
+        if console and relative and ".." not in parts and "" not in parts:
+            return console, relative
+    return None
+
+
+def _find_rom_at(roms_dir: Path, location: tuple[str, str]) -> Path | None:
+    """The real file a synced placeholder stands for: the same path inside
+    whichever ROM folder syncs to that console (the folder on disk may be
+    named differently, "Playstation 1" syncs as "psx")."""
+    from console_names import load_console_lookup, resolve_console_shortname
+
+    console, relative = location
+    try:
+        exact, by_compact = load_console_lookup()
+        folders = sorted(entry for entry in roms_dir.iterdir() if entry.is_dir())
+    except (OSError, ValueError):
+        return None
+    for folder in folders:
+        if resolve_console_shortname(folder.name, exact, by_compact) == console:
+            candidate = folder.joinpath(*relative.split("/"))
+            if candidate.is_file():
+                return candidate
+    return None
+
+
+def find_rom(
+    rom_filename: str, roms_dir: Path, cache: dict, location: tuple[str, str] | None = None
+) -> Path | None:
     """Same caching approach as find_executable, keyed on roms_dir too so
-    changing it in the Manager doesn't risk returning a stale path."""
-    cache_key = f"{rom_filename}::{roms_dir}"
+    changing it in the Manager doesn't risk returning a stale path.
+
+    With location (see rom_location_in_vm) the file is looked up exactly
+    where iiSU says it is. Matching on the file name alone picked the first
+    file of that name anywhere in the library, so two consoles each holding
+    a "Tetris (World).zip" could launch the wrong one, and a game more than
+    ROM_SEARCH_MAX_DEPTH folders down was synced into iiSU but never found
+    at launch. The name search remains as the fallback."""
+    cache_key = f"{'/'.join(location) if location else rom_filename}::{roms_dir}"
     cached = cache["roms"].get(cache_key)
     if cached and Path(cached).is_file():
         return Path(cached)
 
     if not roms_dir.is_dir():
         return None
-    match = _find_by_name(roms_dir, {rom_filename}, ROM_SEARCH_MAX_DEPTH)
+    match = _find_rom_at(roms_dir, location) if location else None
+    if match is None:
+        match = _find_by_name(roms_dir, {rom_filename}, ROM_SEARCH_MAX_DEPTH)
     if match:
         cache["roms"][cache_key] = str(match)
         return match
