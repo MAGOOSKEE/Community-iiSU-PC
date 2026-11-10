@@ -25,6 +25,7 @@ controller-based quit chord (evdev, controller_bridge.py) is a third,
 independent mechanism, unaffected by any of this.
 """
 
+import os
 import shutil
 import subprocess
 import sys
@@ -497,6 +498,22 @@ def wait_for_window_to_close(hwnd: int, timeout: float = 10.0) -> bool:
             return True
         time.sleep(0.2)
     return False
+
+
+def pid_is_running(pid: int | None) -> bool:
+    """Whether a process with this ID is still running. Signal 0 checks
+    without sending anything; a process owned by someone else still exists."""
+    if not pid:
+        return False
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except (OSError, ValueError):
+        return False
+    return True
 
 
 def find_window_by_pid(pid: int) -> int | None:

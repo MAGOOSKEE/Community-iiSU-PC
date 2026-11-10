@@ -102,6 +102,7 @@ from winapi import (
     close_window,
     make_fullscreen,
     nudge_focus_with_click,
+    pid_is_running,
     user32,
     wait_for_new_visible_window,
     wait_for_new_visible_window_excluding_processes,
@@ -242,22 +243,10 @@ def _window_pid(hwnd: int) -> int | None:
 
 
 def _pid_is_running(pid: int | None) -> bool:
-    if not pid:
-        return False
-    # tasklist is available on supported Windows installs and avoids keeping
-    # another process HANDLE open for the whole game session.
-    try:
-        result = subprocess.run(
-            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            creationflags=subprocess_creationflags(),
-            timeout=2,
-        )
-        return result.returncode == 0 and f'"{pid}"' in result.stdout
-    except (OSError, subprocess.SubprocessError):
-        return False
+    # Asked of the system directly (see winapi's pid_is_running): this runs
+    # four times a second for as long as a game does, and used to start
+    # tasklist.exe each time, which also never existed on Linux.
+    return pid_is_running(pid)
 
 
 def _terminate_native_pid(pid: int) -> bool:
@@ -627,7 +616,13 @@ def _register_hotkey(hotkey_config: dict, hotkey_id: int, purpose: str) -> str |
         modifiers |= MODIFIER_FLAGS.get(name.lower(), 0)
 
     key = hotkey_config.get("key", "q")
-    vk = ord(key.upper()[0])
+    # The same lookup the quit key uses. Taking the first letter turned a
+    # named key into a letter: F10 registered F, Escape registered E, and
+    # with no modifiers that took the bare letter away from every program.
+    vk = resolve_vk(key)
+    if not vk:
+        print(f"[bridge] {purpose} hotkey has no key set, not registering it")
+        return None
 
     if not user32.RegisterHotKey(None, hotkey_id, modifiers, vk):
         print(f"[bridge] failed to register {purpose} hotkey ({'+'.join(hotkey_config.get('modifiers', []))}+{key})")

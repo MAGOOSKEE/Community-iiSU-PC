@@ -78,6 +78,10 @@ kernel32.CloseHandle.restype = wintypes.BOOL
 kernel32.GetConsoleWindow.restype = wintypes.HWND
 
 PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+SYNCHRONIZE = 0x00100000
+WAIT_TIMEOUT = 0x00000102
+kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+kernel32.WaitForSingleObject.restype = wintypes.DWORD
 WM_CLOSE = 0x0010
 SW_HIDE = 0
 SW_MAXIMIZE = 3
@@ -177,6 +181,24 @@ def wait_for_new_visible_window(existing: set[int], timeout: float = 10.0) -> in
     return None
 
 
+
+
+def pid_is_running(pid: int | None) -> bool:
+    """Whether a process with this ID is still running, asked of Windows
+    directly. A game's lifetime is checked four times a second for as long
+    as it runs, and starting tasklist.exe for each check took about 55 ms
+    of processor time every time (measured), a fifth of a core for the whole
+    session. A process that has exited but is still held open elsewhere
+    counts as gone, which a bare OpenProcess success would not."""
+    if not pid:
+        return False
+    handle = kernel32.OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+    if not handle:
+        return False
+    try:
+        return kernel32.WaitForSingleObject(handle, 0) == WAIT_TIMEOUT
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 def window_process_name(hwnd: int) -> str:
