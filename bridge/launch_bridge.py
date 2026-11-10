@@ -88,6 +88,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from bridge.ui import boot_overlay_qt as boot_overlay
 from shared import adb_client, app_version
 from shared.platform_compat import IS_WINDOWS, detached_popen_kwargs, new_console_creationflags, open_uri, subprocess_creationflags
+from shared.linux_emulators import linux_path_names
 from shared.vm_backend import BACKEND_WAYDROID, resolve_backend, vm_device_connected
 from winapi import (
     SW_MINIMIZE,
@@ -1556,7 +1557,17 @@ def handle_request(raw_intent: str) -> None:
     executable = find_executable(profile["exe_names"], search_roots, path_cache)
     if executable is None:
         save_path_cache(path_cache)
-        log_launch(f"FAILED: none of {profile['exe_names']} found under {search_roots} (rom '{rom_filename}')", notify=True)
+        looked_for = profile["exe_names"] if IS_WINDOWS else linux_path_names(profile["exe_names"])
+        log_launch(f"FAILED: none of {looked_for} found under {search_roots} (rom '{rom_filename}')", notify=True)
+        return
+    if not IS_WINDOWS and not os.access(executable, os.X_OK):
+        # An AppImage or launcher script downloaded by hand. Starting it
+        # anyway failed with a bare "Permission denied".
+        log_launch(
+            f"FAILED: {executable} isn't marked as a program. Allow it to run "
+            f"(right-click > Properties > Permissions, or `chmod +x`), then launch the game again.",
+            notify=True, notify_title=friendly_emulator_name(executable),
+        )
         return
 
     rom_path = None

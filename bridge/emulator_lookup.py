@@ -27,6 +27,13 @@ from shared.emulator_defaults import (  # noqa: E402; path set up above
     retroarch_core_dll_for_android_core,
     standalone_profile_for_core_dll,
 )
+from shared.linux_emulators import (  # noqa: E402
+    default_linux_search_roots,
+    linux_core_argument,
+    linux_matcher,
+    linux_path_names,
+)
+from shared.platform_compat import IS_WINDOWS  # noqa: E402
 
 PATH_CACHE_PATH = Path(__file__).parent / ".path_cache.json"
 LIBRETRO_CORE_URL = "https://buildbot.libretro.com/nightly/windows/x86_64/latest/{core_dll}.zip"
@@ -59,8 +66,9 @@ ROM_SEARCH_MAX_DEPTH = 3
 _FIND_BY_NAME_SKIP_DIRS = {".git", ".cache", ".var", ".wine", ".steam", "node_modules", "proc", "sys", "dev"}
 
 
-def _find_by_name(root: Path, names: set[str], max_depth: int) -> Path | None:
-    """Breadth-first search for any file in `names` under root, capped at
+def _find_by_name(root: Path, names: set[str], max_depth: int, matches=None) -> Path | None:
+    """Breadth-first search for any file in `names` under root (or, given
+    `matches`, any file whose name it accepts, see find_executable), capped at
     max_depth directory levels below root (root's direct children are
     depth 0). Replaces Path.rglob(), whose unbounded recursion means one
     slow, unavoidable round-trip per folder for every folder in the
@@ -86,7 +94,7 @@ def _find_by_name(root: Path, names: set[str], max_depth: int) -> Path | None:
             except OSError:
                 continue
             for entry in entries:
-                if entry.name in names and entry.is_file():
+                if (matches(entry.name) if matches else entry.name in names) and entry.is_file():
                     return Path(entry.path)
             for entry in entries:
                 # follow_symlinks=False: a symlink loop (real on Linux,
@@ -100,7 +108,9 @@ def _find_by_name(root: Path, names: set[str], max_depth: int) -> Path | None:
     return None
 
 
-def find_executable(names: list[str], search_roots: list[Path], cache: dict) -> Path | None:
+def find_executable(
+    names: list[str], search_roots: list[Path], cache: dict, is_windows: bool = IS_WINDOWS
+) -> Path | None:
     """Scanning search_roots (which commonly include all of C:/Program
     Files) on every single launch is real, avoidable latency, the result
     almost never changes between launches, so it's cached by exe name and
@@ -112,7 +122,12 @@ def find_executable(names: list[str], search_roots: list[Path], cache: dict) -> 
     entry instead of it staying wrong until the previously-found file
     happens to disappear, the Manager documents that path changes apply
     on the very next launch with no restart needed, and a stale cache hit
-    would quietly break that."""
+    would quietly break that.
+
+    The configured names are Windows executables. On Linux each one stands
+    for the names the same emulator has there (its binary, Flatpak launcher,
+    EmuDeck script or AppImage, see shared/linux_emulators.py), and the usual
+    Linux install folders are searched after the configured ones."""
     cache_key = "|".join(names) + "::" + "|".join(str(r) for r in search_roots)
     cached = cache["executables"].get(cache_key)
     if cached and Path(cached).is_file():
@@ -122,19 +137,36 @@ def find_executable(names: list[str], search_roots: list[Path], cache: dict) -> 
     # checking that first is both a real shortcut and the only way
     # find_executable() would ever notice it at all (search_roots are
     # plain folders, not APT/Flatpak; shutil.which() handles both).
-    for name in names:
-        which_path = shutil.which(name)
-        if which_path and Path(which_path).is_file():
-            cache["executables"][cache_key] = which_path
-            return Path(which_path)
+    def found(match: Path) -> Path:
+        cache["executables"][cache_key] = str(match)
+        return match
 
-    for root in search_roots:
-        if not root.is_dir():
-            continue
-        match = _find_by_name(root, set(names), EXECUTABLE_SEARCH_MAX_DEPTH)
-        if match:
-            cache["executables"][cache_key] = str(match)
-            return match
+    def search(roots: list[Path], matches=None) -> Path | None:
+        for root in roots:
+            if root.is_dir():
+                match = _find_by_name(root, set(names), EXECUTABLE_SEARCH_MAX_DEPTH, matches)
+                if match:
+                    return match
+        return None
+
+    def on_path(candidates: list[str]) -> Path | None:
+        for name in candidates:
+            which_path = shutil.which(name)
+            if which_path and Path(which_path).is_file():
+                return Path(which_path)
+        return None
+
+    if is_windows:
+        match = on_path(names) or search(search_roots)
+    else:
+        # The folders the user chose come first, so a build they picked on
+        # purpose wins over one that merely happens to be on PATH, then PATH,
+        # then the usual Linux install folders.
+        matches = linux_matcher(names)
+        usual = [root for root in default_linux_search_roots() if root not in search_roots]
+        match = search(search_roots, matches) or on_path(linux_path_names(names)) or search(usual, matches)
+    if match:
+        return found(match)
     cache["executables"].pop(cache_key, None)
     return None
 
@@ -157,7 +189,9 @@ def find_rom(rom_filename: str, roms_dir: Path, cache: dict) -> Path | None:
     return None
 
 
-def build_pc_launch_args(profile: dict, executable: Path, rom_path: Path | None) -> list[str]:
+def build_pc_launch_args(
+    profile: dict, executable: Path, rom_path: Path | None, is_windows: bool = IS_WINDOWS
+) -> list[str]:
     """The exact CLI argv a PC-side emulator gets launched with, shared with
     try_launch_args.py so that checker exercises the same logic a real
     launch does rather than a separate reimplementation that could drift.
@@ -169,10 +203,15 @@ def build_pc_launch_args(profile: dict, executable: Path, rom_path: Path | None)
     as neither flag having a boot target at all ("Cannot run no-gui mode
     without boot target", confirmed live). rom_before_args, when a profile
     sets it, is the escape hatch for that rather than hardcoding RPCS3 as a
-    special case here."""
+    special case here.
+
+    On Linux a RetroArch core written the Windows way (cores/x_libretro.dll)
+    becomes the bare x_libretro.so, which RetroArch finds in its own cores
+    folder."""
+    pre_args = list(profile["pre_args"]) if is_windows else [linux_core_argument(arg) for arg in profile["pre_args"]]
     if rom_path and profile.get("rom_before_args"):
-        return [str(executable), str(rom_path), *profile["pre_args"]]
-    args = [str(executable), *profile["pre_args"]]
+        return [str(executable), str(rom_path), *pre_args]
+    args = [str(executable), *pre_args]
     if rom_path:
         args.append(str(rom_path))
     return args
@@ -262,7 +301,14 @@ def ensure_retroarch_core(retroarch_dir: Path, core_dll: str) -> bool:
     time this returns (already there, or freshly downloaded), False if it
     couldn't be obtained, the caller still attempts the launch either way,
     since a download failure here shouldn't be worse than today's silent
-    RetroArch exit."""
+    RetroArch exit.
+
+    Windows only: the buildbot address and the cores folder next to the
+    program are both Windows's. On Linux the cores folder depends on how
+    RetroArch was installed (package, Flatpak, AppImage), so a missing core is
+    installed from RetroArch's own Online Updater."""
+    if not IS_WINDOWS:
+        return False
     core_path = retroarch_dir / "cores" / core_dll
     if core_path.is_file():
         return True
@@ -291,6 +337,6 @@ def friendly_emulator_name(executable: Path) -> str:
     still readable, just less polished, for anything not in this
     project's curated list, e.g. some other RetroArch-compatible fork."""
     for app_label, exe_names in all_emulator_exe_names():
-        if executable.name in exe_names:
+        if executable.name in exe_names or (not IS_WINDOWS and linux_matcher(exe_names)(executable.name)):
             return app_label
     return executable.stem
