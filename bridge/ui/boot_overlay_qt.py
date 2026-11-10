@@ -85,7 +85,7 @@ _FLAVOR_LINES = [
 ]
 
 
-def show(context: str) -> subprocess.Popen | None:
+def show(context: str, status_path: Path | None = None) -> subprocess.Popen | None:
     """Best-effort: returns None instead of raising if the overlay process
     can't be started for any reason, a missing overlay is a cosmetic
     regression, never a reason to fail an actual start or game launch.
@@ -95,11 +95,16 @@ def show(context: str) -> subprocess.Popen | None:
     paired with a randomly-picked, purely-for-fun line underneath. Passed
     as real argv entries (not interpolated into a shell string the way the
     PowerShell version had to escape into), so there's nothing to escape
-    here at all."""
+    here at all.
+
+    status_path, for a start, is the file the overlay reads its percentage,
+    current step and log from (see bridge/start_progress.py). Without it the
+    overlay shows the bouncing bar, for waits nothing can measure."""
     flavor = random.choice(_FLAVOR_LINES)
+    arguments = [context, flavor] + (["--status", str(status_path)] if status_path else [])
     try:
         return subprocess.Popen(
-            [sys.executable, "-m", "bridge.ui.boot_overlay_app", context, flavor],
+            [sys.executable, "-m", "bridge.ui.boot_overlay_app", *arguments],
             cwd=str(_PROJECT_ROOT),
             creationflags=subprocess_creationflags(),
             stdin=subprocess.DEVNULL,

@@ -225,6 +225,7 @@ class ManagerWindow(QMainWindow):
                 self.config_data = emulator_profiles.with_profiles(self.config_data, active, profiles)
                 # Same for the startup volume, added after installs existed.
                 self.config_data.setdefault("startup_volume", 100)
+                self.config_data.setdefault("boot_overlay_details", False)
                 self.configured = True
                 self._config_mtime = CONFIG_PATH.stat().st_mtime
                 return
@@ -284,6 +285,7 @@ class ManagerWindow(QMainWindow):
             settings["show_boot_overlay"] = self.advanced_page.get_show_boot_overlay()
             settings["debug_show_console_windows"] = self.advanced_page.get_debug_show_console_windows()
             settings["startup_volume"] = self.advanced_page.get_startup_volume()
+            settings["boot_overlay_details"] = self.advanced_page.get_boot_overlay_details()
 
         if hasattr(self, "emulator_page"):
             settings["emulator_profiles"] = self.emulator_page.get_emulator_profiles()

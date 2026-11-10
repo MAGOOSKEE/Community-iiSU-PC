@@ -107,6 +107,13 @@ class AdvancedPage(PageBase):
         self.show_overlay_check = QCheckBox("Show the loading overlay during boot and game launch")
         self.body_layout.addWidget(self.show_overlay_check)
 
+        self.overlay_details_check = QCheckBox("Show details (the start log) on the loading screen")
+        self.overlay_details_check.setToolTip(
+            "Adds the log of what Community-iiSU-PC is doing under the progress bar while it starts."
+        )
+        self.body_layout.addWidget(self.overlay_details_check)
+        self.show_overlay_check.toggled.connect(self.overlay_details_check.setEnabled)
+
         self.debug_console_check = QCheckBox("Show AVD and bridge console windows (debugging)")
         self.body_layout.addWidget(self.debug_console_check)
         debug_note = QLabel(
@@ -172,6 +179,8 @@ class AdvancedPage(PageBase):
             check.setChecked(name in initial_chord)
 
         self.show_overlay_check.setChecked(bool(config.get("show_boot_overlay", True)))
+        self.overlay_details_check.setChecked(bool(config.get("boot_overlay_details", False)))
+        self.overlay_details_check.setEnabled(self.show_overlay_check.isChecked())
         volume = config.get("startup_volume", 100)
         self.volume_check.setChecked(volume is not None)
         self.volume_spin.setEnabled(volume is not None)
@@ -204,6 +213,9 @@ class AdvancedPage(PageBase):
     def get_startup_volume(self) -> int | None:
         """The percent to set, or None to leave Android's volume alone."""
         return self.volume_spin.value() if self.volume_check.isChecked() else None
+
+    def get_boot_overlay_details(self) -> bool:
+        return self.overlay_details_check.isChecked()
 
     def get_show_boot_overlay(self) -> bool:
         return self.show_overlay_check.isChecked()

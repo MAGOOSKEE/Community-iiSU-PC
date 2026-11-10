@@ -7,11 +7,19 @@ any QApplication at all, and the Manager calls show()/close() from
 background threads, an in-process widget would reintroduce the "second
 GUI root from a non-owning thread" problem this design exists to avoid.
 
-Usage: python -m bridge.ui.boot_overlay_app <context> [flavor]
+Usage: python -m bridge.ui.boot_overlay_app <context> [flavor] [--status <file>]
+
+With --status (a start, see bridge/start_progress.py) the bouncing bar becomes
+a real progress bar with a percentage and the step being worked on, read from
+that file several times a second, and the start log is shown underneath when
+the file says details are on. Without it (waiting on a game to open, where
+nothing can say how far along it is) the bar bounces as before.
 """
 
 import math
 import sys
+import time
+from pathlib import Path
 
 import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
@@ -19,7 +27,9 @@ from shared.platform_compat import IS_WINDOWS
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QGuiApplication, QLinearGradient, QPainter
-from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QLabel, QPlainTextEdit, QVBoxLayout, QWidget
+
+import start_progress
 
 # Same brand gradient used elsewhere (shared/qt_theme.py's GRADIENT_STOPS),
 # kept in sync by eye since this overlay is a standalone process with
@@ -187,11 +197,50 @@ class _BounceBar(QWidget):
         painter.fillRect(self._x, 0, self._fill_width, self.height(), self._theme["title"])
 
 
+class _ProgressBar(QWidget):
+    """A track filled from the left with the brand gradient, as far as the
+    percentage it was last given."""
+
+    def __init__(self, theme: dict, parent=None, width: int = 420, height: int = 8):
+        super().__init__(parent)
+        self._theme = theme
+        self._percent = 0.0
+        self.setFixedSize(width, height)
+
+    def set_percent(self, percent: float) -> None:
+        self._percent = max(0.0, min(100.0, percent))
+        self.update()
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        radius = self.height() / 2
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(self._theme["track"])
+        painter.drawRoundedRect(self.rect(), radius, radius)
+        filled = int(self.width() * self._percent / 100)
+        if filled <= 0:
+            return
+        gradient = QLinearGradient(0, 0, self.width(), 0)
+        for i, hex_color in enumerate(_GRADIENT_HEX):
+            gradient.setColorAt(i / (len(_GRADIENT_HEX) - 1), QColor(hex_color))
+        painter.setBrush(gradient)
+        painter.drawRoundedRect(0, 0, max(filled, self.height()), self.height(), radius, radius)
+
+
+# How often the status file is re-read and the bar moved.
+STATUS_POLL_MS = 100
+LOG_LINES_SHOWN = 14
+
+
 class OverlayWindow(QWidget):
     _TITLE_TEXT = "iiSU-PC Starting"
 
-    def __init__(self, context: str, flavor: str):
+    def __init__(self, context: str, flavor: str, status_path: Path | None = None):
         super().__init__()
+        self._status_path = status_path
+        self._shown_percent = 0.0
+        self._shown_log: list[str] = []
         theme = _THEMES[_detect_windows_theme()]
 
         # Tool: hides it from the taskbar/Alt-Tab, you shouldn't be able
@@ -229,13 +278,29 @@ class OverlayWindow(QWidget):
         self._title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._title)
 
-        context_label = QLabel(context)
-        context_label.setFont(QFont("Segoe UI Semibold", 14))
-        context_label.setStyleSheet(f"color: {theme['context'].name()};")
-        context_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(context_label)
+        self._context_label = QLabel(context)
+        self._context_label.setFont(QFont("Segoe UI Semibold", 14))
+        self._context_label.setStyleSheet(f"color: {theme['context'].name()};")
+        self._context_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self._context_label)
 
-        layout.addWidget(_BounceBar(theme, self), alignment=Qt.AlignmentFlag.AlignCenter)
+        self._progress_bar = None
+        self._percent_label = None
+        self._log_view = None
+        if status_path is None:
+            layout.addWidget(_BounceBar(theme, self), alignment=Qt.AlignmentFlag.AlignCenter)
+        else:
+            self._progress_bar = _ProgressBar(theme, self)
+            self._progress_bar.setAccessibleName("Start progress")
+            layout.addWidget(self._progress_bar, alignment=Qt.AlignmentFlag.AlignCenter)
+            # The number as text: a bar alone says nothing to someone who
+            # can't make out how full it is, or to a screen reader.
+            self._percent_label = QLabel("0%")
+            self._percent_label.setFont(QFont("Segoe UI Semibold", 16))
+            self._percent_label.setStyleSheet(f"color: {theme['context'].name()};")
+            self._percent_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._percent_label.setAccessibleName("Start progress in percent")
+            layout.addWidget(self._percent_label)
 
         flavor_font = QFont("Segoe UI", 10)
         flavor_font.setItalic(True)
@@ -245,6 +310,37 @@ class OverlayWindow(QWidget):
         flavor_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(flavor_label)
 
+        if status_path is not None:
+            # The start log, for "Show details on the loading screen". Hidden
+            # until the status file asks for it, so it costs nothing otherwise.
+            self._log_view = QPlainTextEdit()
+            self._log_view.setReadOnly(True)
+            self._log_view.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self._log_view.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
+            self._log_view.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            self._log_view.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            log_font = QFont("Consolas", 10)
+            log_font.setStyleHint(QFont.StyleHint.Monospace)
+            self._log_view.setFont(log_font)
+            self._log_view.setAccessibleName("Start log")
+            width = min(1100, screen.geometry().width() - 160)
+            self._log_view.setFixedSize(width, self._log_view.fontMetrics().lineSpacing() * LOG_LINES_SHOWN + 24)
+            background = QColor(theme["track"])
+            background.setAlpha(170)
+            self._log_view.setStyleSheet(
+                f"QPlainTextEdit {{ color: {theme['context'].name()}; border: 1px solid {theme['track'].name()}; "
+                f"border-radius: 8px; padding: 8px; background-color: rgba({background.red()}, {background.green()}, "
+                f"{background.blue()}, {background.alpha()}); }}"
+            )
+            self._log_view.hide()
+            layout.addSpacing(12)
+            layout.addWidget(self._log_view, alignment=Qt.AlignmentFlag.AlignCenter)
+
+            self._status_timer = QTimer(self)
+            self._status_timer.timeout.connect(self._refresh_status)
+            self._status_timer.start(STATUS_POLL_MS)
+            self._refresh_status()
+
         # Cycles 0..3 dots on a fixed-length string (padded with trailing
         # spaces) so the label's width, and therefore its centering,
         # never jitters as the dot count changes.
@@ -252,6 +348,36 @@ class OverlayWindow(QWidget):
         self._dot_timer = QTimer(self)
         self._dot_timer.timeout.connect(self._tick_dots)
         self._dot_timer.start(450)
+
+    def _refresh_status(self) -> None:
+        """Re-reads the status file and moves the bar. The bar never goes
+        backwards, and closes a gap in a few steps, not one jump."""
+        status = start_progress.read_status(self._status_path)
+        if status is None:
+            return
+        target = start_progress.status_percent(status, time.time())
+        if target > self._shown_percent:
+            self._shown_percent = min(target, self._shown_percent + max(0.4, (target - self._shown_percent) * 0.3))
+        self._progress_bar.set_percent(self._shown_percent)
+        whole = int(self._shown_percent)
+        if self._percent_label.text() != f"{whole}%":
+            self._percent_label.setText(f"{whole}%")
+            self._progress_bar.setAccessibleDescription(f"{whole} percent")
+        label = str(status.get("label") or "")
+        if label and self._context_label.text() != label:
+            self._context_label.setText(label)
+
+        show_log = bool(status.get("details"))
+        if self._log_view.isVisible() != show_log:
+            self._log_view.setVisible(show_log)
+        log = status.get("log")
+        if show_log and isinstance(log, list):
+            lines = [str(line) for line in log[-LOG_LINES_SHOWN:]]
+            if lines != self._shown_log:
+                self._shown_log = lines
+                self._log_view.setPlainText("\n".join(lines))
+                bar = self._log_view.verticalScrollBar()
+                bar.setValue(bar.maximum())
 
     def _tick_dots(self) -> None:
         self._dot_count = (self._dot_count + 1) % 4
@@ -266,10 +392,17 @@ class OverlayWindow(QWidget):
 
 
 def main() -> None:
-    context = sys.argv[1] if len(sys.argv) > 1 else "Loading..."
-    flavor = sys.argv[2] if len(sys.argv) > 2 else ""
+    arguments = sys.argv[1:]
+    status_path = None
+    if "--status" in arguments:
+        index = arguments.index("--status")
+        if index + 1 < len(arguments):
+            status_path = Path(arguments[index + 1])
+        del arguments[index:index + 2]
+    context = arguments[0] if arguments else "Loading..."
+    flavor = arguments[1] if len(arguments) > 1 else ""
     app = QApplication(sys.argv)
-    window = OverlayWindow(context, flavor)
+    window = OverlayWindow(context, flavor, status_path)
     if IS_WINDOWS:
         window.show()
     else:

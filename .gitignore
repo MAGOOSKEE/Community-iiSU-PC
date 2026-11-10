@@ -23,6 +23,11 @@
 /bridge/.iisu_installed.json
 /bridge/emulator.log
 /bridge/bridge.log
+/bridge/start.log
+/bridge/.start_status.json
+/bridge/.start_status.json.tmp
+/bridge/.start_timings.json
+/bridge/.start_timings.json.tmp
 /bridge/stop.log
 /bridge/setup.log
 /bridge/.iisu_icon.ico

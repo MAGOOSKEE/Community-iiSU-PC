@@ -200,6 +200,7 @@ class HeadlessWithWaydroidTests(unittest.TestCase):
              patch.object(start_iisu_pc.winapi, "ensure_linux_kwin_rules"), \
              patch.object(start_iisu_pc.iisu_install_record, "needs_repatch", return_value=False), \
              patch.object(start_iisu_pc, "_run_start_sequence") as sequence, \
+             patch.object(start_iisu_pc, "START_LOG_PATH", Path(tempfile.gettempdir()) / "iisupc-test-start.log"), \
              patch.object(start_iisu_pc.boot_overlay, "close"):
             start_iisu_pc.main(headless=True)
         self.assertIs(sequence.call_args.args[5], False, "the headless argument")

@@ -55,6 +55,7 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from bridge.ui import boot_overlay_qt as boot_overlay
 import emulator_profiles
+import start_progress
 import sync_library
 import updater
 import winapi
@@ -70,7 +71,7 @@ from portable_sdk import (
     patch_config_ini,
     set_quickboot_autosave,
 )
-from shared import adb_client, app_version, iisu_install_record
+from shared import adb_client, app_version, iisu_install_record, system_info
 from shared.platform_compat import IS_WINDOWS, detached_popen_kwargs, new_console_creationflags, subprocess_creationflags
 from shared.stage_timer import StageTimer
 from shared.vm_backend import BACKEND_WAYDROID, resolve_backend, supports_headless_boot, vm_device_connected
@@ -80,6 +81,7 @@ STATE_PATH = Path(__file__).parent / ".runtime_state.json"
 BOOT_FINGERPRINT_PATH = Path(__file__).parent / ".boot_fingerprint.json"
 EMULATOR_LOG_PATH = Path(__file__).parent / "emulator.log"
 BRIDGE_LOG_PATH = Path(__file__).parent / "bridge.log"
+START_LOG_PATH = Path(__file__).parent / "start.log"
 
 # Generous on purpose: without hardware virtualization (Hyper-V/WHPX on
 # Windows, or disabled in the BIOS/UEFI) the emulator falls back to pure
@@ -102,6 +104,86 @@ HEADLESS_SETTLE_SECONDS = 10
 # start_new_session=True, an entirely different kwarg, not just a
 # different flag value.
 CREATE_NO_WINDOW = subprocess_creationflags()
+
+
+class StartLog:
+    """Everything a start prints, also written to start.log with the time of
+    each line, and handed to the loading screen for its details view.
+
+    A start's output used to exist only in the Manager's log drawer. Started
+    from the desktop shortcut there is no Manager and no console, so a start
+    that failed left nothing to look at. start.log holds the last start,
+    whichever way it was begun. Used as `with StartLog(progress):`, it stands
+    in for sys.stdout for the duration and puts the original back after."""
+
+    def __init__(self, progress=None, path: Path | None = None):
+        self._progress = progress
+        self._path = path or START_LOG_PATH
+        self._original = None
+        self._file = None
+        self._pending = ""
+
+    def __enter__(self):
+        self._original = sys.stdout
+        try:
+            self._file = open(self._path, "w", encoding="utf-8")
+        except OSError:
+            self._file = None
+        sys.stdout = self
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        if self._pending:
+            self._line(self._pending)
+            self._pending = ""
+        sys.stdout = self._original
+        if self._file is not None:
+            self._file.close()
+            self._file = None
+
+    def write(self, text: str) -> int:
+        # pythonw.exe (the desktop shortcut) has no stdout at all.
+        if self._original is not None:
+            self._original.write(text)
+        self._pending += text
+        *lines, self._pending = self._pending.split("\n")
+        for line in lines:
+            self._line(line)
+        return len(text)
+
+    def flush(self) -> None:
+        if self._original is not None:
+            self._original.flush()
+
+    def _line(self, line: str) -> None:
+        if self._file is not None:
+            try:
+                self._file.write(f"{time.strftime('%H:%M:%S')} {line}\n")
+                self._file.flush()
+            except (OSError, ValueError):
+                pass
+        if self._progress is not None and line.strip():
+            self._progress.log(line)
+
+
+def forward_new_lines(path: Path, offset: int, progress) -> int:
+    """Hands the loading screen whatever has been added to a log file since
+    `offset`, whole lines only, and returns the new offset. The bridge is its
+    own process writing bridge.log, and this is how what it is doing (waiting
+    on Android, starting iiSU) shows up in the details view."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(offset)
+            data = f.read()
+    except OSError:
+        return offset
+    end = data.rfind(b"\n")
+    if end == -1:
+        return offset
+    for line in data[:end].decode("utf-8", errors="replace").splitlines():
+        if line.strip():
+            progress.log(line.rstrip())
+    return offset + end + 1
 
 
 def save_state(state: dict) -> None:
@@ -666,11 +748,24 @@ def main(headless: bool = False) -> None:
         and not debug_console
         and not headless
     )
-    overlay = boot_overlay.show("Booting Community-iiSU-PC, please wait...") if show_overlay else None
+    # The loading screen's percentage, current step and (with "Show details
+    # on the loading screen") log come from this, see start_progress.py.
+    progress = (
+        start_progress.StartProgress(details=bool(config.get("boot_overlay_details", False)))
+        if show_overlay else start_progress.NoProgress()
+    )
+    overlay = boot_overlay.show("Getting ready", progress.path) if show_overlay else None
     try:
-        _run_start_sequence(config, avd_name, port, debug_console, state, headless, timer)
+        with StartLog(progress):
+            for line in system_info.summary_lines():
+                print(f"[start] {line}")
+            _run_start_sequence(config, avd_name, port, debug_console, state, headless, timer, progress=progress)
+        if overlay is not None:
+            # Long enough for the bar to be seen reaching 100%.
+            time.sleep(0.4)
     finally:
         boot_overlay.close(overlay)
+        progress.remove()
 
 
 def _start_waydroid(config: dict, state: dict) -> None:
@@ -691,12 +786,17 @@ def _start_waydroid(config: dict, state: dict) -> None:
 
 def _run_start_sequence(
     config: dict, avd_name: str, port: int, debug_console: bool, state: dict, headless: bool = False,
-    timer: StageTimer | None = None,
+    timer: StageTimer | None = None, progress=None,
 ) -> None:
     timer = timer or StageTimer()
+    progress = progress or start_progress.NoProgress()
     if resolve_backend(config) == BACKEND_WAYDROID:
+        progress.plan(start_progress.KIND_COLD)
+        progress.step("vm", "Starting Waydroid")
         _start_waydroid(config, state)
     elif is_avd_running(avd_name):
+        progress.plan(start_progress.KIND_RUNNING)
+        progress.step("vm")
         print(f"[start] {avd_name} is already running.")
     else:
         new_parts = compute_boot_fingerprint_parts(config, headless)
@@ -718,6 +818,8 @@ def _run_start_sequence(
                 why = "the boot mode changed" if mode_changed else "a headless start never resumes"
                 print(f"[start] Removed the saved resume snapshot ({why}).")
         force_cold_boot = bool(reasons)
+        progress.plan(start_progress.KIND_COLD if force_cold_boot else start_progress.KIND_RESUME)
+        progress.step("vm", "Starting the Android VM" + (" (full boot)" if force_cold_boot else ""))
         if force_cold_boot:
             print(f"[start] Starting {avd_name} (cold boot: {', '.join(reasons)})...")
         else:
@@ -735,6 +837,7 @@ def _run_start_sequence(
         print(f"[start] {avd_name} is up{' (headless, no window)' if headless else ''} after {timer.elapsed:.1f}s.")
     timer.mark("Android VM")
 
+    progress.step("library")
     print("[start] Syncing your ROM library into the AVD...")
     sync_rom_library()
     timer.mark("ROM library")
@@ -756,12 +859,14 @@ def _run_start_sequence(
         # exactly the "shortcut sometimes only opens the emulator, not
         # iiSU, or not fullscreen" symptom, since the shortcut gives no
         # visible sign anything happened at all when nothing did.
+        progress.step("iisu", "Bringing iiSU to the front")
         print(f"[start] Bridge is already running on port {port}, bringing iiSU to the foreground...")
         launch_iisu(config)
         if config.get("iisu_fullscreen"):
             show_iisu_window(config)
         timer.mark("iiSU")
     else:
+        progress.step("iisu")
         if debug_console:
             print("[start] Starting the launch bridge in a visible console (debug_show_console_windows is on)...")
             bridge_process = subprocess.Popen(
@@ -790,7 +895,11 @@ def _run_start_sequence(
         # to a minute on its own (package manager can take a while to be
         # ready right after a cold boot, see its docstring), and the
         # socket doesn't open until after that succeeds.
+        bridge_log_offset = 0
         for _ in range(120):
+            # Only when there is a loading screen to show it on.
+            if progress.path is not None and not debug_console:
+                bridge_log_offset = forward_new_lines(BRIDGE_LOG_PATH, bridge_log_offset, progress)
             if is_port_open(port):
                 break
             time.sleep(0.5)
@@ -813,6 +922,7 @@ def _run_start_sequence(
         # closes a real "launched but not fullscreen" gap seen there.
         show_iisu_window(config)
     print(f"[start] Took {timer.elapsed:.1f}s: {timer.breakdown()}.")
+    progress.done()
     if headless:
         print(f"[start] Ready in {timer.elapsed:.0f}s (headless: the VM is up, the launch bridge is not running).")
     else:
