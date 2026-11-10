@@ -223,6 +223,8 @@ class ManagerWindow(QMainWindow):
             except Exception:
                 pass
         self.config_data = {}
+                # Same for the startup volume, added after installs existed.
+                self.config_data.setdefault("startup_volume", 100)
         self.configured = False
         self._config_mtime = None
 
@@ -281,6 +283,7 @@ class ManagerWindow(QMainWindow):
             display = self.display_page.get_display()
             if display is None:
                 if silent:
+            settings["startup_volume"] = self.advanced_page.get_startup_volume()
                     return None
                 QMessageBox.critical(self, "Invalid display settings", "Width, height, density, and refresh rate must be numbers.")
                 return None

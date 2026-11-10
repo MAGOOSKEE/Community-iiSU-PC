@@ -88,8 +88,8 @@ from hotkey_keys import MODIFIER_FLAGS, MODIFIER_VK, resolve_vk
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from bridge.ui import boot_overlay_qt as boot_overlay
 from shared import adb_client, app_version
-from shared.platform_compat import IS_WINDOWS, detached_popen_kwargs, new_console_creationflags, open_uri, subprocess_creationflags
 from shared.linux_emulators import linux_path_names
+from shared.platform_compat import IS_WINDOWS, detached_popen_kwargs, new_console_creationflags, open_uri, subprocess_creationflags
 from shared.vm_backend import BACKEND_WAYDROID, resolve_backend, vm_device_connected
 from winapi import (
     SW_MINIMIZE,
@@ -263,17 +263,29 @@ def _terminate_native_pid(pid: int) -> bool:
         return False
 
 
-def _adb_media_volume_get() -> int | None:
-    """Read Android's MUSIC stream volume (stream 3) without showing a
-    console. Tries the current `cmd media_session volume` API first,
-    falling back to the older `media volume` command some system image
-    versions still need. Both run in one device shell command."""
+VOLUME_RE = re.compile(r"volume\s+is\s+(\d+)(?:\s+in\s+range\s+\[(\d+)\.\.(\d+)\])?", re.IGNORECASE)
+
+
+def _adb_media_volume_query() -> tuple[int, int | None] | None:
+    """Android's MUSIC stream volume (stream 3) as (current step, highest
+    step), or None when it can't be read. The highest step is None on a
+    system image that doesn't print the range. Tries the current
+    `cmd media_session volume` API first, falling back to the older
+    `media volume` command some system image versions still need. Both run
+    in one device shell command, without showing a console."""
     _status, output = adb_client.shell(
         "cmd media_session volume --stream 3 --get 2>/dev/null || media volume --stream 3 --get 2>/dev/null", timeout=5,
     )
     # Typical Android output: "volume is 7 in range [0..15]"
-    match = re.search(r"volume\s+is\s+(\d+)", output, re.IGNORECASE)
-    return int(match.group(1)) if match else None
+    match = VOLUME_RE.search(output)
+    if not match:
+        return None
+    return int(match.group(1)), int(match.group(3)) if match.group(3) else None
+
+
+def _adb_media_volume_get() -> int | None:
+    volume = _adb_media_volume_query()
+    return volume[0] if volume else None
 
 
 def _adb_media_volume_set(volume: int) -> bool:
@@ -440,7 +452,7 @@ def launch_iisu(config: dict) -> None:
             f"[bridge] iiSU started {time.monotonic() - started:.1f}s after asking "
             f"(boot animation wait {boot_wait or 0:.1f}s, am start attempt {attempt})"
         )
-        set_volume_max()
+        set_startup_volume(config)
         return
     print(f"[bridge] could not launch iiSU ({component}):")
     print("    " + ("\n    ".join(output[-5:]) or "no answer from adb"))
@@ -470,16 +482,57 @@ NATIVE_RELAUNCH_SECONDS = 30.0
 NATIVE_RELAUNCH_WAIT_SECONDS = 10.0
 
 
-def set_volume_max() -> None:
-    """A fresh boot comes up at whatever media volume level the system
-    image defaults to (usually well below max), silent enough that
-    anything iiSU itself plays (UI sounds, trailers) needs a manual
-    volume raise inside the VM on every single boot otherwise. Repeated
-    VOLUME_UP keyevents clamp at the device's actual max regardless of
-    AOSP vs OEM MAX_VOLUME differences, so this doesn't need to know the
-    exact volume index, one `adb shell input keyevent` call with the
-    keycode repeated is enough, no need for 20 separate subprocess calls."""
-    adb_client.shell("input keyevent " + " ".join(["24"] * 20), timeout=15)
+# config.json's "startup_volume": the percent Android's media volume is set
+# to each time iiSU starts, or null to leave it wherever it is.
+DEFAULT_STARTUP_VOLUME = 100
+
+
+def startup_volume_percent(config: dict) -> int | None:
+    """The configured startup volume, 0 to 100, or None for "leave Android's
+    volume alone". A config from before the setting existed gets the default,
+    which is what every start did then."""
+    value = config.get("startup_volume", DEFAULT_STARTUP_VOLUME)
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return max(0, min(100, int(value)))
+    except (TypeError, ValueError):
+        return DEFAULT_STARTUP_VOLUME
+
+
+def volume_step_for(percent: int, highest_step: int) -> int:
+    """The Android volume step nearest a percent. Anything above zero keeps
+    at least one step, so a low setting is quiet, not silent."""
+    step = round(percent * highest_step / 100)
+    return max(1, step) if percent > 0 and highest_step > 0 else step
+
+
+def set_startup_volume(config: dict) -> None:
+    """A fresh Android VM comes up with its media volume at about half, so
+    everything iiSU plays is quiet until someone raises it inside the VM. This sets it to the level
+    chosen in Settings > Advanced (100% unless changed) by asking Android's
+    audio service for that exact step.
+
+    It used to press the volume-up key 20 times instead. That could only ever
+    mean "maximum", it put Android's volume slider on screen over iiSU at
+    every start, and it overrode a level the user had picked for themselves.
+    The key presses remain only as the fallback for "100%" on a system image
+    that doesn't report its volume range."""
+    percent = startup_volume_percent(config)
+    if percent is None:
+        return
+    volume = _adb_media_volume_query()
+    if volume is not None and volume[1]:
+        current, highest = volume
+        step = volume_step_for(percent, highest)
+        if step == current or _adb_media_volume_set(step):
+            print(f"[bridge] Android media volume {percent}% (step {step} of {highest})")
+            return
+    if percent == 100:
+        adb_client.shell("input keyevent " + " ".join(["24"] * 20), timeout=15)
+        print("[bridge] Android media volume raised to its maximum")
+    else:
+        print("[bridge] couldn't read Android's volume range, leaving the volume as it is")
 
 
 def show_iisu_window(config: dict) -> None:

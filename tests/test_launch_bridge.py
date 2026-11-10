@@ -44,7 +44,7 @@ class LaunchIisuTests(unittest.TestCase):
         with patch.object(launch_bridge, "time", SimpleNamespace(monotonic=clock.monotonic, sleep=clock.sleep)), \
              patch.object(launch_bridge.adb_client, "shell_lines", side_effect=shell_lines), \
              patch.object(launch_bridge, "_is_waydroid", return_value=waydroid), \
-             patch.object(launch_bridge, "set_volume_max") as volume, \
+             patch.object(launch_bridge, "set_startup_volume") as volume, \
              patch("builtins.print") as printed:
             launch_bridge.launch_iisu({"iisu_component": "com.iisulauncher/.launcher.X"})
         return [call.args[0] for call in printed.call_args_list], volume, scripts
@@ -385,6 +385,52 @@ class QuitTapTests(unittest.TestCase):
         log.assert_called_once_with("QUIT: escape, terminating emulator PID 4321")
 
 
+class StartupVolumeTests(unittest.TestCase):
+    def _start(self, config, answers):
+        """Runs set_startup_volume against a device that gives each answer in
+        turn, returning the shell commands sent."""
+        with patch.object(launch_bridge.adb_client, "shell", side_effect=answers) as shell, \
+             patch("builtins.print"):
+            launch_bridge.set_startup_volume(config)
+        return [call.args[0] for call in shell.call_args_list]
+
+    def test_a_config_without_the_setting_means_full_volume(self):
+        self.assertEqual(launch_bridge.startup_volume_percent({}), 100)
+
+    def test_null_means_leave_the_volume_alone(self):
+        self.assertIsNone(launch_bridge.startup_volume_percent({"startup_volume": None}))
+        self.assertEqual(self._start({"startup_volume": None}, []), [])
+
+    def test_out_of_range_values_are_clamped(self):
+        self.assertEqual(launch_bridge.startup_volume_percent({"startup_volume": 250}), 100)
+        self.assertEqual(launch_bridge.startup_volume_percent({"startup_volume": -4}), 0)
+
+    def test_percent_becomes_the_nearest_step(self):
+        self.assertEqual(launch_bridge.volume_step_for(100, 15), 15)
+        self.assertEqual(launch_bridge.volume_step_for(50, 15), 8)
+        self.assertEqual(launch_bridge.volume_step_for(0, 15), 0)
+        # Quiet, not silent.
+        self.assertEqual(launch_bridge.volume_step_for(1, 15), 1)
+
+    def test_sets_the_exact_step_without_key_presses(self):
+        commands = self._start({"startup_volume": 60}, [(0, "volume is 5 in range [0..15]"), (0, "")])
+        self.assertEqual(len(commands), 2)
+        self.assertIn("--set 9 ", commands[1])
+        self.assertFalse(any("keyevent" in command for command in commands))
+
+    def test_nothing_is_sent_when_the_volume_is_already_there(self):
+        commands = self._start({"startup_volume": 100}, [(0, "volume is 15 in range [0..15]")])
+        self.assertEqual(len(commands), 1)
+
+    def test_full_volume_falls_back_to_key_presses_without_a_range(self):
+        commands = self._start({}, [(0, "volume is 5"), (0, "")])
+        self.assertIn("keyevent", commands[-1])
+
+    def test_another_level_is_left_alone_without_a_range(self):
+        commands = self._start({"startup_volume": 40}, [(None, "")])
+        self.assertEqual(len(commands), 1)
+
+
 class MediaVolumeTests(unittest.TestCase):
     def test_reads_the_volume_from_androids_answer(self):
         with patch.object(launch_bridge.adb_client, "shell", return_value=(0, "volume is 7 in range [0..15]")):
@@ -393,6 +439,12 @@ class MediaVolumeTests(unittest.TestCase):
     def test_an_unreadable_answer_is_none(self):
         with patch.object(launch_bridge.adb_client, "shell", return_value=(None, "")):
             self.assertIsNone(launch_bridge._adb_media_volume_get())
+
+    def test_reads_the_highest_step_too(self):
+        with patch.object(launch_bridge.adb_client, "shell", return_value=(0, "volume is 5 in range [0..15]")):
+            self.assertEqual(launch_bridge._adb_media_volume_query(), (5, 15))
+        with patch.object(launch_bridge.adb_client, "shell", return_value=(0, "volume is 5")):
+            self.assertEqual(launch_bridge._adb_media_volume_query(), (5, None))
 
     def test_setting_reports_success_and_never_goes_negative(self):
         with patch.object(launch_bridge.adb_client, "shell", return_value=(0, "")) as shell:

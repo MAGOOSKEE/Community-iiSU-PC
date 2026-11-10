@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -77,6 +78,31 @@ class AdvancedPage(PageBase):
         )
         restart_note.setStyleSheet(f"color: {TEXT_DIM};")
         self.body_layout.addWidget(restart_note)
+
+        self.volume_check = QCheckBox("Set Android's volume each time iiSU starts")
+        self.volume_check.setToolTip("Unticked, the volume stays wherever it was last set inside the Android VM.")
+        self.body_layout.addWidget(self.volume_check)
+        volume_row = QHBoxLayout()
+        volume_label = QLabel("Volume:")
+        volume_row.addWidget(volume_label)
+        self.volume_spin = QSpinBox()
+        self.volume_spin.setRange(0, 100)
+        self.volume_spin.setSingleStep(5)
+        self.volume_spin.setSuffix(" %")
+        self.volume_spin.setFixedWidth(100)
+        self.volume_spin.setAccessibleName("Android volume when iiSU starts, in percent")
+        volume_label.setBuddy(self.volume_spin)
+        volume_row.addWidget(self.volume_spin)
+        volume_row.addStretch(1)
+        self.body_layout.addLayout(volume_row)
+        self.volume_check.toggled.connect(self.volume_spin.setEnabled)
+        volume_note = QLabel(
+            "A new Android VM starts at about half volume, so iiSU's music and sounds are quiet. "
+            "This sets the level for you. Applies the next time iiSU starts."
+        )
+        volume_note.setWordWrap(True)
+        volume_note.setStyleSheet(f"color: {TEXT_DIM};")
+        self.body_layout.addWidget(volume_note)
 
         self.show_overlay_check = QCheckBox("Show the loading overlay during boot and game launch")
         self.body_layout.addWidget(self.show_overlay_check)
@@ -146,6 +172,10 @@ class AdvancedPage(PageBase):
             check.setChecked(name in initial_chord)
 
         self.show_overlay_check.setChecked(bool(config.get("show_boot_overlay", True)))
+        volume = config.get("startup_volume", 100)
+        self.volume_check.setChecked(volume is not None)
+        self.volume_spin.setEnabled(volume is not None)
+        self.volume_spin.setValue(volume if isinstance(volume, int) and not isinstance(volume, bool) else 100)
         self.debug_console_check.setChecked(bool(config.get("debug_show_console_windows", False)))
 
     # == Field getters (used by ManagerWindow._gather_settings) ==
@@ -170,6 +200,10 @@ class AdvancedPage(PageBase):
 
     def get_controller_quit_chord(self) -> list[str]:
         return [name for name, check in self._chord_checks.items() if check.isChecked()]
+
+    def get_startup_volume(self) -> int | None:
+        """The percent to set, or None to leave Android's volume alone."""
+        return self.volume_spin.value() if self.volume_check.isChecked() else None
 
     def get_show_boot_overlay(self) -> bool:
         return self.show_overlay_check.isChecked()
