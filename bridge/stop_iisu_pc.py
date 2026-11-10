@@ -50,7 +50,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from portable_sdk import PORTABLE_AVD_HOME, PORTABLE_SDK
-from shared import adb_client, app_version
+from shared import adb_client, app_version, log_stamp
 from shared.platform_compat import IS_WINDOWS, subprocess_creationflags
 from shared.vm_backend import BACKEND_WAYDROID, resolve_backend, vm_device_connected
 
@@ -315,8 +315,13 @@ def main() -> None:
     # running indefinitely after every single Stop. `adb kill-server` is
     # the documented graceful shutdown for it, unlike taskkill against the
     # other two processes above.
-    print("[stop] stopping the adb server...")
-    subprocess.run(["adb", "kill-server"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
+    # Only when one is running. With none, `adb kill-server` spent two
+    # seconds trying to reach it before giving up (measured).
+    if adb_client.server_running():
+        print("[stop] stopping the adb server...")
+        subprocess.run(["adb", "kill-server"], capture_output=True, text=True, creationflags=CREATE_NO_WINDOW)
+    else:
+        print("[stop] the adb server is not running.")
 
     if backend != BACKEND_WAYDROID:
         clear_stale_locks(avd_name)
@@ -328,4 +333,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    # Run on its own (the quit hotkey, the controller chord) this writes to
+    # stop.log, where each line gets its time.
+    log_stamp.stamp_stdout()
     main()

@@ -87,7 +87,7 @@ from hotkey_keys import MODIFIER_FLAGS, MODIFIER_VK, resolve_vk
 # subprocess with cwd set to this directory, not the project root.
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from bridge.ui import boot_overlay_qt as boot_overlay
-from shared import adb_client, app_version
+from shared import adb_client, app_version, log_stamp
 from shared.linux_emulators import linux_path_names
 from shared.platform_compat import IS_WINDOWS, detached_popen_kwargs, new_console_creationflags, open_uri, subprocess_creationflags
 from shared.vm_backend import BACKEND_WAYDROID, resolve_backend, vm_device_connected
@@ -1762,6 +1762,9 @@ def recover_from_request_exception(config: dict) -> None:
 
 def main() -> None:
     bridge_started = time.monotonic()
+    # Every line in bridge.log gets the time it was written (not in a
+    # visible debug console, see shared/log_stamp.py).
+    log_stamp.stamp_stdout()
     # Install bridge-specific crash logging only when this module is actually
     # running the bridge. The Manager imports helpers from launch_bridge and
     # must retain its own sys/threading exception hooks.

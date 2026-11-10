@@ -34,7 +34,7 @@ from jre_env import java_exe, java_subprocess_env, keytool_exe
 from patch_iisu import patch_apk, validate_iisu_apk
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from shared import app_version, iisu_install_record, vm_storage
+from shared import app_version, iisu_install_record, system_info, vm_storage
 from shared.steam_deck import STEAM_DECK_DISPLAY, is_steam_deck
 from shared.platform_compat import IS_WINDOWS, detached_popen_kwargs, subprocess_creationflags
 from shared.vm_backend import (
@@ -393,6 +393,29 @@ def virtualization_diagnostics() -> dict:
     except (OSError, subprocess.TimeoutExpired):
         pass
     return result
+
+
+def describe_virtualization(diag: dict) -> str:
+    """One log line saying whether the Android VM can be hardware accelerated,
+    written at the start of Setup so the answer is in setup.log before the
+    multi-GB download, not only after a first boot has failed."""
+    if diag.get("hypervisor_present"):
+        return "Hardware virtualization: available, a hypervisor is active."
+    if diag.get("cpu_virtualization_enabled"):
+        return (
+            "Hardware virtualization: enabled in the firmware, but no hypervisor is active yet. "
+            "Setup turns on what the Android VM needs if its first boot fails."
+        )
+    return (
+        "Hardware virtualization: not available. The Android VM will be very slow or fail to start "
+        "until virtualization (Intel VT-x or AMD-V/SVM) is enabled in the BIOS/UEFI settings."
+    )
+
+
+def format_duration(seconds: float) -> str:
+    """"42s" or "3m 05s", for the Setup log."""
+    seconds = max(0, int(round(seconds)))
+    return f"{seconds}s" if seconds < 60 else f"{seconds // 60}m {seconds % 60:02d}s"
 
 
 def enable_hypervisor_platform() -> None:
@@ -1107,14 +1130,26 @@ def run_setup(
     stages = WAYDROID_SETUP_STAGES if backend == BACKEND_WAYDROID else SETUP_STAGES
     total = len(stages)
 
+    setup_started = time.monotonic()
+    step_started = {"at": setup_started, "label": None}
+
     def stage(index: int) -> None:
+        # How long the step before took, so a slow Setup shows where the time went.
+        now = time.monotonic()
+        if step_started["label"] is not None:
+            print(f"[setup] \"{step_started['label']}\" took {format_duration(now - step_started['at'])}.")
         label = stages[index]
+        step_started.update(at=now, label=label)
         print(f"\n=== Step {index + 1}/{total}: {label} ===")
         if on_stage:
             on_stage(label, index + 1, total)
 
     storage_gb = vm_storage.clamp_storage_gb(storage_gb)
     print(app_version.banner("setup", f"backend {backend}"))
+    for line in system_info.summary_lines(PROJECT_ROOT):
+        print(f"[setup] {line}")
+    if backend == BACKEND_AVD:
+        print(f"[setup] {describe_virtualization(virtualization_diagnostics())}")
     if backend == BACKEND_AVD:
         print(f"[setup] Android VM internal storage: {storage_gb} GB (a maximum, it only uses what's filled), lean profile: {'on' if lean else 'off'}")
     print("=== Community-iiSU-PC first-time setup ===\n")
@@ -1185,8 +1220,9 @@ def run_setup(
     )
     cleanup_installer_sdk()
     create_desktop_shortcut(apk_path)
+    print(f"[setup] \"{step_started['label']}\" took {format_duration(time.monotonic() - step_started['at'])}.")
 
-    print("\n=== Setup complete ===")
+    print(f"\n=== Setup complete in {format_duration(time.monotonic() - setup_started)} ===")
     if backend == BACKEND_WAYDROID:
         print("iiSU is installed in Waydroid and the bridge is configured for it.")
     else:
