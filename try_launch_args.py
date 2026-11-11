@@ -18,7 +18,7 @@ Run with (from the repo root):
     python try_launch_args.py --list            # show what it found, launch nothing
     python try_launch_args.py --only ps2,xbox   # test just these consoles
     python try_launch_args.py --timeout 10      # seconds before a still-running process counts as a PASS
-    python try_launch_args.py --rom xbox="X:\\iiSU Roms\\xbox\\SSX Tricky (USA).xiso.iso"
+    python try_launch_args.py --rom xbox="D:\\Roms\\xbox\\Example Game.iso"
                                                  # override auto-picked ROM for one console
 
 A profile counts as:
