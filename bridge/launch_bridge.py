@@ -197,6 +197,11 @@ current_native_window: int | None = None
 # HWND while the process itself keeps running; the PID is the stable fallback
 # for controller gating and the quit hotkey.
 current_native_pid: int | None = None
+# True while the tracked native window is a Windows program or Steam game
+# (launch_windows_app, launch_steam_game), as opposed to an emulator that
+# relaunched itself. The quit key treats the two differently, see
+# quit_key_watcher.
+current_native_is_app = False
 # Becomes True immediately when iiSU hands a launch to the PC side. This
 # closes the Steam startup gap before a real native HWND/PID exists.
 game_handoff_active = False
@@ -275,6 +280,30 @@ def _terminate_native_pid(pid: int) -> bool:
 
 
 VOLUME_RE = re.compile(r"volume\s+is\s+(\d+)(?:\s+in\s+range\s+\[(\d+)\.\.(\d+)\])?", re.IGNORECASE)
+
+
+def _close_native_app(hwnd: int | None, pid: int | None, grace: float = NATIVE_CLOSE_GRACE_SECONDS) -> None:
+    """Quits a Windows program or Steam game the way closing its window
+    would, so it can save and shut down properly, and ends it by force only
+    if it is still running after `grace` seconds. Force first, as it used to
+    be, could cost unsaved progress and leave a game's files half written."""
+    asked = bool(hwnd) and user32.IsWindow(hwnd) and close_window(hwnd)
+    if not pid:
+        return
+    if not asked:
+        _terminate_native_pid(pid)
+        return
+
+    def end_if_still_running() -> None:
+        deadline = time.monotonic() + grace
+        while time.monotonic() < deadline:
+            if not _pid_is_running(pid):
+                return
+            time.sleep(0.2)
+        log_launch(f"QUIT: PID {pid} was still running {grace:.0f}s after being asked to close, ending it")
+        _terminate_native_pid(pid)
+
+    threading.Thread(target=end_if_still_running, daemon=True).start()
 
 
 def _adb_media_volume_query() -> tuple[int, int | None] | None:
@@ -361,10 +390,17 @@ def release_iisu_from_stub() -> None:
         adb_client.shell(f"am start -n {adb_client.quote(f'{package}/{STUB_ACTIVITY}')}", timeout=10)
 
 
+def _set_native_is_app(value: bool) -> None:
+    global current_native_is_app
+    with current_process_lock:
+        current_native_is_app = value
+
+
 def end_game_handoff() -> None:
     """Restore iiSU controller navigation and its previous Android volume."""
     debug_log("end_game_handoff() entered")
     global game_handoff_active, saved_android_media_volume, pending_native_quit
+    _set_native_is_app(False)
     release_iisu_from_stub()
     previous = saved_android_media_volume
     saved_android_media_volume = None
@@ -799,11 +835,15 @@ def quit_tap_action(label: str = "quit") -> None:
         proc = current_process
         native_hwnd = current_native_window
         native_pid = current_native_pid
+        native_is_app = current_native_is_app
         handoff_active = game_handoff_active
     if native_hwnd is not None and user32.IsWindow(native_hwnd):
         print(f"[bridge] {label}, quitting native game")
         log_launch(f"QUIT: {label}, native HWND {native_hwnd}, PID {native_pid}")
-        if native_pid and _pid_is_running(native_pid):
+        if native_is_app:
+            # A Windows program or Steam game: ask it to close, force later.
+            _close_native_app(native_hwnd, native_pid if native_pid and _pid_is_running(native_pid) else None)
+        elif native_pid and _pid_is_running(native_pid):
             # Once a native game has been identified, its owning PID is
             # authoritative. current_process may only be a launcher or
             # wrapper executable that remains alive beside it.
@@ -867,17 +907,83 @@ def quit_key_watcher(config: dict) -> None:
     label = "+".join([*modifier_names, key_name]).upper()
 
     print(f"[bridge] {label}: tap to quit the running emulator (or close iiSU entirely if none is running)")
+    print(
+        f"[bridge] {label}: in a Windows or Steam game, hold it for {NATIVE_QUIT_HOLD_SECONDS:g} seconds to quit "
+        "(a tap is left to the game)"
+    )
 
     was_down = False
+    down_since = 0.0
+    acted = False  # this press has already done something, or been ruled out
     while True:
         time.sleep(KEY_POLL_INTERVAL)
         is_down = _is_key_down(vk) and all(_is_key_down(m) for m in modifier_vks)
+        now = time.monotonic()
         if is_down and not was_down:
             debug_log(f"quit hotkey DOWN: {label}")
+            down_since = now
+            # Decided when the key goes down: by the time it comes back up,
+            # whatever it did in the focused program may have changed focus.
+            acted = not quit_key_applies(config, label)
+        elif is_down and not acted and native_app_running() and now - down_since >= NATIVE_QUIT_HOLD_SECONDS:
+            acted = True
+            quit_tap_action(f"{label} held")
         elif was_down and not is_down:
             debug_log(f"quit hotkey UP: {label}")
-            quit_tap_action(f"{label} tapped")
+            if not acted:
+                if native_app_running():
+                    debug_log(f"{label} tapped in a Windows/Steam game: left to the game (hold to quit)")
+                else:
+                    quit_tap_action(f"{label} tapped")
         was_down = is_down
+
+
+def native_app_running() -> bool:
+    """A Windows program or Steam game is the thing being played, or is
+    still being started (Steam can take seconds to show a window)."""
+    with current_process_lock:
+        return current_native_is_app and (
+            current_native_window is not None or current_native_pid is not None or game_handoff_active
+        )
+
+
+def quit_key_applies(config: dict, label: str = "quit key") -> bool:
+    """Whether a press of the quit key is meant for Community-iiSU-PC: the
+    window in front is iiSU or the game or emulator it started. The Manager
+    doesn't count, where Escape closes a dialog. The key is read system wide, so pressing Escape in a
+    browser, a chat or anything else while iiSU sat in the background used to
+    quit the game, or with no game running shut the whole VM down.
+
+    Says yes whenever it can't tell (no window in front, or a platform where
+    windows can't be asked), so the key never stops working by mistake. The
+    controller chord isn't checked: a controller has no window."""
+    foreground = user32.GetForegroundWindow()
+    if not foreground:
+        return True
+    foreground_pid = _window_pid(foreground)
+    if not foreground_pid:
+        return True
+    with current_process_lock:
+        proc = current_process
+        ours = {os.getpid(), current_native_pid, proc.pid if proc is not None else None}
+        handing_off = game_handoff_active and current_native_pid is None and current_native_window is None
+        emulator_exe = Path(str(proc.args[0])).name.casefold() if proc is not None and proc.poll() is None else None
+    if foreground_pid in ours:
+        return True
+    iisu_hwnd = find_window_by_title(config.get("iisu_window_title", ""))
+    if iisu_hwnd is not None and _window_pid(iisu_hwnd) == foreground_pid:
+        return True
+    name = window_process_name(foreground).casefold()
+    # The emulator's window can belong to a process it started itself.
+    if name and name == emulator_exe:
+        return True
+    if handing_off:
+        # Between asking Steam for a game and its window appearing, whatever
+        # is in front (Steam's own launch window, usually) counts as ours.
+        return True
+    debug_log(f"{label} ignored: the window in front ({name or foreground_pid}) is not iiSU or its game")
+    print(f"[bridge] {label} ignored, another program is in front ({name or 'unknown'})")
+    return False
 
 
 def _linux_key_watcher(config: dict) -> None:
@@ -1202,6 +1308,7 @@ def launch_windows_app(app_name: str, config: dict) -> bool:
 
     # Cut iiSU off immediately, before Steam or the executable is invoked.
     # Native URI launches can take seconds before their real HWND exists.
+    _set_native_is_app(True)
     begin_game_handoff()
 
     existing_windows = list_visible_windows()
@@ -1328,6 +1435,7 @@ def launch_steam_game(app_id: str, config: dict) -> None:
 
     # GameNative ultimately launches a normal Windows Steam game, so use the
     # same handoff/tracking lifecycle as native URI entries from windows_apps.
+    _set_native_is_app(True)
     begin_game_handoff()
 
     existing_windows = list_visible_windows()
