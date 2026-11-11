@@ -107,27 +107,43 @@ def _hotkey_signature(hotkey: dict) -> tuple[frozenset, str]:
 
 
 class KeyCaptureDialog(QDialog):
-    """Modal key capture: a real dialog gives modal focus trapping and
-    Esc-to-cancel."""
+    """Modal key capture: a real dialog gives modal focus trapping.
+
+    Every key press is the key being mapped, Escape included. Escape used to
+    cancel the dialog, so the one key that is the default quit key could
+    never be mapped again once it had been changed. Cancelling is the Cancel
+    button, or closing the window (Alt+F4, or its X)."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Map a key")
         self.setModal(True)
-        self.setFixedSize(300, 110)
+        self.setFixedSize(440, 190)
         self.captured_key: str | None = None
 
         layout = QVBoxLayout(self)
-        label = QLabel("Press any key...\n(Esc cancels)")
+        label = QLabel("Press the key to use")
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         label.setFont(Fonts.heading())
         layout.addWidget(label)
+        hint = QLabel("Any key works, including Escape.\nTo keep the current key, choose Cancel or press Alt+F4.")
+        hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        hint.setWordWrap(True)
+        hint.setProperty("role", "dim")
+        layout.addWidget(hint)
+
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.setObjectName("ghost")
+        # Never holds keyboard focus: a focused button would take Space and
+        # Enter for itself, and both are keys that can be mapped.
+        self.cancel_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.cancel_button.setAutoDefault(False)
+        self.cancel_button.setDefault(False)
+        self.cancel_button.clicked.connect(self.reject)
+        layout.addWidget(self.cancel_button, 0, Qt.AlignmentFlag.AlignHCenter)
 
     def keyPressEvent(self, event) -> None:
         key = event.key()
-        if key == Qt.Key.Key_Escape:
-            self.reject()
-            return
         if key in _MODIFIER_KEYS:
             return  # keep listening, a bare modifier press isn't a usable hotkey key
         if key in _NAMED_KEYS:
