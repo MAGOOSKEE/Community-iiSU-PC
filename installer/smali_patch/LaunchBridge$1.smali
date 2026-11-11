@@ -151,7 +151,7 @@
     # Tells the bridge this iiSU reads its answer (below). One patched before
     # then doesn't, so the bridge starts that iiSU's Android apps itself.
     :cond_3
-    const-string v2, "\nBRIDGE_REPLY:1"
+    const-string v2, "\nBRIDGE_REPLY:1\nBRIDGE_END:1\n"
 
     invoke-virtual {v1, v2}, Ljava/lang/StringBuilder;->append(Ljava/lang/String;)Ljava/lang/StringBuilder;
 
@@ -159,13 +159,9 @@
 
     move-result-object v0
 
-    new-instance v1, Ljava/net/Socket;
+    invoke-static {}, Lcom/iisulauncher/pcbridge/LaunchBridge;->connect()Ljava/net/Socket;
 
-    const-string v2, "10.0.2.2"
-
-    const/16 v3, 0x1e39
-
-    invoke-direct {v1, v2, v3}, Ljava/net/Socket;-><init>(Ljava/lang/String;I)V
+    move-result-object v1
 
     invoke-virtual {v1}, Ljava/net/Socket;->getOutputStream()Ljava/io/OutputStream;
 
@@ -183,11 +179,12 @@
 
     const/4 v7, 0x1
 
-    # Half-close, so the bridge sees the end of the intent, then read its one
-    # byte answer: "A" hands the launch back to Android. Anything else, or no
-    # answer at all from a bridge too old to send one, means the PC took it.
-    invoke-virtual {v1}, Ljava/net/Socket;->shutdownOutput()V
-
+    # The intent ends with a BRIDGE_END line (appended above), which is how
+    # the bridge knows it has all of it. It used to be told by half-closing
+    # the connection, but the adb route this connection now takes closes the
+    # whole connection on a half-close, so the answer never came back.
+    # Then read the bridge's one byte answer: "A" hands the launch back to
+    # Android. Anything else, or no answer at all, means the PC took it.
     const/16 v3, 0x2710
 
     invoke-virtual {v1, v3}, Ljava/net/Socket;->setSoTimeout(I)V

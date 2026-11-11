@@ -756,7 +756,7 @@ def _start(headless: bool, log: StartLog) -> None:
         updater.check_for_updates()
     else:
         print("[updater] automatic Community-iiSU-PC updates are disabled")
-    if iisu_install_record.needs_repatch(iisu_install_record.load()):
+    if iisu_install_record.needs_repatch(iisu_install_record.load(), config):
         print(
             "[start] This update of Community-iiSU-PC changed the patch it applies to iiSU, so iiSU "
             "has to be repatched before it can start. Opening the Manager, which walks you through it."

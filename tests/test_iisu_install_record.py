@@ -27,6 +27,9 @@ PATCH_HASHES = {
     4: "d54594b86ec6e4cae15330e2f4dafd0922b54c3f22fed14714710ea275c8ebc1",
     # Same smali patch; version 5 added the Kenji-NX stand-in.
     5: "d54594b86ec6e4cae15330e2f4dafd0922b54c3f22fed14714710ea275c8ebc1",
+    # Reaches the bridge through this device's own port first (adb reverse),
+    # then 10.0.2.2: needed on Waydroid and with another bridge port.
+    6: "a212d54ef5fbd56cce6d8efc57176830990c8ad2284cca162ea91e4ebaa24f73",
 }
 
 
@@ -45,6 +48,25 @@ class PatchVersionTests(unittest.TestCase):
             smali_patch_hash(), PATCH_HASHES.get(record.PATCH_VERSION),
             "installer/smali_patch/ changed: see PATCH_HASHES in this file for what to update",
         )
+
+    def test_patch_6_is_only_required_where_it_is_needed(self):
+        patched_5 = {"apk_name": "x.apk", "patch_version": 5}
+        # The SDK emulator on the standard port still reaches 10.0.2.2:7737.
+        self.assertFalse(record.needs_repatch(patched_5))
+        self.assertFalse(record.needs_repatch(patched_5, {"vm_backend": "avd", "bridge_port": 7737}))
+        self.assertFalse(record.needs_repatch(patched_5, {}))
+        # Waydroid has no 10.0.2.2, and another port isn't where patch 5 looks.
+        self.assertTrue(record.needs_repatch(patched_5, {"vm_backend": "waydroid", "bridge_port": 7737}))
+        self.assertTrue(record.needs_repatch(patched_5, {"vm_backend": "avd", "bridge_port": 8123}))
+        patched_6 = {"apk_name": "x.apk", "patch_version": 6}
+        self.assertFalse(record.needs_repatch(patched_6, {"vm_backend": "waydroid", "bridge_port": 8123}))
+
+    def test_older_patches_still_have_to_repatch_everywhere(self):
+        self.assertTrue(record.needs_repatch({"apk_name": "x.apk", "patch_version": 4}, {"vm_backend": "avd"}))
+        self.assertTrue(record.needs_repatch(None))
+
+    def test_an_unreadable_port_never_forces_a_repatch(self):
+        self.assertFalse(record.needs_bridge_route({"bridge_port": "soon"}))
 
     def test_every_version_says_what_it_brings(self):
         for version in range(record.UNVERSIONED_PATCH + 1, record.PATCH_VERSION + 1):

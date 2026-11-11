@@ -48,6 +48,60 @@
     return-void
 .end method
 
+# Opens the connection to the PC bridge. First this device's own port 7737,
+# which the bridge points at itself with "adb reverse" every time it starts:
+# that works on any Android runtime and whatever port the bridge listens on.
+# Then 10.0.2.2, the SDK emulator's name for the PC, for a bridge from before
+# it set that route up. 10.0.2.2 exists only inside the SDK emulator, so on
+# Waydroid it was the reason no launch ever reached the PC. Both attempts
+# give up after a moment, so with no bridge at all the launch falls back to
+# Android quickly (see LaunchBridge$1) and iiSU is never left waiting.
+.method static connect()Ljava/net/Socket;
+    .locals 4
+
+    :try_start_0
+    new-instance v0, Ljava/net/Socket;
+
+    invoke-direct {v0}, Ljava/net/Socket;-><init>()V
+
+    new-instance v1, Ljava/net/InetSocketAddress;
+
+    const-string v2, "127.0.0.1"
+
+    const/16 v3, 0x1e39
+
+    invoke-direct {v1, v2, v3}, Ljava/net/InetSocketAddress;-><init>(Ljava/lang/String;I)V
+
+    const/16 v2, 0x3e8
+
+    invoke-virtual {v0, v1, v2}, Ljava/net/Socket;->connect(Ljava/net/SocketAddress;I)V
+    :try_end_0
+    .catch Ljava/lang/Throwable; {:try_start_0 .. :try_end_0} :catch_0
+
+    return-object v0
+
+    :catch_0
+    move-exception v0
+
+    new-instance v0, Ljava/net/Socket;
+
+    invoke-direct {v0}, Ljava/net/Socket;-><init>()V
+
+    new-instance v1, Ljava/net/InetSocketAddress;
+
+    const-string v2, "10.0.2.2"
+
+    const/16 v3, 0x1e39
+
+    invoke-direct {v1, v2, v3}, Ljava/net/InetSocketAddress;-><init>(Ljava/lang/String;I)V
+
+    const/16 v2, 0xbb8
+
+    invoke-virtual {v0, v1, v2}, Ljava/net/Socket;->connect(Ljava/net/SocketAddress;I)V
+
+    return-object v0
+.end method
+
 # The startActivity call the patch replaced, made on the main thread.
 .method static startOnAndroid(Landroid/content/Context;Landroid/content/Intent;Landroid/os/Bundle;)V
     .locals 2

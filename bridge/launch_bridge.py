@@ -88,6 +88,7 @@ from hotkey_keys import MODIFIER_FLAGS, MODIFIER_VK, resolve_vk
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from bridge.ui import boot_overlay_qt as boot_overlay
 from shared import adb_client, app_version, log_stamp
+from shared.iisu_install_record import GUEST_BRIDGE_PORT
 from shared.linux_emulators import linux_path_names
 from shared.platform_compat import IS_WINDOWS, detached_popen_kwargs, new_console_creationflags, open_uri, subprocess_creationflags
 from shared.vm_backend import BACKEND_WAYDROID, resolve_backend, vm_device_connected, vm_device_listed
@@ -183,6 +184,14 @@ REPLY_HANDLED_ON_PC = b"P"
 # iiSU patched before then hangs up without reading it, so for that one the
 # bridge starts the Android app itself, and nobody has to re-patch.
 REPLY_CAPABLE_LINE = "BRIDGE_REPLY:1"
+# The line that ends a request from an iiSU with patch 6 or later. Earlier
+# patches ended theirs by half-closing the connection, which the bridge still
+# accepts; over the adb route patch 6 uses, a half-close would close the
+# connection both ways and lose the answer.
+REQUEST_END_LINE = b"\nBRIDGE_END:1"
+# A connection that neither ends its request nor closes is dropped after this
+# long, so one stuck client can't stop the bridge taking launches.
+REQUEST_TIMEOUT_SECONDS = 15.0
 INTENT_ACT_RE = re.compile(r"\bact=(\S+)")
 INTENT_CAT_RE = re.compile(r"\bcat=\[([^\]]*)\]")
 INTENT_FLG_RE = re.compile(r"\bflg=(0x[0-9a-fA-F]+)")
@@ -500,6 +509,7 @@ def launch_iisu(config: dict) -> None:
             f"(boot animation wait {boot_wait or 0:.1f}s, am start attempt {attempt})"
         )
         set_startup_volume(config)
+        route_bridge_port(config)
         return
     print(f"[bridge] could not launch iiSU ({component}):")
     print("    " + ("\n    ".join(output[-5:]) or "no answer from adb"))
@@ -527,6 +537,35 @@ EMULATOR_FOCUS_SECONDS = 6.0
 # relaunched itself; the bridge waits this long for the new process's window.
 NATIVE_RELAUNCH_SECONDS = 30.0
 NATIVE_RELAUNCH_WAIT_SECONDS = 10.0
+
+
+def route_bridge_port(config: dict) -> bool:
+    """Points the Android side's port 7737 at this bridge with `adb reverse`,
+    so a launch from the patched iiSU reaches it on any Android runtime and
+    whatever port the bridge listens on. The SDK emulator also offers
+    10.0.2.2 as a way to the PC, which is all the patch used before; Waydroid
+    has no such address, so no launch ever arrived there, and a bridge moved
+    off port 7737 was never where iiSU looked.
+
+    Done after Android has finished booting (adbd restarts during a boot and
+    forgets its routes) and again on every start, since a resumed snapshot
+    remembers a route to an adb server that is no longer there."""
+    port = config.get("bridge_port", GUEST_BRIDGE_PORT)
+    serial = adb_client.target_serial()
+    args = (["-s", serial] if serial else []) + ["reverse", f"tcp:{GUEST_BRIDGE_PORT}", f"tcp:{port}"]
+    try:
+        result = subprocess.run(
+            ["adb", *args], capture_output=True, text=True, timeout=15, creationflags=subprocess_creationflags(),
+        )
+    except (OSError, subprocess.SubprocessError) as e:
+        print(f"[bridge] couldn't route Android's port {GUEST_BRIDGE_PORT} to the bridge ({e})")
+        return False
+    if result.returncode != 0:
+        reason = (result.stderr or result.stdout).strip().splitlines()[-1:] or ["no reason given"]
+        print(f"[bridge] couldn't route Android's port {GUEST_BRIDGE_PORT} to the bridge ({reason[0]})")
+        return False
+    print(f"[bridge] Android's port {GUEST_BRIDGE_PORT} is routed to the bridge on port {port}")
+    return True
 
 
 # config.json's "startup_volume": the percent Android's media volume is set
@@ -1525,6 +1564,27 @@ def launch_steam_game(app_id: str, config: dict) -> None:
         boot_overlay.close(overlay)
 
 
+def read_request(conn) -> str:
+    """One launch request from a connection: everything up to its end line
+    (patch 6 on) or up to the sender closing its side (older patches). The
+    end line itself is left out."""
+    conn.settimeout(REQUEST_TIMEOUT_SECONDS)
+    data = b""
+    try:
+        while True:
+            chunk = conn.recv(4096)
+            if not chunk:
+                break
+            data += chunk
+            end = data.find(REQUEST_END_LINE)
+            if end != -1:
+                data = data[:end]
+                break
+    except (TimeoutError, OSError):
+        debug_log("a launch request stopped arriving before it was complete; using what came")
+    return data.decode("utf-8", errors="replace")
+
+
 def launch_package(raw_intent: str) -> str | None:
     cmp_match = INTENT_CMP_RE.search(raw_intent)
     return cmp_match.group(1).split("/")[0] if cmp_match else None
@@ -1994,13 +2054,7 @@ def main() -> None:
         while True:
             conn, addr = server.accept()
             with conn:
-                chunks = []
-                while True:
-                    chunk = conn.recv(4096)
-                    if not chunk:
-                        break
-                    chunks.append(chunk)
-                payload = b"".join(chunks).decode("utf-8", errors="replace")
+                payload = read_request(conn)
                 if payload:
                     if answer_launch(conn, payload):
                         continue

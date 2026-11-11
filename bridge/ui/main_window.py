@@ -546,7 +546,7 @@ class ManagerWindow(QMainWindow):
         patched, in which case iiSU isn't started until it's repatched."""
         from shared import iisu_install_record
 
-        return self.configured and iisu_install_record.needs_repatch(iisu_install_record.load())
+        return self.configured and iisu_install_record.needs_repatch(iisu_install_record.load(), self.config_data)
 
     def _vm_running(self) -> bool:
         if self.last_avd_up or self.last_bridge_up:

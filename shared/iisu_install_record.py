@@ -20,7 +20,11 @@ RECORD_PATH = Path(__file__).resolve().parent.parent / "bridge" / ".iisu_install
 # repatching: the Manager then won't start iiSU until it is (see
 # bridge/ui/dialogs/repatch_wizard.py). tests/test_iisu_install_record.py fails
 # when smali_patch/ changes and this hasn't.
-PATCH_VERSION = 5
+PATCH_VERSION = 6
+# The port the patched iiSU sends launches to, on the Android side. Fixed in
+# the patch (installer/smali_patch/LaunchBridge.smali); the bridge routes it
+# to whatever port it really listens on.
+GUEST_BRIDGE_PORT = 7737
 # A record from before patch versions were kept, or no record at all.
 UNVERSIONED_PATCH = 1
 PATCH_CHANGES = {
@@ -31,6 +35,7 @@ PATCH_CHANGES = {
     4: "Windows games launch from iiSU again.",
     # The repatch's stand-ins again: it adds Kenji-NX's, which Ryujinx is behind.
     5: "Switch games can be played in Ryujinx.",
+    6: "Game launches reach the PC on Waydroid, and with a bridge port other than 7737.",
 }
 # What the user still has to change by hand after repatching to each version,
 # for what the repatch itself can't (iiSU's own settings). Every version needs
@@ -50,6 +55,7 @@ PATCH_STEPS: dict[int, list[str]] = {
         "To play Switch games in Ryujinx, open the Switch platform's menu in iiSU, choose "
         "Override Emulator and pick Kenji-NX (Standalone).",
     ],
+    6: [],
 }
 
 
@@ -71,8 +77,33 @@ def patch_version_of(record: dict | None) -> int:
     return value if isinstance(value, int) else UNVERSIONED_PATCH
 
 
-def needs_repatch(record: dict | None) -> bool:
-    return patch_version_of(record) < PATCH_VERSION
+def needs_bridge_route(config: dict | None) -> bool:
+    """Whether this install can only reach the bridge the way patch 6 does.
+    The SDK emulator on the standard port still works with an older patch
+    (it reaches the PC at 10.0.2.2:7737 as it always did), so those installs
+    aren't made to repatch for nothing. Waydroid has no 10.0.2.2, and a bridge
+    on another port isn't where the old patch looks."""
+    if not config:
+        return False
+    if config.get("vm_backend") == "waydroid":
+        return True
+    try:
+        return int(config.get("bridge_port", GUEST_BRIDGE_PORT)) != GUEST_BRIDGE_PORT
+    except (TypeError, ValueError):
+        return False
+
+
+def required_patch_version(config: dict | None = None) -> int:
+    """The oldest patch this install still works with. Every version up to 5
+    is needed by everyone; 6 only where needs_bridge_route() says so."""
+    return PATCH_VERSION if needs_bridge_route(config) else min(PATCH_VERSION, 5)
+
+
+def needs_repatch(record: dict | None, config: dict | None = None) -> bool:
+    """Whether iiSU has to be repatched before it can start. Pass the config
+    so an install that needs patch 6 is told; without it only the versions
+    everyone needs are required."""
+    return patch_version_of(record) < required_patch_version(config)
 
 
 def changes_since(record: dict | None) -> list[str]:

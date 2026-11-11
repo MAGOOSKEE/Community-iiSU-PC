@@ -133,6 +133,12 @@ def _pick_serial(serial: str | None) -> str | None:
     return serial or os.environ.get("ANDROID_SERIAL") or vm_device_serial(devices_text())
 
 
+def target_serial() -> str | None:
+    """The serial of the Android VM adb commands should go to, or None when
+    it can't be told (adb then picks the only device)."""
+    return _pick_serial(None)
+
+
 def shell_lines(command: str, serial: str | None = None, timeout: float = 30.0):
     """Runs a shell command on the device and yields its output lines (stdout
     and stderr together) as they arrive, so a caller can time each one. The
