@@ -212,6 +212,7 @@ Freeing space without rebuilding is rarely enough: clearing Android's caches fre
 
 - **[MAGOOSKEE](https://github.com/MAGOOSKEE)**: project owner, built and maintains Community-iiSU-PC.
 - **[jacksterson](https://github.com/jacksterson)**: contributed the original Linux port (KWin/xdotool window management, joydev controller support, cross-platform SDK/shortcut/process handling, the Flatpak emulator downloader), integrated here.
+- **[44kitcaliber](https://github.com/44kitcaliber)**: found and fixed the stuck loading screen and the launch bridge quitting while the VM boots, and made the ROM sync time-limited so it can't hang a start.
 - **[Claude](https://github.com/claude)** (Anthropic): AI coding assistant; wrote and refactored most of this codebase in collaboration with MAGOOSKEE.
 
 Shown with live GitHub avatars on the Manager's Credits page.

@@ -28,6 +28,11 @@ _CONTRIBUTORS = [
         "display_name": "jacksterson",
         "blurb": "Original Linux port: KWin/xdotool window management, joydev controller support, cross-platform SDK/shortcut/process handling, and the Flatpak emulator downloader.",
     },
+    {
+        "username": "44kitcaliber",
+        "display_name": "44kitcaliber",
+        "blurb": "Found and fixed the stuck loading screen and the launch bridge quitting while the VM boots, and made the ROM sync time-limited so it can't hang a start.",
+    },
 ]
 
 # Every third-party component this project actually ships or bundles, plus

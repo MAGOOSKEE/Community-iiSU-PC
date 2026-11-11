@@ -99,6 +99,17 @@ def _device_lines(adb_devices_stdout: str):
 _NETWORK_SERIAL_RE = re.compile(r"^(\d{1,3}(\.\d{1,3}){3}|localhost|\[[0-9a-fA-F:]+\]):\d+$")
 
 
+def vm_device_listed(adb_devices_stdout: str) -> bool:
+    """Whether the VM appears in `adb devices` at all, in any state. A
+    booting or briefly reconnecting AVD shows as "offline" for a while;
+    that's still a running VM, unlike an empty list."""
+    for line in adb_devices_stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and (parts[0].startswith("emulator-") or _NETWORK_SERIAL_RE.match(parts[0])):
+            return True
+    return False
+
+
 def vm_device_serial(adb_devices_stdout: str) -> str | None:
     """The serial of the connected Android VM in `adb devices` output, or
     None. An AVD shows up as emulator-<port>, Waydroid as <ip>:<port> (adb

@@ -90,7 +90,7 @@ from bridge.ui import boot_overlay_qt as boot_overlay
 from shared import adb_client, app_version, log_stamp
 from shared.linux_emulators import linux_path_names
 from shared.platform_compat import IS_WINDOWS, detached_popen_kwargs, new_console_creationflags, open_uri, subprocess_creationflags
-from shared.vm_backend import BACKEND_WAYDROID, resolve_backend, vm_device_connected
+from shared.vm_backend import BACKEND_WAYDROID, resolve_backend, vm_device_connected, vm_device_listed
 from winapi import (
     SW_MINIMIZE,
     SW_RESTORE,
@@ -131,6 +131,17 @@ SHUTDOWN_HOTKEY_ID = 2
 MOD_NOREPEAT = 0x4000
 
 KEY_POLL_INTERVAL = 0.03  # seconds, responsive without busy-looping
+# How long the quit key has to be held to quit a Windows program or Steam
+# game. A tap is left to the game: Escape is the pause/menu key in most PC
+# games, and a tap used to kill the game outright, unsaved progress and all.
+NATIVE_QUIT_HOLD_SECONDS = 1.5
+# How long a Windows program gets to close by itself after being asked to
+# (as if its window's X was clicked) before it is ended by force.
+NATIVE_CLOSE_GRACE_SECONDS = 5.0
+# How many checks in a row the VM has to be missing from adb's device list
+# before the bridge takes it as gone, and how long between them.
+VM_GONE_CHECKS = 5
+VM_GONE_CHECK_SECONDS = 2.0
 BOOTANIM_WAIT_SECONDS = 90  # generous cap; see launch_iisu's docstring
 
 
@@ -1806,22 +1817,30 @@ def main() -> None:
         lingering as an orphaned process nobody can Start again over.
 
         Listens to the adb server's device change stream instead of asking
-        every 2 seconds. A change that drops the VM is re-checked a few
-        seconds later before shutting down, since the stream also reports a
-        momentary "offline" that polling would mostly have missed. If the
-        stream breaks, falls back to asking every 2 seconds, without ever
-        starting an adb server Stop has just ended."""
+        every 2 seconds. If the stream breaks, falls back to asking every
+        2 seconds, without ever starting an adb server Stop has just ended.
+
+        A VM that is listed but "offline" is still running: a cold-booting
+        AVD sits at offline for a while, and treating that as gone made the
+        bridge shut itself down a few seconds after starting, taking iiSU's
+        launch, the controller bridge and game hand-off with it ("Bridge
+        didn't come up in time", issue #10, found by 44kitcaliber). The
+        bridge only exits once the VM has been missing from the list
+        altogether for VM_GONE_CHECKS checks in a row, about 10 seconds."""
         time.sleep(2)
 
         def vm_gone() -> bool:
-            if vm_device_connected(adb_client.devices_text(start=False)):
-                return False
-            time.sleep(3)
-            return not vm_device_connected(adb_client.devices_text(start=False))
+            for miss in range(1, VM_GONE_CHECKS + 1):
+                if vm_device_listed(adb_client.devices_text(start=False)):
+                    return False
+                debug_log(f"the VM is missing from adb's device list ({miss}/{VM_GONE_CHECKS})")
+                if miss < VM_GONE_CHECKS:
+                    time.sleep(VM_GONE_CHECK_SECONDS)
+            return True
 
         try:
             for listing in adb_client.track_devices():
-                if not vm_device_connected(listing) and vm_gone():
+                if not vm_device_listed(listing) and vm_gone():
                     break
             else:
                 raise adb_client.AdbError("the device stream ended")

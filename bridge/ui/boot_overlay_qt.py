@@ -11,6 +11,7 @@ in-process widget would reintroduce the "second GUI root from a non-owning
 thread" problem a separate process avoids.
 """
 
+import os
 import random
 import subprocess
 import sys
@@ -85,7 +86,15 @@ _FLAVOR_LINES = [
 ]
 
 
-def show(context: str, status_path: Path | None = None) -> subprocess.Popen | None:
+# The overlay closes itself after this long even if nobody closes it. A start
+# passes a longer limit, since a full boot can take minutes.
+DEFAULT_MAX_SECONDS = 120
+START_MAX_SECONDS = 300
+
+
+def show(
+    context: str, status_path: Path | None = None, max_seconds: float = DEFAULT_MAX_SECONDS,
+) -> subprocess.Popen | None:
     """Best-effort: returns None instead of raising if the overlay process
     can't be started for any reason, a missing overlay is a cosmetic
     regression, never a reason to fail an actual start or game launch.
@@ -99,9 +108,14 @@ def show(context: str, status_path: Path | None = None) -> subprocess.Popen | No
 
     status_path, for a start, is the file the overlay reads its percentage,
     current step and log from (see bridge/start_progress.py). Without it the
-    overlay shows the bouncing bar, for waits nothing can measure."""
+    overlay shows the bouncing bar, for waits nothing can measure.
+
+    The overlay watches this process and closes when it exits, and also
+    closes after max_seconds, or when the user clicks it or presses Escape."""
     flavor = random.choice(_FLAVOR_LINES)
-    arguments = [context, flavor] + (["--status", str(status_path)] if status_path else [])
+    arguments = [context, flavor, "--parent-pid", str(os.getpid()), "--max-seconds", str(max_seconds)]
+    if status_path:
+        arguments += ["--status", str(status_path)]
     try:
         return subprocess.Popen(
             [sys.executable, "-m", "bridge.ui.boot_overlay_app", *arguments],

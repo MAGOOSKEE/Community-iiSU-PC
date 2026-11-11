@@ -789,7 +789,10 @@ def _start(headless: bool, log: StartLog) -> None:
         start_progress.StartProgress(details=bool(config.get("boot_overlay_details", False)))
         if show_overlay else start_progress.NoProgress()
     )
-    overlay = boot_overlay.show("Getting ready", progress.path) if show_overlay else None
+    overlay = (
+        boot_overlay.show("Getting ready", progress.path, max_seconds=boot_overlay.START_MAX_SECONDS)
+        if show_overlay else None
+    )
     try:
         log.attach(progress)
         for line in system_info.summary_lines():
