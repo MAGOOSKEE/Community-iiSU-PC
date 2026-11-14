@@ -32,7 +32,7 @@ body:
     attributes:
       label: Community-iiSU-PC version
       description: Shown at the bottom of the Manager's sidebar.
-      placeholder: v0.5.9-alpha
+      placeholder: v0.6.0-alpha
     validations:
       required: true
   - type: input
