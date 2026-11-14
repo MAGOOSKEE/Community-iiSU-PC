@@ -137,8 +137,8 @@ class HostInfo:
 
 
 def is_old_copy_name(name: str, avd_name: str) -> bool:
-    """The folders earlier resizes (and the hand-made recovery steps in the
-    README) leave next to the AVD."""
+    """The folders earlier resizes (and the hand-made recovery steps in
+    docs/troubleshooting.md) leave next to the AVD."""
     return name.startswith((f"{avd_name}.pre-resize", f"{avd_name}.avd.bak"))
 
 

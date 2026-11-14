@@ -199,8 +199,8 @@ class ManagerWindow(QMainWindow):
     def _apply_window_icon(self) -> None:
         import create_shortcut
 
-        # From the file: this runs before config_data is loaded.
-        icon_path = create_shortcut.icon_path_for(create_shortcut.configured_icon_choice())
+        # The Manager's own icon, whichever icon the launch shortcut shows.
+        icon_path = create_shortcut.MANAGER_ICON_PATH
         if icon_path.is_file():
             self.setWindowIcon(QIcon(str(icon_path)))
 

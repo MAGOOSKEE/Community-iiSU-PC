@@ -88,7 +88,7 @@ def inspect_backup(source: Path) -> dict[str, bytes]:
             members = [n.replace("\\", "/") for n in zf.namelist()]
             selected = [n for n in members if backup_safe_member(n)]
             if not selected:
-                raise BackupServiceError("This archive does not contain supported iiSU-PC backup files.")
+                raise BackupServiceError("This archive does not contain supported Community-iiSU-PC backup files.")
 
             payloads: dict[str, bytes] = {}
             for name in selected:

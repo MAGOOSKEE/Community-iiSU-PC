@@ -48,7 +48,7 @@ class WindowsAppsPage(PageBase):
         self._sort_column = "name"
         self._sort_reverse = False
 
-        self.add_header("Windows Apps", "Native executables, Steam games, and registered Windows protocol links in iiSU.")
+        self.add_header("PC Apps and Games", "Native programs, Steam games, and registered protocol links in iiSU.")
 
         steam_card = Card()
         steam_layout = QHBoxLayout(steam_card)
@@ -253,7 +253,7 @@ class WindowsAppsPage(PageBase):
             svc.create_windows_app(name, entry, apps, self._windows_dir())
             svc.save_windows_apps(apps)
         except svc.WindowsAppsServiceError as e:
-            QMessageBox.critical(self, "Windows Apps", str(e))
+            QMessageBox.critical(self, "PC Apps", str(e))
             return
         self._refresh_tree()
 
@@ -278,7 +278,7 @@ class WindowsAppsPage(PageBase):
         try:
             svc.rename_windows_app_placeholder(self._windows_dir(), old_name, new_name)
         except svc.WindowsAppsServiceError as e:
-            QMessageBox.critical(self, "Windows Apps", str(e))
+            QMessageBox.critical(self, "PC Apps", str(e))
             return
         apps.pop(old_name, None)
         apps[new_name] = new_entry
@@ -307,7 +307,7 @@ class WindowsAppsPage(PageBase):
             svc.create_windows_app(name, new_entry, apps, self._windows_dir())
             svc.save_windows_apps(apps)
         except svc.WindowsAppsServiceError as e:
-            QMessageBox.critical(self, "Windows Apps", str(e))
+            QMessageBox.critical(self, "PC Apps", str(e))
             return
         self._refresh_tree()
 
@@ -318,8 +318,8 @@ class WindowsAppsPage(PageBase):
             return
         reply = QMessageBox.question(
             self,
-            "Remove Windows Apps?",
-            f"Remove {len(selected)} selected application(s) from iiSU-PC?\n\n"
+            "Remove PC Apps?",
+            f"Remove {len(selected)} selected application(s) from Community-iiSU-PC?\n\n"
             "Their .pcgame placeholders are removed too. The applications themselves aren't uninstalled.",
         )
         if reply != QMessageBox.StandardButton.Yes:
@@ -410,11 +410,11 @@ class WindowsAppsPage(PageBase):
         if orphans:
             summary.append(f"Found {len(orphans)} unconfigured placeholder(s): " + ", ".join(p.name for p in orphans))
         if not summary:
-            QMessageBox.information(self, "Windows Apps", "Everything is already in sync. No repairs were needed.")
+            QMessageBox.information(self, "PC Apps", "Everything is already in sync. No repairs were needed.")
             return
 
         if orphans:
-            reply = QMessageBox.question(self, "Windows Apps: Sync / Repair", "\n\n".join(summary) + "\n\nConfigure the unconfigured placeholders now?")
+            reply = QMessageBox.question(self, "PC Apps: Sync / Repair", "\n\n".join(summary) + "\n\nConfigure the unconfigured placeholders now?")
             if reply == QMessageBox.StandardButton.Yes:
                 apps = svc.load_windows_apps()
                 for orphan in orphans:
@@ -430,13 +430,13 @@ class WindowsAppsPage(PageBase):
                         if orphan != windows_dir / f"{new_name}.pcgame":
                             orphan.rename(windows_dir / f"{new_name}.pcgame")
                     except OSError as e:
-                        QMessageBox.critical(self, "Windows Apps", f"Couldn't rename the placeholder:\n\n{e}")
+                        QMessageBox.critical(self, "PC Apps", f"Couldn't rename the placeholder:\n\n{e}")
                         continue
                     apps[new_name] = entry
                 svc.save_windows_apps(apps)
                 self._refresh_tree()
                 return
-        QMessageBox.information(self, "Windows Apps: Sync / Repair", "\n\n".join(summary))
+        QMessageBox.information(self, "PC Apps: Sync / Repair", "\n\n".join(summary))
 
     # == Health check ==
 
@@ -451,10 +451,10 @@ class WindowsAppsPage(PageBase):
     def _export_windows_apps(self) -> None:
         apps = svc.load_windows_apps()
         if not apps:
-            QMessageBox.information(self, "Export", "There are no Windows Apps to export.")
+            QMessageBox.information(self, "Export", "There are no PC Apps to export.")
             return
         path, _filter = QFileDialog.getSaveFileName(
-            self, "Export Windows Apps", "windows_apps_export.json", "JSON files (*.json);;All files (*.*)"
+            self, "Export PC Apps", "windows_apps_export.json", "JSON files (*.json);;All files (*.*)"
         )
         if not path:
             return
@@ -466,11 +466,11 @@ class WindowsAppsPage(PageBase):
         QMessageBox.information(
             self,
             "Export complete",
-            "Windows Apps exported.\n\nSteam and URI entries are portable. Executable paths may need updating on another PC.",
+            "PC Apps exported.\n\nSteam and URI entries are portable. Executable paths may need updating on another PC.",
         )
 
     def _import_windows_apps_file(self) -> None:
-        path, _filter = QFileDialog.getOpenFileName(self, "Import Windows Apps", filter="JSON files (*.json);;All files (*.*)")
+        path, _filter = QFileDialog.getOpenFileName(self, "Import PC Apps", filter="JSON files (*.json);;All files (*.*)")
         if not path:
             return
         try:
@@ -480,7 +480,7 @@ class WindowsAppsPage(PageBase):
             return
         incoming = svc.parse_import_payload(payload)
         if incoming is None:
-            QMessageBox.critical(self, "Import failed", "That file doesn't contain a Windows Apps mapping.")
+            QMessageBox.critical(self, "Import failed", "That file doesn't contain a PC Apps mapping.")
             return
 
         apps = svc.load_windows_apps()
@@ -539,7 +539,7 @@ class WindowsAppsPage(PageBase):
             self,
             "Auto-import Steam Games",
             f"Add {len(missing)} installed Steam game(s) not yet in iiSU?\n\n{preview}\n\n"
-            "This creates their Windows Apps mappings and .pcgame placeholders.",
+            "This creates their PC Apps mappings and .pcgame placeholders.",
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
@@ -602,26 +602,26 @@ class WindowsAppsPage(PageBase):
             windows_dir.mkdir(parents=True, exist_ok=True)
             open_uri(str(windows_dir))
         except OSError as e:
-            QMessageBox.critical(self, "Windows Apps", str(e))
+            QMessageBox.critical(self, "PC Apps", str(e))
 
     def _delete_legacy_stubs(self) -> None:
         roms_dir = self.window.config_data.get("roms_dir", "")
         legacy_dir = svc.legacy_windows_stubs_dir(roms_dir)
         if legacy_dir is None:
-            QMessageBox.information(self, "Windows Apps", "No old placeholder folder found under your ROM directory.")
+            QMessageBox.information(self, "PC Apps", "No old placeholder folder found under your ROM directory.")
             return
         count = sum(1 for _ in legacy_dir.glob("*.pcgame"))
         reply = QMessageBox.question(
             self,
             "Delete Old Placeholder Folder",
             f"Delete {legacy_dir}?\n\nIt holds {count} old .pcgame placeholder(s) from before they moved to "
-            f"{svc.WINDOWS_STUBS_DIR}. Only delete once your Windows Apps still work. This can't be undone.",
+            f"{svc.WINDOWS_STUBS_DIR}. Only delete once your PC Apps still work. This can't be undone.",
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
         try:
             svc.delete_legacy_windows_stubs(roms_dir)
         except svc.WindowsAppsServiceError as e:
-            QMessageBox.critical(self, "Windows Apps", str(e))
+            QMessageBox.critical(self, "PC Apps", str(e))
             return
-        QMessageBox.information(self, "Windows Apps", f"Deleted {legacy_dir}.")
+        QMessageBox.information(self, "PC Apps", f"Deleted {legacy_dir}.")

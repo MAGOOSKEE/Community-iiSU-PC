@@ -57,7 +57,7 @@ def vm_storage_check(df_output: str, configured_gb: float | None = None) -> tupl
     small = configured_gb is not None and configured_gb < vm_storage.DEFAULT_DATA_PARTITION_GB
     advice = (
         f" This VM's data partition is {configured_gb:g} GB; new installs get {vm_storage.DEFAULT_DATA_PARTITION_GB} GB. "
-        "See \"If the VM runs out of internal storage\" in the README to rebuild it bigger."
+        "Settings > Storage can recreate it bigger."
         if small else ""
     )
     if level == "critical":
@@ -81,7 +81,7 @@ def run_diagnostics(config_data: dict) -> list[tuple[str, str, str]]:
 
     add("OK" if BRIDGE_DIR.is_dir() else "ERROR", "Bridge directory", str(BRIDGE_DIR) if BRIDGE_DIR.is_dir() else f"Missing: {BRIDGE_DIR}")
     add("OK" if config_path.is_file() else "ERROR", "Bridge config", str(config_path) if config_path.is_file() else "bridge/config.json is missing")
-    add("OK" if apps_path.is_file() else "WARNING", "Windows Apps config", str(apps_path) if apps_path.is_file() else "windows_apps.json is missing")
+    add("OK" if apps_path.is_file() else "WARNING", "PC Apps config", str(apps_path) if apps_path.is_file() else "windows_apps.json is missing")
     add("OK" if adb_path.is_file() else "ERROR", "Bundled ADB", str(adb_path) if adb_path.is_file() else f"Missing: {adb_path}")
 
     config: dict = {}
@@ -96,11 +96,11 @@ def run_diagnostics(config_data: dict) -> list[tuple[str, str, str]]:
         try:
             apps = json.loads(apps_path.read_text(encoding="utf-8-sig"))
             if isinstance(apps, dict):
-                add("OK", "Windows Apps JSON", f"Valid JSON \u2022 {len(apps)} entr{'y' if len(apps) == 1 else 'ies'}")
+                add("OK", "PC Apps JSON", f"Valid JSON \u2022 {len(apps)} entr{'y' if len(apps) == 1 else 'ies'}")
             else:
-                add("ERROR", "Windows Apps JSON", "Top-level JSON value is not an object")
+                add("ERROR", "PC Apps JSON", "Top-level JSON value is not an object")
         except Exception as exc:
-            add("ERROR", "Windows Apps JSON", f"Invalid JSON: {exc}")
+            add("ERROR", "PC Apps JSON", f"Invalid JSON: {exc}")
 
     bridge_port = config.get("bridge_port", 7737) if isinstance(config, dict) else 7737
     try:

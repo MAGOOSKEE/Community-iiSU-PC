@@ -1,0 +1,69 @@
+name: Bug report
+description: Something doesn't work the way it should
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Running **Backup & Diagnostics > Diagnostics** in the Manager first often says what is wrong.
+        Please don't attach an iiSU APK, ROMs or BIOS files.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Where does it go wrong?
+      options:
+        - Installing or Setup
+        - Starting iiSU
+        - Launching a game
+        - In the Manager
+        - Updating
+        - Something else
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Community-iiSU-PC version
+      description: Shown at the bottom of the Manager's sidebar.
+      placeholder: v0.5.9-alpha
+    validations:
+      required: true
+  - type: input
+    id: iisu-version
+    attributes:
+      label: iiSU version
+      placeholder: Alpha 7.5
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows 11
+        - Windows 10
+        - Linux, KDE Plasma (X11)
+        - Linux, Wayland with Waydroid
+        - Steam Deck
+        - Other Linux
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: |
+        Drag the log files in, or paste the relevant part. They are in the `bridge` folder (Home > the arrow next to Start > Open Logs Folder).
+        `setup.log` for a Setup problem, `start.log` for a start problem, `bridge.log` for a game that won't launch.
+        They include folder paths from your PC, so glance through them first.
+      render: text
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Screenshots, what you already tried, which emulator and game.

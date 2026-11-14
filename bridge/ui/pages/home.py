@@ -1,4 +1,4 @@
-"""Home page: status card, Start/Stop, quick actions, and the live log.
+"""Home page: the mark and name, Start/Stop, status, quick actions, and the live log.
 Threading uses run_in_background() + a Signal-based log redirector, since
 Qt already marshals cross-thread signal delivery on its own, see
 bridge/ui/workers/{task_runner,log_stream}.py's docstrings."""
@@ -11,9 +11,11 @@ from pathlib import Path
 import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QFont, QTextCursor
+from PySide6.QtGui import QColor, QTextCursor
 from PySide6.QtWidgets import (
     QDialog,
+    QFrame,
+    QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
     QMenu,
@@ -28,9 +30,11 @@ from PySide6.QtWidgets import (
 import start_iisu_pc
 import stop_iisu_pc
 from bridge.ui.pages.base import PageBase
+from bridge.ui.widgets.brand_mark import BrandMark
 from bridge.ui.widgets.card import Card
 from bridge.ui.widgets.elided_label import ElidedLabel
 from bridge.ui.widgets.gradient_background import GradientBlobBackground
+from bridge.ui.widgets.gradient_divider import GradientDivider
 from bridge.ui.widgets.status_dot import StatusDot
 from shared.platform_compat import open_uri
 from shared.vm_backend import supports_headless_boot
@@ -41,6 +45,7 @@ from bridge_config import CONFIG_PATH
 from shared.qt_theme import Fonts, INPUT_BG, LOG_TEXT, TEXT_DIM
 
 STATUS_POLL_INTERVAL_MS = 2000
+HERO_LOGO_HEIGHT = 72
 
 
 class HomePage(PageBase):
@@ -63,53 +68,43 @@ class HomePage(PageBase):
         self._background = GradientBlobBackground(self)
         self._background.lower()
 
-        self.add_header("Community-iiSU-PC", "Android frontend, real PC emulators.")
+        self.body_layout.addStretch(2)
 
-        self.body_layout.addStretch(1)
-
-        # Everything below is the one thing this page is actually for:
-        # start/stop iiSU. Status, resume-state, and log detail all used to
-        # sit here permanently as their own buttons/cards; now they're a
-        # compact status line, an Advanced Launch Options menu, and a
-        # collapsed-by-default log drawer, so the page reads as one big
-        # button rather than a control panel.
+        # One centred column: who this is (mark, name, tagline), the one
+        # thing the page is for (start/stop iiSU), then what is running.
+        # Resume state and log detail stay out of the way as a single dim
+        # line, an Advanced Launch Options menu, and a collapsed-by-default
+        # log drawer, so the page reads as one big button rather than a
+        # control panel.
         center_col = QWidget()
         center_layout = QVBoxLayout(center_col)
         center_layout.setContentsMargins(0, 0, 0, 0)
-        center_layout.setSpacing(10)
+        center_layout.setSpacing(0)
         center_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 
-        self.status_row = QWidget()
-        status_row_layout = QHBoxLayout(self.status_row)
-        status_row_layout.setContentsMargins(0, 0, 0, 0)
-        status_row_layout.setSpacing(18)
-        status_row_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        # The iiPC mark, its "ii" drifting through the brand gradient.
+        self.brand_mark = BrandMark(HERO_LOGO_HEIGHT, animated=True)
+        if self.brand_mark.is_available():
+            center_layout.addWidget(self.brand_mark, 0, Qt.AlignmentFlag.AlignHCenter)
+            center_layout.addSpacing(20)
 
-        avd_col = QHBoxLayout()
-        avd_col.setSpacing(6)
-        self.avd_dot = StatusDot()
-        avd_col.addWidget(self.avd_dot)
-        avd_label = QLabel("Android VM")
-        avd_label.setStyleSheet(f"color: {TEXT_DIM};")
-        avd_col.addWidget(avd_label)
-        self.avd_status_label = QLabel("checking...")
-        self.avd_status_label.setStyleSheet(f"color: {TEXT_DIM};")
-        avd_col.addWidget(self.avd_status_label)
-        status_row_layout.addLayout(avd_col)
+        name_label = QLabel("Community-iiSU-PC")
+        name_label.setFont(Fonts.brand(28))
+        name_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        center_layout.addWidget(name_label)
+        center_layout.addSpacing(4)
 
-        bridge_col = QHBoxLayout()
-        bridge_col.setSpacing(6)
-        self.bridge_dot = StatusDot()
-        bridge_col.addWidget(self.bridge_dot)
-        bridge_label = QLabel("Launch bridge")
-        bridge_label.setStyleSheet(f"color: {TEXT_DIM};")
-        bridge_col.addWidget(bridge_label)
-        self.bridge_status_label = QLabel("checking...")
-        self.bridge_status_label.setStyleSheet(f"color: {TEXT_DIM};")
-        bridge_col.addWidget(self.bridge_status_label)
-        status_row_layout.addLayout(bridge_col)
+        tagline_label = QLabel("Android frontend, real PC emulators.")
+        tagline_label.setFont(Fonts.ui(11))
+        tagline_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        tagline_label.setStyleSheet(f"color: {TEXT_DIM};")
+        center_layout.addWidget(tagline_label)
+        center_layout.addSpacing(16)
 
-        center_layout.addWidget(self.status_row)
+        divider = GradientDivider()
+        divider.setFixedWidth(200)
+        center_layout.addWidget(divider, 0, Qt.AlignmentFlag.AlignHCenter)
+        center_layout.addSpacing(28)
 
         self.setup_intro_label = QLabel(
             "Not set up yet. Setup installs a self-contained Android VM and patches your copy "
@@ -118,38 +113,61 @@ class HomePage(PageBase):
         self.setup_intro_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self.setup_intro_label.setWordWrap(True)
         self.setup_intro_label.setMaximumWidth(520)
+        self.setup_intro_label.setContentsMargins(0, 0, 0, 16)
         self.setup_intro_label.setStyleSheet(f"color: {TEXT_DIM};")
         center_layout.addWidget(self.setup_intro_label)
 
         button_row = QWidget()
         button_layout = QHBoxLayout(button_row)
         button_layout.setContentsMargins(0, 0, 0, 0)
-        button_layout.setSpacing(6)
+        button_layout.setSpacing(8)
 
+        # The brand gradient while it starts something, a quiet outline
+        # while it stops it (see #HomePrimary in shared/qt_theme.py).
         self.primary_button = QPushButton("Start iiSU")
-        self.primary_button.setObjectName("accent")
-        primary_font = QFont(self.primary_button.font())
-        primary_font.setPointSize(primary_font.pointSize() + 4)
-        self.primary_button.setFont(primary_font)
-        self.primary_button.setMinimumSize(220, 56)
+        self.primary_button.setObjectName("HomePrimary")
+        self.primary_button.setFont(Fonts.ui(14, semibold=True))
+        self.primary_button.setMinimumSize(280, 58)
+        self.primary_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        # A soft glow in the gradient's own blue, only while it is the
+        # bright Start button (see _restyle_primary_button).
+        self._primary_glow = QGraphicsDropShadowEffect(self.primary_button)
+        self._primary_glow.setBlurRadius(42)
+        self._primary_glow.setOffset(0, 6)
+        self._primary_glow.setColor(QColor(110, 140, 255, 120))
+        self.primary_button.setGraphicsEffect(self._primary_glow)
         button_layout.addWidget(self.primary_button)
 
         self.advanced_button = QPushButton("▾")  # small dropdown caret
-        self.advanced_button.setObjectName("ghost")
-        self.advanced_button.setFixedSize(32, 56)
+        self.advanced_button.setObjectName("HomeCaret")
+        self.advanced_button.setFixedSize(44, 58)
         self.advanced_button.setToolTip("Advanced launch options")
         self.advanced_button.clicked.connect(self._show_advanced_menu)
         button_layout.addWidget(self.advanced_button)
 
-        center_layout.addWidget(button_row)
+        center_layout.addWidget(button_row, 0, Qt.AlignmentFlag.AlignHCenter)
+        center_layout.addSpacing(10)
 
         self.progress = QProgressBar()
         self.progress.setTextVisible(False)
         self.progress.setRange(0, 0)
         self.progress.setFixedHeight(4)
-        self.progress.setFixedWidth(220)
+        self.progress.setFixedWidth(332)
         self.progress.hide()
         center_layout.addWidget(self.progress, 0, Qt.AlignmentFlag.AlignHCenter)
+        center_layout.addSpacing(10)
+
+        self.status_row = QWidget()
+        status_row_layout = QHBoxLayout(self.status_row)
+        status_row_layout.setContentsMargins(0, 0, 0, 0)
+        status_row_layout.setSpacing(10)
+        status_row_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        avd_chip, self.avd_dot, self.avd_status_label = self._status_chip("Android VM")
+        status_row_layout.addWidget(avd_chip)
+        bridge_chip, self.bridge_dot, self.bridge_status_label = self._status_chip("Launch bridge")
+        status_row_layout.addWidget(bridge_chip)
+        center_layout.addWidget(self.status_row, 0, Qt.AlignmentFlag.AlignHCenter)
+        center_layout.addSpacing(14)
 
         # One line each, cut short with the full text in the tooltip: a wrapped line
         # here grew taller than the layout allowed for and drew over the button.
@@ -157,6 +175,7 @@ class HomePage(PageBase):
         self.resume_reason_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self.resume_reason_label.setStyleSheet(f"color: {TEXT_DIM};")
         center_layout.addWidget(self.resume_reason_label, 0, Qt.AlignmentFlag.AlignHCenter)
+        center_layout.addSpacing(6)
 
         self.stage_label = ElidedLabel(width=520)
         self.stage_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
@@ -164,7 +183,7 @@ class HomePage(PageBase):
         center_layout.addWidget(self.stage_label)
 
         self.body_layout.addWidget(center_col, 0, Qt.AlignmentFlag.AlignHCenter)
-        self.body_layout.addStretch(1)
+        self.body_layout.addStretch(3)
 
         # Collapsed by default: the log drawer, not a permanently visible
         # console. _run_guarded's redirector keeps appending to it whether
@@ -195,6 +214,21 @@ class HomePage(PageBase):
 
         self.primary_button.clicked.connect(self._on_primary_click)
         self.refresh_home_state()
+
+    def _status_chip(self, name: str) -> tuple[QFrame, StatusDot, QLabel]:
+        """A rounded pill: a status dot, what it is, and its state."""
+        chip = QFrame()
+        chip.setObjectName("StatusChip")
+        layout = QHBoxLayout(chip)
+        layout.setContentsMargins(12, 6, 14, 6)
+        layout.setSpacing(8)
+        dot = StatusDot(size=8)
+        layout.addWidget(dot)
+        layout.addWidget(QLabel(name))
+        status_label = QLabel("checking...")
+        status_label.setStyleSheet(f"color: {TEXT_DIM};")
+        layout.addWidget(status_label)
+        return chip, dot, status_label
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -286,9 +320,19 @@ class HomePage(PageBase):
         else:
             self.primary_button.setText("Repatch iiSU" if self.window.needs_repatch() else "Start iiSU")
             self.primary_button.setEnabled(not self.busy)
+        self._restyle_primary_button()
 
     def refresh_primary_button(self) -> None:
         self._refresh_primary_button()
+
+    def _restyle_primary_button(self) -> None:
+        """Stop gets the quiet look, everything that starts something the gradient."""
+        mode = "stop" if self.primary_button.text() == "Stop" else "go"
+        if self.primary_button.property("mode") != mode:
+            self.primary_button.setProperty("mode", mode)
+            self.primary_button.style().unpolish(self.primary_button)
+            self.primary_button.style().polish(self.primary_button)
+        self._primary_glow.setEnabled(mode == "go" and self.primary_button.isEnabled())
 
     def _on_primary_click(self) -> None:
         if self.window.config_problem:

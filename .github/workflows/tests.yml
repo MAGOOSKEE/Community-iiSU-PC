@@ -1,10 +1,10 @@
 name: Tests
 
-# windows-latest, not ubuntu: bridge/winapi.py (and everything that
-# imports it, launch_bridge.py, the Manager pages, onboarding_wizard.py, ...)
-# uses ctypes.windll at import time, so this project only imports
-# cleanly on Windows in the first place, same as it only ever runs on
-# Windows.
+# windows-latest: the Windows half of the code (bridge/winapi_windows.py,
+# the XInput controller bridge, the WinMM audio player) only imports there,
+# and Windows is where most installs are. The Linux half is covered by the
+# tests that take the platform as a parameter; a Linux job that runs the
+# suite for real would be a welcome addition.
 on:
   push:
     branches: [dev, master]

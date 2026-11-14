@@ -926,7 +926,7 @@ def quit_tap_action(label: str = "quit") -> None:
         log_launch(f"QUIT: {label} during native launch handoff; queued until HWND/PID is tracked")
     else:
         print(f"[bridge] {label} with no emulator/native game running, closing iiSU and the AVD entirely...")
-        log_launch(f"QUIT: {label}, no tracked emulator/native HWND; shutting down iiSU-PC")
+        log_launch(f"QUIT: {label}, no tracked emulator/native HWND; shutting down Community-iiSU-PC")
         shutdown_everything()
 
 

@@ -1,4 +1,4 @@
-"""Asks which icon the desktop shortcuts and the Manager's window show:
+"""Asks which icon the desktop shortcut that starts iiSU shows:
 iiSU's own, extracted from your iiSU APK (see create_shortcut.py), or this
 project's iiPC icon. Opened when onboarding finishes, right after Setup made
 the shortcuts, and by the Home page's Recreate Shortcut. The caller saves
@@ -29,7 +29,7 @@ class IconChoiceDialog(QDialog):
         heading.setFont(Fonts.heading())
         layout.addWidget(heading)
         intro = QLabel(
-            "Used by the desktop shortcuts and the Manager's window. Change it any time with "
+            "Used by the desktop shortcut that starts iiSU. The Manager keeps its own icon. Change it any time with "
             "Recreate Shortcut, in the menu next to Start on the Home page."
         )
         intro.setWordWrap(True)

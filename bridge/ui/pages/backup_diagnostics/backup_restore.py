@@ -19,7 +19,7 @@ class BackupRestorePage(PageBase):
         super().__init__(parent, scrollable_body=True)
         self.window = window
 
-        self.add_header("Backup & Restore", "Back up or restore iiSU-PC configuration.")
+        self.add_header("Backup & Restore", "Back up or restore Community-iiSU-PC's configuration.")
 
         card = Card()
         card_layout = QVBoxLayout(card)
@@ -89,7 +89,7 @@ class BackupRestorePage(PageBase):
             return
 
         path, _filter = QFileDialog.getSaveFileName(
-            self, "Create iiSU-PC Backup", svc.default_backup_filename(), "iiSU-PC Backup (*.zip);;ZIP archive (*.zip)"
+            self, "Create Community-iiSU-PC Backup", svc.default_backup_filename(), "Community-iiSU-PC Backup (*.zip);;ZIP archive (*.zip)"
         )
         if not path:
             return
@@ -104,7 +104,7 @@ class BackupRestorePage(PageBase):
         QMessageBox.information(self, "Backup Complete", f"Backed up {len(files)} configuration file(s).\n\n{path}")
 
     def _restore_backup(self) -> None:
-        path, _filter = QFileDialog.getOpenFileName(self, "Restore iiSU-PC Backup", filter="iiSU-PC Backup (*.zip);;ZIP archive (*.zip)")
+        path, _filter = QFileDialog.getOpenFileName(self, "Restore Community-iiSU-PC Backup", filter="Community-iiSU-PC Backup (*.zip);;ZIP archive (*.zip)")
         if not path:
             return
 

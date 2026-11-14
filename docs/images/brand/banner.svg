@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1280 320">
+  <defs>
+    <style>
+      .cls-1{fill:#151515}
+      .cls-2{fill:url(#radial-gradient-1)}
+      .cls-3{fill:url(#radial-gradient-2)}
+      .cls-4{font-family:Bahnschrift, sans-serif;font-size:76px;font-weight:600;fill:#ffffff}
+      .cls-5{font-family:Lexend, sans-serif;font-size:30px;font-weight:600;fill:#b9b9c4}
+      .cls-6{fill:url(#linear-gradient-1)}
+      .cls-7{fill:url(#linear-gradient-2)}
+      .cls-8{fill:#ffffff}
+    </style>
+    <clipPath id="clip-path-1">
+      <path d="M28 0 L1252 0 C1267.464 0 1280 12.536 1280 28 L1280 292 C1280 307.464 1267.464 320 1252 320 L28 320 C12.536 320 0 307.464 0 292 L0 28 C0 12.536 12.536 0 28 0 Z"/>
+    </clipPath>
+    <radialGradient id="radial-gradient-1" cx="0" cy="0" r="520" gradientTransform="matrix(1 0 0 0.577 520 120)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6a4a9c" stop-opacity="0.75"/>
+      <stop offset="1" stop-color="#6a4a9c" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="radial-gradient-2" cx="0" cy="0" r="420" gradientTransform="matrix(1 0 0 0.619 1080 260)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2f6f7a" stop-opacity="0.6"/>
+      <stop offset="1" stop-color="#2f6f7a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="linear-gradient-1" x1="114.604" y1="73.256" x2="280.194" y2="237.91" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#575d5c"/>
+      <stop offset="0.4991" stop-color="#2c2e2e" data-vc-midpoint="0.5057"/>
+      <stop offset="0.9868" stop-color="#000000"/>
+    </linearGradient>
+    <linearGradient id="linear-gradient-2" x1="131.15" y1="173.296" x2="152.13" y2="129.625" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#6c6a6a"/>
+    </linearGradient>
+  </defs>
+  <title>Artboard 1</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <g clip-path="url(#clip-path-1)">
+      <rect x="0" y="0" width="1280" height="320" class="cls-1"/>
+      <ellipse cx="520" cy="120" rx="520" ry="300" class="cls-2"/>
+      <ellipse cx="1080" cy="260" rx="420" ry="260" class="cls-3"/>
+    </g>
+    <text transform="matrix(1 0 0 1 340 158)" x="0" y="0" xml:space="preserve" class="cls-4"><tspan x="0" y="0">Community-iiSU-PC</tspan></text>
+    <text transform="matrix(1 0 0 1 344 212)" x="0" y="0" xml:space="preserve" class="cls-5"><tspan x="0" y="0">Android frontend, real PC emulators.</tspan></text>
+    <g>
+      <path d="M135.51 67.119 L257.207 67.119 C272.258 67.119 284.459 79.32 284.459 94.371 L284.459 216.067 C284.459 231.118 272.258 243.319 257.207 243.319 L135.51 243.319 C120.46 243.319 108.259 231.118 108.259 216.067 L108.259 94.371 C108.259 79.32 120.46 67.119 135.51 67.119 Z" class="cls-6"/>
+      <g>
+        <g>
+          <polygon points="118.354,175.233 142.399,134.012 158.082,134.012 134.036,175.233" class="cls-7"/>
+          <circle cx="126.24" cy="114.746" r="7.886" class="cls-8"/>
+          <circle cx="126.24" cy="135.205" r="7.886" class="cls-8"/>
+          <circle cx="126.24" cy="174.04" r="7.886" class="cls-8"/>
+          <rect x="118.354" y="135.205" width="15.682" height="40.028" class="cls-8"/>
+          <circle cx="150.196" cy="194.5" r="7.886" class="cls-8"/>
+          <circle cx="150.196" cy="174.04" r="7.886" class="cls-8"/>
+          <circle cx="150.196" cy="135.205" r="7.886" class="cls-8"/>
+          <rect x="142.399" y="134.012" width="15.683" height="40.028" class="cls-8"/>
+        </g>
+        <path d="M207.707 127.319 C208.096 127.26 208.494 127.229 208.9 127.229 C213.255 127.229 216.786 130.76 216.786 135.115 C216.786 135.145 216.786 135.175 216.785 135.205 L216.786 135.205 L216.786 174.13 C216.786 178.485 213.255 182.016 208.9 182.016 C208.494 182.016 208.096 181.985 207.707 181.926 L184.554 181.926 L184.554 194.5 C184.613 194.889 184.644 195.287 184.644 195.692 C184.644 200.048 181.113 203.578 176.758 203.578 C172.402 203.578 168.872 200.048 168.872 195.692 L168.872 181.926 L168.872 166.244 L168.872 135.205 C168.872 130.865 172.378 127.343 176.713 127.319 L176.713 127.319 L176.758 127.319 Z M184.554 143.002 L184.554 166.244 L201.103 166.244 L201.103 143.002 Z" class="cls-8"/>
+        <path d="M235.417 127.319 L235.417 127.319 L235.462 127.319 L274.364 127.319 L274.364 143.002 L243.259 143.002 L243.259 187.896 L274.364 187.896 L274.364 203.578 L235.462 203.578 C231.107 203.578 227.576 200.048 227.576 195.692 L227.576 135.205 C227.576 130.865 231.082 127.343 235.417 127.319 Z" class="cls-8"/>
+      </g>
+    </g>
+  </g>
+</svg>

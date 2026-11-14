@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 1280 640">
+  <defs>
+    <style>
+      .cls-1{fill:#151515}
+      .cls-2{fill:url(#radial-gradient-1)}
+      .cls-3{fill:url(#radial-gradient-2)}
+      .cls-4{font-family:Bahnschrift, sans-serif;font-size:80px;font-weight:600;fill:#ffffff;text-anchor:middle}
+      .cls-5{fill:url(#linear-gradient-1)}
+      .cls-6{font-family:Lexend, sans-serif;font-size:32px;font-weight:600;fill:#b9b9c4;text-anchor:middle}
+      .cls-7{font-family:Lexend, sans-serif;font-size:22px;font-weight:bold;fill:#8a8a96;text-anchor:middle}
+      .cls-8{fill:url(#linear-gradient-2)}
+      .cls-9{fill:url(#linear-gradient-3)}
+      .cls-10{fill:#ffffff}
+    </style>
+    <radialGradient id="radial-gradient-1" cx="0" cy="0" r="620" gradientTransform="matrix(1 0 0 0.677 560 260)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6a4a9c" stop-opacity="0.75"/>
+      <stop offset="1" stop-color="#6a4a9c" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="radial-gradient-2" cx="0" cy="0" r="480" gradientTransform="matrix(1 0 0 0.708 1120 520)" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2f6f7a" stop-opacity="0.6"/>
+      <stop offset="1" stop-color="#2f6f7a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="linear-gradient-1" x1="440" y1="436" x2="840" y2="436" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6fd6f5"/>
+      <stop offset="1" stop-color="#a86bf2"/>
+    </linearGradient>
+    <linearGradient id="linear-gradient-2" x1="558.245" y1="134.037" x2="723.835" y2="298.691" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#575d5c"/>
+      <stop offset="0.4991" stop-color="#2c2e2e" data-vc-midpoint="0.5057"/>
+      <stop offset="0.9868" stop-color="#000000"/>
+    </linearGradient>
+    <linearGradient id="linear-gradient-3" x1="574.791" y1="234.077" x2="595.771" y2="190.406" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#6c6a6a"/>
+    </linearGradient>
+  </defs>
+  <title>Artboard 1</title>
+  <g id="Layer_1" data-name="Layer 1">
+    <rect x="0" y="0" width="1280" height="640" class="cls-1"/>
+    <ellipse cx="560" cy="260" rx="620" ry="420" class="cls-2"/>
+    <ellipse cx="1120" cy="520" rx="480" ry="340" class="cls-3"/>
+    <text transform="matrix(1 0 0 1 640 408)" x="0" y="0" xml:space="preserve" class="cls-4"><tspan x="0" y="0">Community-iiSU-PC</tspan></text>
+    <path d="M442.5 436 L837.5 436 C838.881 436 840 437.119 840 438.5 L840 438.5 C840 439.881 838.881 441 837.5 441 L442.5 441 C441.119 441 440 439.881 440 438.5 L440 438.5 C440 437.119 441.119 436 442.5 436 Z" class="cls-5"/>
+    <text transform="matrix(1 0 0 1 640 492)" x="0" y="0" xml:space="preserve" class="cls-6"><tspan x="0" y="0">Android frontend, real PC emulators.</tspan></text>
+    <text transform="matrix(1 0 0 1 640 540)" x="0" y="0" xml:space="preserve" class="cls-7"><tspan x="0" y="0">Windows · Linux · Steam Deck</tspan></text>
+    <g>
+      <path d="M579.152 127.9 L700.848 127.9 C715.899 127.9 728.1 140.101 728.1 155.152 L728.1 276.848 C728.1 291.899 715.899 304.1 700.848 304.1 L579.152 304.1 C564.101 304.1 551.9 291.899 551.9 276.848 L551.9 155.152 C551.9 140.101 564.101 127.9 579.152 127.9 Z" class="cls-8"/>
+      <g>
+        <g>
+          <polygon points="561.995,236.014 586.04,194.793 601.723,194.793 577.677,236.014" class="cls-9"/>
+          <circle cx="569.881" cy="175.527" r="7.886" class="cls-10"/>
+          <circle cx="569.881" cy="195.986" r="7.886" class="cls-10"/>
+          <circle cx="569.881" cy="234.821" r="7.886" class="cls-10"/>
+          <rect x="561.995" y="195.986" width="15.682" height="40.028" class="cls-10"/>
+          <circle cx="593.837" cy="255.281" r="7.886" class="cls-10"/>
+          <circle cx="593.837" cy="234.821" r="7.886" class="cls-10"/>
+          <circle cx="593.837" cy="195.986" r="7.886" class="cls-10"/>
+          <rect x="586.04" y="194.793" width="15.683" height="40.028" class="cls-10"/>
+        </g>
+        <path d="M651.348 188.1 C651.737 188.041 652.136 188.01 652.541 188.01 C656.896 188.01 660.427 191.541 660.427 195.896 C660.427 195.926 660.427 195.956 660.427 195.986 L660.427 195.986 L660.427 234.911 C660.427 239.266 656.896 242.797 652.541 242.797 C652.136 242.797 651.737 242.766 651.348 242.707 L628.196 242.707 L628.196 255.281 C628.255 255.67 628.285 256.068 628.285 256.473 C628.285 260.829 624.754 264.359 620.399 264.359 C616.044 264.359 612.513 260.829 612.513 256.473 L612.513 242.707 L612.513 227.025 L612.513 195.986 C612.513 191.646 616.02 188.124 620.354 188.1 L620.354 188.1 L620.399 188.1 Z M628.196 203.783 L628.196 227.025 L644.744 227.025 L644.744 203.783 Z" class="cls-10"/>
+        <path d="M679.058 188.1 L679.058 188.1 L679.103 188.1 L718.005 188.1 L718.005 203.783 L686.9 203.783 L686.9 248.677 L718.005 248.677 L718.005 264.359 L679.103 264.359 C674.748 264.359 671.217 260.829 671.217 256.473 L671.217 195.986 C671.217 191.646 674.724 188.124 679.058 188.1 Z" class="cls-10"/>
+      </g>
+    </g>
+  </g>
+</svg>

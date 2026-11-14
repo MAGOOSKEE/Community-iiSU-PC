@@ -1,0 +1,27 @@
+name: Feature request
+description: Suggest an improvement or a new feature
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The situation you're in and what gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?
+      description: How you imagine it working. A rough idea is fine.
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform it matters on
+      options:
+        - Both
+        - Windows
+        - Linux
+        - Steam Deck

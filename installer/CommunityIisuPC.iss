@@ -91,9 +91,9 @@ Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#AppName} Manager"; Filename: "{app}\runtime\python\pythonw.exe"; \
-    Parameters: "-m bridge.ui.app"; WorkingDir: "{app}"; IconFilename: "{app}\bridge\assets\iisu_launch.ico"
+    Parameters: "-m bridge.ui.app"; WorkingDir: "{app}"; IconFilename: "{app}\bridge\assets\manager.ico"
 Name: "{autodesktop}\{#AppName} Manager"; Filename: "{app}\runtime\python\pythonw.exe"; \
-    Parameters: "-m bridge.ui.app"; WorkingDir: "{app}"; IconFilename: "{app}\bridge\assets\iisu_launch.ico"; Tasks: desktopicon
+    Parameters: "-m bridge.ui.app"; WorkingDir: "{app}"; IconFilename: "{app}\bridge\assets\manager.ico"; Tasks: desktopicon
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
 
 [Run]

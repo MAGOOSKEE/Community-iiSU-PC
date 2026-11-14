@@ -36,6 +36,7 @@ from pathlib import Path
 import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
 from shared.platform_compat import IS_WINDOWS
+from shared.qt_theme import Fonts
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QGuiApplication, QLinearGradient, QPainter
@@ -324,17 +325,17 @@ class OverlayWindow(QWidget):
         layout.setContentsMargins(48, 48, 48, 48)
 
         # Bahnschrift SemiBold (bundled with Windows 10+), not this
-        # project's usual Segoe UI, a blockier, more technical/console-ish
+        # project's usual UI font, a blockier, more technical/console-ish
         # face echoing iiSU's own branding without using any of iiSU's
         # actual (copyrighted, not ours to include) font files.
         self._title = QLabel(self._TITLE_TEXT)
-        self._title.setFont(QFont("Bahnschrift SemiBold", 32))
+        self._title.setFont(Fonts.brand(32))
         self._title.setStyleSheet(f"color: {theme['title'].name()};")
         self._title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._title)
 
         self._context_label = QLabel(context)
-        self._context_label.setFont(QFont("Segoe UI Semibold", 14))
+        self._context_label.setFont(Fonts.ui(14, semibold=True))
         self._context_label.setStyleSheet(f"color: {theme['context'].name()};")
         self._context_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._context_label)
@@ -351,13 +352,13 @@ class OverlayWindow(QWidget):
             # The number as text: a bar alone says nothing to someone who
             # can't make out how full it is, or to a screen reader.
             self._percent_label = QLabel("0%")
-            self._percent_label.setFont(QFont("Segoe UI Semibold", 16))
+            self._percent_label.setFont(Fonts.ui(16, semibold=True))
             self._percent_label.setStyleSheet(f"color: {theme['context'].name()};")
             self._percent_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self._percent_label.setAccessibleName("Start progress in percent")
             layout.addWidget(self._percent_label)
 
-        flavor_font = QFont("Segoe UI", 10)
+        flavor_font = Fonts.ui(10)
         flavor_font.setItalic(True)
         flavor_label = QLabel(flavor)
         flavor_label.setFont(flavor_font)
@@ -397,7 +398,7 @@ class OverlayWindow(QWidget):
             self._refresh_status()
 
         hint_label = QLabel("Press Esc or click to hide this screen")
-        hint_label.setFont(QFont("Segoe UI", 9))
+        hint_label.setFont(Fonts.ui(9))
         hint_label.setStyleSheet(f"color: {theme['flavor'].name()};")
         hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addSpacing(24)

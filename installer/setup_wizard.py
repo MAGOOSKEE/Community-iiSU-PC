@@ -182,7 +182,7 @@ def require_java() -> None:
 def warn_missing_linux_extras() -> None:
     """Non-fatal: unlike java/keytool, nothing actually stops Setup or day-
     to-day use without xdotool/flatpak, each just quietly degrades one
-    specific feature (see README's Linux support note) rather than
+    specific feature (see docs/linux.md) rather than
     failing outright, so this only prints a heads-up rather than raising,
     the same "best effort, log it, keep going" pattern
     virtualization_diagnostics() already uses for a non-fatal check."""

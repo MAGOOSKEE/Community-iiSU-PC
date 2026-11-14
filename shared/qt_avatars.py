@@ -26,7 +26,9 @@ import urllib.request
 from pathlib import Path
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QBrush, QColor, QFont, QPainter, QPainterPath, QPixmap
+from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPixmap
+
+from shared.qt_theme import Fonts
 
 GITHUB_AVATAR_URL = "https://github.com/{username}.png"
 FETCH_TIMEOUT = 5.0
@@ -121,7 +123,7 @@ def make_placeholder_circle(size: int, label: str, color: str, text_color: str) 
     painter.drawEllipse(0, 0, size, size)
 
     painter.setPen(QColor(text_color))
-    font = QFont("Segoe UI Semibold", int(size * 0.4))
+    font = Fonts.ui(int(size * 0.4), semibold=True)
     painter.setFont(font)
     painter.drawText(pixmap.rect(), Qt.AlignmentFlag.AlignCenter, (label[:1] or "?").upper())
     painter.end()

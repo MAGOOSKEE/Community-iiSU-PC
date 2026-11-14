@@ -23,7 +23,7 @@ _SECTIONS = [
 class WindowsAppsHealthDialog(QDialog):
     def __init__(self, parent, windows_dir: Path, on_repaired):
         super().__init__(parent)
-        self.setWindowTitle("Windows Apps Health Check")
+        self.setWindowTitle("PC Apps Health Check")
         self.resize(760, 580)
         self._windows_dir = windows_dir
         self._on_repaired = on_repaired
@@ -35,7 +35,7 @@ class WindowsAppsHealthDialog(QDialog):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 16, 18, 16)
 
-        title = QLabel("Windows Apps Health Check")
+        title = QLabel("PC Apps Health Check")
         title.setFont(Fonts.heading())
         layout.addWidget(title)
         status = QLabel("Everything looks healthy." if problem_total == 0 else f"Found {problem_total} item(s) worth reviewing.")

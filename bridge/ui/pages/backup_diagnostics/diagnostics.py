@@ -26,7 +26,7 @@ class DiagnosticsPage(PageBase):
         self.window = window
 
         self.add_header(
-            "Diagnostics", "Run non-destructive checks for iiSU-PC, the Android VM, bridge, Windows Apps, Steam, and logs."
+            "Diagnostics", "Run non-destructive checks for the install, the Android VM, bridge, PC apps, Steam, and logs."
         )
 
         toolbar = QWidget()

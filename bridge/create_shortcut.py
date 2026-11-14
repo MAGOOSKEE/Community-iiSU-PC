@@ -39,10 +39,10 @@ START_SCRIPT = BRIDGE_DIR / "start_iisu_pc.py"
 SHORTCUT_NAME = "Community-iiSU-PC.lnk" if IS_WINDOWS else "Community-iiSU-PC.desktop"
 
 # The installer's own [Icons] entries (CommunityIisuPC.iss) create this one
-# at install time, before any APK has ever been processed, so it's always
-# hardcoded to FALLBACK_ICON_PATH. Nothing else ever revisits it afterward,
-# confirmed live: it stays generic forever even once a real icon has been
-# extracted. Re-pointed to match here whenever extraction succeeds.
+# at install time. The Manager has its own icon (MANAGER_ICON_PATH), apart
+# from the launch shortcut's, so the two can be told apart on a desktop. An
+# install from before it had one is re-pointed here whenever the shortcuts
+# are remade.
 MANAGER_SHORTCUT_NAME = "Community-iiSU-PC Manager.lnk" if IS_WINDOWS else "Community-iiSU-PC-Manager.desktop"
 
 # .ico only really renders correctly in a Windows shell context; Linux
@@ -50,6 +50,7 @@ MANAGER_SHORTCUT_NAME = "Community-iiSU-PC Manager.lnk" if IS_WINDOWS else "Comm
 # The iiPC icon, this project's own: the choice, or the fallback.
 FALLBACK_ICON_PATH = BRIDGE_DIR / "assets" / ("iisu_launch.ico" if IS_WINDOWS else "iisu_launch.png")
 IIPC_PNG_PATH = BRIDGE_DIR / "assets" / "iisu_launch.png"
+MANAGER_ICON_PATH = BRIDGE_DIR / "assets" / ("manager.ico" if IS_WINDOWS else "manager.png")
 EXTRACTED_ICON_PATH = BRIDGE_DIR / (".iisu_icon.ico" if IS_WINDOWS else ".iisu_icon.png")
 EXTRACTED_ICO_PATH = BRIDGE_DIR / ".iisu_icon.ico"
 EXTRACTED_PNG_PATH = BRIDGE_DIR / ".iisu_icon.png"
@@ -60,7 +61,7 @@ ICON_DENSITY_ORDER = ["xxxhdpi", "xxhdpi", "xhdpi", "hdpi", "mdpi"]
 ICON_RASTER_EXTS = [".webp", ".png"]
 ICON_SIZES = [16, 24, 32, 48, 64, 128, 256]
 
-# config.json's "icon_choice": which icon the shortcuts and the Manager show.
+# config.json's "icon_choice": which icon the launch shortcut shows.
 ICON_IISU = "iisu"
 ICON_IIPC = "iipc"
 CONFIG_PATH = BRIDGE_DIR / "config.json"
@@ -272,7 +273,7 @@ def _create_manager_desktop_file(icon_path: Path) -> Path:
 
 
 def _update_manager_shortcut_icon(icon_path: Path) -> None:
-    """Re-points the installer-created Manager shortcut's icon to match,
+    """Re-points the installer-created Manager shortcut's icon,
     only if that shortcut actually exists (it's optional, tied to Inno's
     desktopicon task) and only if it isn't already pointing at icon_path
     (skips a pointless PowerShell call on every ordinary launch). Never
@@ -301,10 +302,10 @@ def _update_manager_shortcut_icon(icon_path: Path) -> None:
 
 def remove_desktop_shortcut(icon_choice: str | None = None) -> None:
     """For someone who wants no launch shortcut on the desktop: deletes the
-    one Setup made and points the Manager's shortcut at the chosen icon. On
+    one Setup made and points the Manager's shortcut at the Manager's icon. On
     Linux the app menu entry stays, so it can still be found."""
     (desktop_dir() / SHORTCUT_NAME).unlink(missing_ok=True)
-    _update_manager_shortcut_icon(icon_path_for(icon_choice or configured_icon_choice()))
+    _update_manager_shortcut_icon(MANAGER_ICON_PATH)
     _refresh_shell_icon_cache()
 
 
@@ -323,7 +324,7 @@ def create_desktop_shortcut(apk_path: Path | None = None, icon_choice: str | Non
             # too, since that diagnostic line is easy to miss buried in a long
             # setup log, and the shortcut otherwise looks identical either way.
             print("[shortcut] using the iiPC fallback icon, not iiSU's own, see the line above for why")
-    _update_manager_shortcut_icon(icon_path)
+    _update_manager_shortcut_icon(MANAGER_ICON_PATH)
 
     if not IS_WINDOWS:
         content = (

@@ -250,7 +250,7 @@ def build_pc_launch_args(
     profile: dict, executable: Path, rom_path: Path | None, is_windows: bool = IS_WINDOWS
 ) -> list[str]:
     """The exact CLI argv a PC-side emulator gets launched with, shared with
-    try_launch_args.py so that checker exercises the same logic a real
+    scripts/try_launch_args.py so that checker exercises the same logic a real
     launch does rather than a separate reimplementation that could drift.
 
     Every emulator here except RPCS3 takes its rom as a trailing positional

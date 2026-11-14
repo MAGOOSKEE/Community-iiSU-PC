@@ -1,5 +1,5 @@
 """Unit tests for bridge/create_shortcut.py's icon choice: iiSU's own icon or
-the iiPC one, for the shortcuts and the Manager. No shortcut is written:
+the iiPC one, for the launch shortcut (the Manager keeps its own). No shortcut is written:
 PowerShell, the desktop folder and icon extraction are stubbed out."""
 
 import json
@@ -53,20 +53,20 @@ class IconChoiceTests(unittest.TestCase):
         written = run.call_args.args[0][-1] if run.called else desktop_file.call_args.args[2]
         return extracted, manager.call_args.args[0], written
 
-    def test_choosing_iipc_points_both_shortcuts_at_it_and_still_extracts_iisus(self):
+    def test_choosing_iipc_points_the_launch_shortcut_at_it_and_still_extracts_iisus(self):
         extracted, manager_icon, written = self._create(create_shortcut.ICON_IIPC)
         extracted.assert_called_once()
-        self.assertEqual(manager_icon, create_shortcut.FALLBACK_ICON_PATH)
+        self.assertEqual(manager_icon, create_shortcut.MANAGER_ICON_PATH, "the Manager keeps its own icon")
         self.assertIn(str(create_shortcut.FALLBACK_ICON_PATH.resolve() if sys.platform != "win32" else create_shortcut.FALLBACK_ICON_PATH), written)
 
-    def test_choosing_iisu_points_both_shortcuts_at_its_icon(self):
+    def test_choosing_iisu_points_the_launch_shortcut_at_its_icon(self):
         _extracted, manager_icon, written = self._create(create_shortcut.ICON_IISU)
-        self.assertEqual(manager_icon, self.extracted)
+        self.assertEqual(manager_icon, create_shortcut.MANAGER_ICON_PATH, "the Manager keeps its own icon")
         self.assertIn(str(self.extracted.resolve() if sys.platform != "win32" else self.extracted), written)
 
 
 class NoShortcutTests(unittest.TestCase):
-    def test_the_launch_shortcut_goes_and_the_managers_gets_the_choice(self):
+    def test_the_launch_shortcut_goes_and_the_managers_keeps_its_own_icon(self):
         with tempfile.TemporaryDirectory() as tmp:
             shortcut = Path(tmp) / create_shortcut.SHORTCUT_NAME
             shortcut.write_text("lnk", encoding="utf-8")
@@ -76,7 +76,7 @@ class NoShortcutTests(unittest.TestCase):
                 create_shortcut.remove_desktop_shortcut(create_shortcut.ICON_IIPC)
                 create_shortcut.remove_desktop_shortcut(create_shortcut.ICON_IIPC)
             self.assertFalse(shortcut.exists())
-        self.assertEqual(manager.call_args.args[0], create_shortcut.FALLBACK_ICON_PATH)
+        self.assertEqual(manager.call_args.args[0], create_shortcut.MANAGER_ICON_PATH)
 
 
 if __name__ == "__main__":

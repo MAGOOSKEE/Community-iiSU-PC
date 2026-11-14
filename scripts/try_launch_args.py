@@ -14,11 +14,11 @@ Not part of the shipped app, just a dev tool, run it against your own
 config.json/roms library before committing a change to emulator_defaults.py.
 
 Run with (from the repo root):
-    python try_launch_args.py                  # test everything it can find
-    python try_launch_args.py --list            # show what it found, launch nothing
-    python try_launch_args.py --only ps2,xbox   # test just these consoles
-    python try_launch_args.py --timeout 10      # seconds before a still-running process counts as a PASS
-    python try_launch_args.py --rom xbox="D:\\Roms\\xbox\\Example Game.iso"
+    python scripts/try_launch_args.py                  # test everything it can find
+    python scripts/try_launch_args.py --list            # show what it found, launch nothing
+    python scripts/try_launch_args.py --only ps2,xbox   # test just these consoles
+    python scripts/try_launch_args.py --timeout 10      # seconds before a still-running process counts as a PASS
+    python scripts/try_launch_args.py --rom xbox="D:\\Roms\\xbox\\Example Game.iso"
                                                  # override auto-picked ROM for one console
 
 A profile counts as:
@@ -37,8 +37,9 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-sys.path.insert(0, str(Path(__file__).parent / "bridge"))
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(PROJECT_ROOT / "bridge"))
 
 from bridge_config import ConfigMissingError, load_config
 from console_names import load_console_lookup, resolve_console_shortname

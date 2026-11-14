@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Troubleshooting guide
+    url: https://github.com/MAGOOSKEE/Community-iiSU-PC/blob/master/docs/troubleshooting.md
+    about: Diagnostics, logs and fixes for common problems. Worth a look before opening an issue.
+  - name: Problems with iiSU itself
+    url: https://github.com/iisu-network/iiSU
+    about: This project only patches iiSU. Bugs in iiSU's own interface belong with its developers.

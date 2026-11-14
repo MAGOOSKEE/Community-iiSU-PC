@@ -6,17 +6,18 @@ NAV_ITEMS/NAV_GROUPS/DANGER_NAV_ITEMS are the pure data the widgets read."""
 import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
 from PySide6.QtCore import QSize, Qt, Signal
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 import updater
 from bridge.ui.icon_font import icon
+from bridge.ui.widgets.brand_mark import BrandMark
 from shared.platform_compat import open_uri
-from shared.qt_theme import FONT_FAMILY_UI, Fonts, PANEL_BG, PANEL_BG_HOVER, RED, TEXT, TEXT_DIM
+from shared.qt_theme import Fonts, PANEL_BG, PANEL_BG_HOVER, RED, TEXT, TEXT_DIM
 
 SIDEBAR_WIDTH_EXPANDED = 200
 SIDEBAR_WIDTH_COLLAPSED = 56
 _ICON_SIZE = 20
+_HEADER_MARK_HEIGHT = 20
 
 
 def release_url(version: str | None) -> str:
@@ -104,10 +105,13 @@ class Sidebar(QWidget):
         root.setContentsMargins(0, 10, 0, 12)
         root.setSpacing(0)
 
-        header = QPushButton(" Community-iiSU-PC")
+        # The iiPC mark, not the name spelled out: it sits inside the
+        # button, to the right of the menu icon, and lets clicks through.
+        header = QPushButton("")
         header.setObjectName("NavButton")
-        header.setFont(Fonts.heading())
         header.setFlat(True)
+        header.setToolTip("Community-iiSU-PC")
+        header.setAccessibleName("Community-iiSU-PC, collapse or expand the sidebar")
         header.setIcon(icon("menu", TEXT, _ICON_SIZE))
         header.setIconSize(QSize(_ICON_SIZE, _ICON_SIZE))
         # Even padding so the hover highlight sits evenly around the title. It was 4px
@@ -115,6 +119,11 @@ class Sidebar(QWidget):
         # gap before the first page lives outside the button instead.
         header.setStyleSheet("text-align: left; padding: 10px 16px; font-weight: 600;")
         header.clicked.connect(self.toggle_clicked.emit)
+        self._header_mark = BrandMark(_HEADER_MARK_HEIGHT)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(16 + _ICON_SIZE + 14, 0, 0, 0)
+        header_layout.addWidget(self._header_mark)
+        header_layout.addStretch(1)
         self._header_button = header
         root.addWidget(header)
         root.addSpacing(4)
@@ -137,7 +146,7 @@ class Sidebar(QWidget):
         version = updater.get_installed_version() or "dev"
         self.version_label = ClickableLabel(f" {version}")
         self.version_label.setStyleSheet(f"color: {TEXT_DIM}; padding: 8px 16px 0 16px;")
-        self.version_label.setFont(QFont(FONT_FAMILY_UI, 8))
+        self.version_label.setFont(Fonts.ui(8))
         self.version_label.setCursor(Qt.CursorShape.PointingHandCursor)
         self.version_label.setToolTip("Open this version's release page")
         self.version_label.clicked.connect(lambda: open_uri(release_url(updater.get_installed_version())))
@@ -146,7 +155,7 @@ class Sidebar(QWidget):
     def _make_nav_button(self, key: str, glyph: str, label: str, danger: bool = False) -> QPushButton:
         btn = QPushButton(f" {_no_mnemonic(label)}")
         btn.setObjectName("DangerNavButton" if danger else "NavButton")
-        btn.setFont(QFont(FONT_FAMILY_UI, 10))
+        btn.setFont(Fonts.ui(10))
         btn.setIcon(icon(glyph, RED if danger else TEXT, _ICON_SIZE))
         btn.setIconSize(QSize(_ICON_SIZE, _ICON_SIZE))
         btn.setCheckable(True)
@@ -191,7 +200,7 @@ class Sidebar(QWidget):
     def set_expanded(self, expanded: bool) -> None:
         self._expanded = expanded
         self.setFixedWidth(SIDEBAR_WIDTH_EXPANDED if expanded else SIDEBAR_WIDTH_COLLAPSED)
-        self._header_button.setText(" Community-iiSU-PC" if expanded else "")
+        self._header_mark.setVisible(expanded)
         for key, _glyph, label in NAV_ITEMS + DANGER_NAV_ITEMS:
             self.nav_buttons[key].setText(f" {_no_mnemonic(label)}" if expanded else "")
         self.version_label.setVisible(expanded)
