@@ -38,16 +38,29 @@ class BrandMark(QWidget):
             # No picture, no widget: the layout closes up around it.
             self.setFixedSize(0, 0)
             return
-        ratio = self.devicePixelRatioF()
-        self._mark = source.scaledToHeight(
-            round(height * ratio), Qt.TransformationMode.SmoothTransformation
-        ).convertToFormat(QImage.Format.Format_ARGB32_Premultiplied)
-        self._mark.setDevicePixelRatio(ratio)
-        self.setFixedSize(QSize(round(self._mark.width() / ratio), height))
+        self._source = source
+        self._height = height
+        # Logical size comes from the artwork's aspect ratio, never from a
+        # scaled bitmap, so it can't drift with the display scale.
+        self.setFixedSize(QSize(round(source.width() * height / source.height()), height))
+        self._build_mark(self.devicePixelRatioF())
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
 
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
+
+    def _build_mark(self, ratio: float) -> None:
+        """The picture at the screen's real pixel size (logical size x scale,
+        e.g. 1.25 or 1.5 on a scaled Windows desktop). Rebuilt whenever the
+        scale changes, since the widget is created before it knows which
+        screen it will be on."""
+        self._ratio = ratio
+        target_w = round(self.width() * ratio)
+        target_h = round(self._height * ratio)
+        self._mark = self._source.scaled(
+            target_w, target_h, Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation
+        ).convertToFormat(QImage.Format.Format_ARGB32_Premultiplied)
+        self._mark.setDevicePixelRatio(ratio)
 
     def is_available(self) -> bool:
         return self._mark is not None
@@ -73,6 +86,10 @@ class BrandMark(QWidget):
         two strokes) is kept by multiplying it into the gradient."""
         mark = self._mark
         width, height = math.ceil(mark.width() * II_FRACTION), mark.height()
+        # Pixel work below is all in device pixels; the stored DPR would make
+        # Qt rescale these images by the display scale when drawing them.
+        mark = mark.copy()
+        mark.setDevicePixelRatio(1.0)
         strip = QImage(width, height, QImage.Format.Format_ARGB32_Premultiplied)
         strip.fill(Qt.GlobalColor.transparent)
 
@@ -99,12 +116,16 @@ class BrandMark(QWidget):
     def paintEvent(self, _event) -> None:
         if self._mark is None:
             return
+        ratio = self.devicePixelRatioF()
+        if ratio != self._ratio:
+            self._build_mark(ratio)
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         if not self._animated:
             painter.drawImage(0, 0, self._mark)
             return
         frame = self._mark.copy()
+        frame.setDevicePixelRatio(1.0)
         strip = self._gradient_ii()
         composer = QPainter(frame)
         composer.setCompositionMode(QPainter.CompositionMode.CompositionMode_Source)
