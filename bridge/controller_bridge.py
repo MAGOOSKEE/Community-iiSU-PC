@@ -30,25 +30,29 @@ BUTTON_NAME_TO_BIT via the Manager's Advanced page.
 
 Also separately watches (via the legacy winmm joystick API, not XInput,
 see detect_unmapped_sony_controller) for a DualSense/DS4 that's plugged in
-but NOT already appearing as an XInput device, and opens Steam for you
-when it sees one. There's no documented, stable API to flip Steam's
-"PlayStation Configuration Support" setting programmatically, it lives
-in Steam's own config.vdf under an internal key that isn't part of any
-public interface and could change or get silently reverted between Steam
-versions, so this deliberately doesn't try to write it directly. Opening
-Steam gets you one click away from Settings -> Controller -> General
-Controller Settings instead, where switching that on is a one-time,
-persistent choice covering every DualSense/DS4 from then on.
+but NOT already appearing as an XInput device, and shows a notice saying
+how to fix it when it sees one (bridge/ui/controller_notice_app.py). The
+notice has a "Don't show this again" box, remembered in
+CONTROLLER_NOTICE_STATE_PATH. There's no documented, stable API to flip
+Steam's "PlayStation Configuration Support" setting programmatically, it
+lives in Steam's own config.vdf under an internal key that isn't part of
+any public interface and could change or get silently reverted between
+Steam versions, so this deliberately doesn't try to write it directly. It
+doesn't open Steam either: the notice says where the setting is (Settings
+-> Controller) instead, where switching it on is a one-time, persistent
+choice covering every DualSense/DS4 from then on.
 """
 
 import ctypes
 import glob
+import json
 import os
 import struct
 import subprocess
 import sys
 import time
 from ctypes import wintypes
+from pathlib import Path
 
 from shared.platform_compat import subprocess_creationflags
 
@@ -224,41 +228,63 @@ def find_unmapped_sony_controllers() -> list[str]:
     return found
 
 
-def find_steam_exe() -> str | None:
-    """Steam's own install path: the registry key it writes itself on
-    Windows install (more reliable than guessing a Program Files
-    location, since Steam can be installed anywhere the person chose),
-    or just `steam` on PATH on Linux (Flatpak/native Steam installs both
-    put a launcher there)."""
-    if sys.platform == "win32":
-        import winreg
-        try:
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam") as key:
-                return winreg.QueryValueEx(key, "SteamExe")[0]
-        except OSError:
-            return None
-    import shutil
-    return shutil.which("steam") or shutil.which("steam-runtime")
+# Whether the "this controller needs Steam Input" notice has been switched
+# off for good. Its own small file rather than a config.json key: the notice
+# runs as a separate process while the Manager may be open with its own copy
+# of config.json in memory, and the Manager's next Save would write that
+# copy back over the key.
+CONTROLLER_NOTICE_STATE_PATH = Path(__file__).parent / ".controller_notice.json"
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 
-def open_steam_for_controller_setup(controller_name: str) -> None:
-    """Opens Steam, just the client, no documented way to jump straight
-    to Controller settings (see this module's docstring for why this
-    doesn't try to flip the underlying setting itself), so a detected
-    DualSense/DS4 that isn't already working as an XInput device is one
-    click away from being fixed."""
-    steam_exe = find_steam_exe()
-    if steam_exe is None:
-        print(
-            f"[controller] {controller_name} detected, but Steam doesn't appear to be installed, install it and "
-            "enable \"PlayStation Configuration Support\" under Settings > Controller for it to work with iiSU"
-        )
-        return
-    print(
-        f"[controller] {controller_name} detected, opening Steam. Enable \"PlayStation Configuration Support\" "
-        "under Settings > Controller > General Controller Settings (one-time, covers every DualSense/DS4 from then on)"
+def controller_notice_dismissed() -> bool:
+    """True once "Don't show this again" has been ticked on the notice."""
+    try:
+        state = json.loads(CONTROLLER_NOTICE_STATE_PATH.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    return isinstance(state, dict) and state.get("dismissed") is True
+
+
+def dismiss_controller_notice() -> None:
+    """Remembers that the notice is never to be shown again."""
+    CONTROLLER_NOTICE_STATE_PATH.write_text(json.dumps({"dismissed": True}) + "\n", encoding="utf-8")
+
+
+def controller_notice_message(controller_name: str) -> str:
+    return (
+        f"{controller_name} is connected, but iiSU's menus can't read it directly.\n\n"
+        "To use it, open Steam and turn on PlayStation controller support under "
+        "Settings > Controller. That is a one-time change that covers every DualSense and "
+        "DualShock 4 from then on."
     )
-    subprocess.Popen([steam_exe], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def notify_unmapped_sony_controller(controller_name: str) -> bool:
+    """Tells the person that a DualSense/DS4 which isn't working as an
+    XInput device needs Steam Input, with a notice rather than by opening
+    Steam (see this module's docstring). Returns whether a notice was
+    started: not when it has been switched off for good, or it couldn't
+    start. Detached and fire-and-forget, a notice failing to appear is
+    never a reason to disturb the controller loop."""
+    print(
+        f"[controller] {controller_name} detected. Enable PlayStation controller support in Steam under "
+        "Settings > Controller for it to work with iiSU (one-time, covers every DualSense/DS4 from then on)"
+    )
+    if controller_notice_dismissed():
+        return False
+    try:
+        subprocess.Popen(
+            [sys.executable, "-m", "bridge.ui.controller_notice_app", controller_name],
+            cwd=str(_PROJECT_ROOT),
+            creationflags=CREATE_NO_WINDOW,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError:
+        return False
+    return True
 
 
 class XinputGamepad(ctypes.Structure):
@@ -661,17 +687,17 @@ class ControllerBridge:
     def _check_sony_controllers(self, now: float) -> None:
         """Throttled to once every SONY_CONTROLLER_CHECK_INTERVAL, winmm
         device enumeration is cheap but pointless to redo at POLL_HZ.
-        Prompts (opens Steam) once per distinct controller name while it
+        Shows the notice once per distinct controller name while it
         stays plugged in and un-translated, forgetting it once it
         disappears so unplugging and replugging, or a later session,
-        since this state doesn't persist anywhere, prompts again if it's
-        still not fixed."""
+        shows it again if it's still not fixed, unless the notice's
+        "Don't show this again" box was ticked."""
         if now < self._sony_controller_check_due:
             return
         self._sony_controller_check_due = now + SONY_CONTROLLER_CHECK_INTERVAL
         found = set(find_unmapped_sony_controllers())
         for name in found - self._sony_controllers_prompted:
-            open_steam_for_controller_setup(name)
+            notify_unmapped_sony_controller(name)
         self._sony_controllers_prompted = found
 
     def run(self) -> None:

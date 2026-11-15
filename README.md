@@ -83,7 +83,7 @@ Out of the box, consoles are mapped to DuckStation, PCSX2, RPCS3, PPSSPP, Vita3K
 
 ## Getting help
 
-Run **Backup & Diagnostics > Diagnostics** in the Manager first: it checks the install without changing anything. If that doesn't settle it, [open an issue](https://github.com/MAGOOSKEE/Community-iiSU-PC/issues/new/choose) and attach the logs the form asks for. This is alpha software, so reports are welcome.
+Run **Backup & Tools > Diagnostics** in the Manager first: it checks the install without changing anything. If that doesn't settle it, [open an issue](https://github.com/MAGOOSKEE/Community-iiSU-PC/issues/new/choose) and attach the logs the form asks for. This is alpha software, so reports are welcome.
 
 ## Credits
 

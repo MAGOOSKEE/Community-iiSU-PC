@@ -19,7 +19,7 @@ Double-click the **desktop shortcut** to start iiSU directly, or open the Manage
 
 On every start, your ROM library is re-synced into the VM automatically. iiSU still needs to notice new games: hit "Rescan full library" in its Library settings.
 
-Community-iiSU-PC uses a quick resume when nothing relevant has changed since the last start. It only cold-boots (a bit slower) on the very first start, or when something that changes the VM itself has changed: display, VM profile, USB passthrough, the AVD, or switching between a normal and a headless start. Adding ROMs or changing PC emulator mappings doesn't need a cold boot. The Home page tells you which one the next start will be.
+Community-iiSU-PC uses a quick resume when nothing relevant has changed since the last start. It only cold-boots (a bit slower) on the very first start, or when something that changes the VM itself has changed: display, VM profile, USB passthrough, the AVD, or switching between a normal and a headless start. Adding ROMs or changing PC emulator mappings doesn't need a cold boot. Hover over the ▾ next to Start on the Home page to see which one the next start will be.
 
 ## The Manager
 
@@ -33,21 +33,23 @@ One window, navigated with the sidebar.
 | **Library** | **ROM Directory** (your host ROM folder), **Media Library** (check/restore saved media), **Android Storage** (browse and manage the VM's shared storage over ADB). |
 | **Games** | **Console** (every detected ROM, grouped by multi-disc playlist) and **PC** (native apps and URI launches). |
 | **Settings** | **Display** (the VM's resolution and DPI), **VM Profiles**, **PC Emulators** (which PC emulator each console launches, downloading emulators, reinstalling iiSU's redirector apps), **Storage**, and **Advanced**. |
-| **Backup & Diagnostics** | **Backup & Restore** and **Diagnostics**. |
+| **Backup & Tools** | **Backup & Restore** and **Diagnostics**. |
 | **Updates** | Community-iiSU-PC and iiSU updates. |
 | **Credits** | Who built this and how. |
 | **Uninstall** | Below a divider at the bottom of the sidebar. |
 
 ### Home
 
-The ▾ next to Start has shortcuts to your ROMs and logs folders, **Recreate Shortcut** and **Clear Resume State**.
+The ▾ next to Start has shortcuts to your ROMs and logs folders, **Recreate Shortcut**, **Add to Steam** and **Remove from Steam**, a **Show Logs** tick box and **Clear Resume State**. Hovering over it says whether the next start will be a quick resume or a cold boot, and why.
+
+- **Show Logs** shows the log of what Start and Stop are doing at the bottom of the Home page. It stays the way you left it.
 
 - **Recreate Shortcut**, like the end of onboarding, asks whether the desktop shortcut that starts iiSU shows iiSU's own icon (taken from your iiSU APK) or Community-iiSU-PC's iiPC icon. The Manager has its own icon either way. Onboarding's also lets you go without a desktop shortcut.
 - **Boot Headless (no window)** boots the VM without its window or the launch bridge. A headless boot always cold boots, ignores and clears the saved resume state, and on Windows uses the host GPU with audio off, because a windowless emulator that renders in software crashes shortly after Android boots. Its Ready means Android has finished booting: the start waits on the VM for the boot animation to end, then watches the emulator for 10 more seconds, and if it dies it says so with the exit code and retries. It isn't available with Waydroid, which has no window to leave out: the menu item is greyed out and a headless start request just starts normally.
 
 ### Settings > Advanced
 
-AVD name, bridge port, hotkeys, the volume Android is set to when iiSU starts, **Add to Steam**, and debugging options such as "Show console windows".
+AVD name, bridge port, hotkeys, the volume Android is set to when iiSU starts, and debugging options such as "Show console windows".
 
 A new Android VM starts at about half volume, so by default each start sets it to 100%. Pick another level, or untick the box to leave the volume wherever it was last set inside the VM.
 
@@ -68,6 +70,8 @@ By default, **Escape** controls game quitting and shutdown:
 The key only acts while iiSU, or the game or emulator it started, is the window in front, so pressing Escape in a browser or anything else never quits your game or shuts the VM down.
 
 Pressing **Select+Start** together on a controller does the same thing on either platform, and the chord is remappable to any combination of buttons. Escape itself is rebindable in **Settings > Advanced** on both platforms.
+
+On Windows, a DualSense or DualShock 4 plugged in without Steam Input (or another tool) translating it can't drive iiSU's menus. When that happens a small notice says so and where to turn it on in Steam (**Settings > Controller**). Tick **Don't show this again** on the notice and it never appears again.
 
 On Linux, Alt+F4, Ctrl+Q, and Ctrl+Alt+X also force a full shutdown, and Ctrl+Shift+Esc mirrors an Escape tap. These four aren't currently rebindable.
 
@@ -136,8 +140,8 @@ Every profile also sets `QEMU_AUDIO_TIMER_PERIOD=1000`, which stops the emulator
 
 ## Steam and Steam Deck
 
-**Settings > Advanced > Add to Steam** adds Community-iiSU-PC to Steam as a non-Steam game (on Windows and Linux, native or Flatpak Steam), so you can start it from Steam's library, Big Picture, or a Steam Deck's Game Mode.
+**Add to Steam**, in the ▾ menu next to Start on the Home page, adds Community-iiSU-PC to Steam as a non-Steam game (on Windows and Linux, native or Flatpak Steam), so you can start it from Steam's library, Big Picture, or a Steam Deck's Game Mode.
 
-Close Steam first: it rewrites its shortcut list when it exits and would undo the change, so the button refuses while Steam is running. The previous list is kept as a `.bak` next to it, and **Remove from Steam** undoes it. The shortcut starts the VM and bridge and then ends, so Steam shows it as stopped while iiSU keeps running.
+Close Steam first: it rewrites its shortcut list when it exits and would undo the change, so it refuses while Steam is running. The previous list is kept as a `.bak` next to it, and **Remove from Steam** undoes it. The shortcut starts the VM and bridge and then ends, so Steam shows it as stopped while iiSU keeps running.
 
 Steam Deck specifics are on the [Linux page](linux.md#steam-deck).

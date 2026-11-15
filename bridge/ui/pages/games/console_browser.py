@@ -34,6 +34,16 @@ from shared.qt_theme import RED, TEXT_DIM
 GAMES_CONSOLE_ALL_SYSTEMS = "All Systems"
 
 
+def _disc_separation_label(row: dict) -> str:
+    """The Disc Separation column: "Separate" for a playlist whose discs
+    are kept as their own entries, "Combined" for one that syncs as a
+    single entry, and nothing for a plain file, which has no discs to
+    combine."""
+    if row["excepted"]:
+        return "Separate"
+    return "Combined" if row["is_playlist"] else ""
+
+
 class ConsoleBrowserPage(PageBase):
     def __init__(self, window, parent=None):
         super().__init__(parent, scrollable_body=False)
@@ -92,7 +102,7 @@ class ConsoleBrowserPage(PageBase):
         self.body_layout.addWidget(note)
 
         self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["Name", "Console", "Type", "File", "Discs kept separate"])
+        self.tree.setHeaderLabels(["Name", "Console", "Type", "File", "Disc Separation"])
         self.tree.setRootIsDecorated(False)
         self.tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.tree.setColumnWidth(0, 220)
@@ -204,7 +214,7 @@ class ConsoleBrowserPage(PageBase):
             has_override = game_overrides.get_override(self.window.config_data, PurePosixPath(row["rel"]).name) is not None
             item = QTreeWidgetItem([
                 f"{row['name']}  (custom settings)" if has_override else row["name"],
-                row["shortname"], type_label, row["rel"], "Yes" if row["excepted"] else "",
+                row["shortname"], type_label, row["rel"], _disc_separation_label(row),
             ])
             item.setData(0, Qt.ItemDataRole.UserRole, row["exception_key"])
             if row["hidden_from_iisu"]:
@@ -291,7 +301,7 @@ class ConsoleBrowserPage(PageBase):
     def _remove_exceptions(self) -> None:
         selected = [row for row in self._selected_rows() if row["excepted"]]
         if not selected:
-            QMessageBox.information(self, "Console Games", 'Select one or more "Discs kept separate" entries first.')
+            QMessageBox.information(self, "Console Games", 'Select one or more entries whose Disc Separation is "Separate" first.')
             return
         exceptions = sync_library.load_dedupe_exceptions()
         exceptions.difference_update(row["exception_key"] for row in selected)

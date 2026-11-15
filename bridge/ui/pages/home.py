@@ -4,6 +4,7 @@ Qt already marshals cross-thread signal delivery on its own, see
 bridge/ui/workers/{task_runner,log_stream}.py's docstrings."""
 
 import os
+import random
 import sys
 import traceback
 from pathlib import Path
@@ -47,6 +48,27 @@ from shared.qt_theme import Fonts, INPUT_BG, LOG_TEXT, TEXT_DIM
 STATUS_POLL_INTERVAL_MS = 2000
 HERO_LOGO_HEIGHT = 72
 
+# The line under the name. A different one each time the Manager opens.
+TAGLINES = (
+    "It's game time!",
+    "Android frontend, real PC emulators.",
+    "What are we playing today?",
+    "Ready when you are.",
+    "Pick up where you left off.",
+    "Every console, one library.",
+    "Controllers at the ready.",
+    "Press Start to play.",
+    "One more game couldn't hurt.",
+    "Your library missed you.",
+)
+
+STEAM_SHORTCUT_NOTE = (
+    "Adds Community-iiSU-PC as a non-Steam game, for Steam's library, Big Picture or Game Mode.\n"
+    "Close Steam first, it rewrites this list on exit. The shortcut starts the VM and bridge, then\n"
+    "ends, so Steam shows it stopped while iiSU keeps running."
+)
+LAUNCH_OPTIONS_TOOLTIP = "Launch options"
+
 
 class HomePage(PageBase):
     def __init__(self, window, parent=None):
@@ -72,10 +94,10 @@ class HomePage(PageBase):
 
         # One centred column: who this is (mark, name, tagline), the one
         # thing the page is for (start/stop iiSU), then what is running.
-        # Resume state and log detail stay out of the way as a single dim
-        # line, an Advanced Launch Options menu, and a collapsed-by-default
-        # log drawer, so the page reads as one big button rather than a
-        # control panel.
+        # Everything else stays out of the way in the menu next to the
+        # button: what the next start will be is its tooltip, and the log
+        # drawer is a tick box in it, so the page reads as one big button
+        # rather than a control panel.
         center_col = QWidget()
         center_layout = QVBoxLayout(center_col)
         center_layout.setContentsMargins(0, 0, 0, 0)
@@ -94,11 +116,11 @@ class HomePage(PageBase):
         center_layout.addWidget(name_label)
         center_layout.addSpacing(4)
 
-        tagline_label = QLabel("Android frontend, real PC emulators.")
-        tagline_label.setFont(Fonts.ui(11))
-        tagline_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        tagline_label.setStyleSheet(f"color: {TEXT_DIM};")
-        center_layout.addWidget(tagline_label)
+        self.tagline_label = QLabel(random.choice(TAGLINES))
+        self.tagline_label.setFont(Fonts.ui(11))
+        self.tagline_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        self.tagline_label.setStyleSheet(f"color: {TEXT_DIM};")
+        center_layout.addWidget(self.tagline_label)
         center_layout.addSpacing(16)
 
         divider = GradientDivider()
@@ -141,7 +163,9 @@ class HomePage(PageBase):
         self.advanced_button = QPushButton("▾")  # small dropdown caret
         self.advanced_button.setObjectName("HomeCaret")
         self.advanced_button.setFixedSize(44, 58)
-        self.advanced_button.setToolTip("Advanced launch options")
+        # Says what the next start will be (see _refresh_resume_reason).
+        self.advanced_button.setToolTip(LAUNCH_OPTIONS_TOOLTIP)
+        self.advanced_button.setAccessibleName("Launch options")
         self.advanced_button.clicked.connect(self._show_advanced_menu)
         button_layout.addWidget(self.advanced_button)
 
@@ -169,14 +193,8 @@ class HomePage(PageBase):
         center_layout.addWidget(self.status_row, 0, Qt.AlignmentFlag.AlignHCenter)
         center_layout.addSpacing(14)
 
-        # One line each, cut short with the full text in the tooltip: a wrapped line
+        # One line, cut short with the full text in the tooltip: a wrapped line
         # here grew taller than the layout allowed for and drew over the button.
-        self.resume_reason_label = ElidedLabel(width=520)
-        self.resume_reason_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        self.resume_reason_label.setStyleSheet(f"color: {TEXT_DIM};")
-        center_layout.addWidget(self.resume_reason_label, 0, Qt.AlignmentFlag.AlignHCenter)
-        center_layout.addSpacing(6)
-
         self.stage_label = ElidedLabel(width=520)
         self.stage_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self.stage_label.setStyleSheet(f"color: {TEXT_DIM};")
@@ -185,15 +203,11 @@ class HomePage(PageBase):
         self.body_layout.addWidget(center_col, 0, Qt.AlignmentFlag.AlignHCenter)
         self.body_layout.addStretch(3)
 
-        # Collapsed by default: the log drawer, not a permanently visible
-        # console. _run_guarded's redirector keeps appending to it whether
-        # it's shown or not, so opening it mid-run shows history, not just
-        # new output.
-        self.logs_toggle_button = QPushButton("Show Logs ▾")
-        self.logs_toggle_button.setObjectName("ghost")
-        self.logs_toggle_button.clicked.connect(self._toggle_logs_drawer)
-        self.body_layout.addWidget(self.logs_toggle_button, 0, Qt.AlignmentFlag.AlignHCenter)
-
+        # Hidden by default: the log drawer, not a permanently visible
+        # console, switched on with the Show Logs tick box in the menu next
+        # to the button. _run_guarded's redirector keeps appending to it
+        # whether it's shown or not, so opening it mid-run shows history,
+        # not just new output.
         self.log_drawer = Card()
         log_layout = QVBoxLayout(self.log_drawer)
         log_layout.setContentsMargins(10, 10, 10, 10)
@@ -203,7 +217,8 @@ class HomePage(PageBase):
         self.log_text.setStyleSheet(f"background-color: {INPUT_BG}; color: {LOG_TEXT}; border: none;")
         self.log_text.setFixedHeight(220)
         log_layout.addWidget(self.log_text)
-        self.log_drawer.setVisible(False)
+        self._logs_shown = bool((getattr(self.window, "config_data", None) or {}).get("home_show_logs", False))
+        self.log_drawer.setVisible(self._logs_shown)
         self.body_layout.addWidget(self.log_drawer)
 
         self._log_redirector = LogStreamRedirector()
@@ -235,7 +250,12 @@ class HomePage(PageBase):
         self._background.setGeometry(self.rect())
 
     def _show_advanced_menu(self) -> None:
+        menu = self._build_advanced_menu()
+        menu.exec(self.advanced_button.mapToGlobal(self.advanced_button.rect().bottomRight()))
+
+    def _build_advanced_menu(self) -> QMenu:
         menu = QMenu(self)
+        menu.setToolTipsVisible(True)
         boot_headless = menu.addAction("Boot Headless (no window)", self._start_headless)
         # Only meaningful when nothing is running yet.
         boot_headless.setEnabled(
@@ -247,13 +267,28 @@ class HomePage(PageBase):
         menu.addAction("Open Logs Folder", self._open_logs)
         menu.addAction("Recreate Shortcut", self._recreate_desktop_shortcut)
         menu.addSeparator()
+        # Only once there is an install for the Steam shortcut to start.
+        add_to_steam = menu.addAction("Add to Steam", self._add_to_steam)
+        add_to_steam.setToolTip(STEAM_SHORTCUT_NOTE)
+        add_to_steam.setEnabled(self.window.configured)
+        remove_from_steam = menu.addAction("Remove from Steam", self._remove_from_steam)
+        remove_from_steam.setToolTip("Takes the non-Steam game Add to Steam made back out. Close Steam first.")
+        remove_from_steam.setEnabled(self.window.configured)
+        menu.addSeparator()
+        show_logs = menu.addAction("Show Logs")
+        show_logs.setCheckable(True)
+        show_logs.setChecked(self._logs_shown)
+        show_logs.setToolTip("Shows the log of what Start and Stop are doing at the bottom of this page.")
+        show_logs.toggled.connect(self.set_logs_shown)
+        menu.addSeparator()
         menu.addAction("Clear Resume State", self._clear_resume_state)
-        menu.exec(self.advanced_button.mapToGlobal(self.advanced_button.rect().bottomRight()))
+        return menu
 
-    def _toggle_logs_drawer(self) -> None:
-        showing = not self.log_drawer.isVisible()
-        self.log_drawer.setVisible(showing)
-        self.logs_toggle_button.setText("Hide Logs ▴" if showing else "Show Logs ▾")
+    def set_logs_shown(self, shown: bool) -> None:
+        """Shows or hides the log drawer, and remembers it for next time."""
+        self._logs_shown = shown
+        self.log_drawer.setVisible(shown)
+        self.window.set_home_show_logs(shown)
 
     # == Home state ==
 
@@ -274,19 +309,20 @@ class HomePage(PageBase):
         self._refresh_resume_reason()
 
     def _refresh_resume_reason(self) -> None:
+        """What the next start will be, as the tooltip of the menu button
+        next to Start."""
+        self.advanced_button.setToolTip(self._next_start_text())
+
+    def _next_start_text(self) -> str:
         if not self.window.configured:
-            self.resume_reason_label.setText("")
-            return
+            return LAUNCH_OPTIONS_TOOLTIP
         reasons = start_iisu_pc.cold_boot_reasons(self.window.config_data)
         if not reasons:
-            text, tooltip = "Next start: quick resume", ""
-        elif len(reasons) == 1:
-            text, tooltip = f"Next start: cold boot ({reasons[0]})", ""
-        else:
-            # The full list runs off the page, so it goes in the tooltip.
-            text, tooltip = f"Next start: cold boot ({len(reasons)} things changed)", "\n".join(reasons)
-        self.resume_reason_label.setText(text)
-        self.resume_reason_label.setToolTip(tooltip)
+            return "Next start: quick resume"
+        if len(reasons) == 1:
+            return f"Next start: cold boot ({reasons[0]})"
+        # One reason per line: together they are too long for one.
+        return "\n".join([f"Next start: cold boot ({len(reasons)} things changed)", *reasons])
 
     def _clear_resume_state(self) -> None:
         reply = QMessageBox.question(
@@ -464,6 +500,40 @@ class HomePage(PageBase):
     def _on_shortcut_error(self, message: str) -> None:
         self.advanced_button.setEnabled(True)
         QMessageBox.critical(self, "Shortcut", f"Couldn't create the desktop shortcut:\n{message}")
+
+    # == Steam shortcut ==
+
+    def _add_to_steam(self) -> None:
+        from bridge.services import steam_shortcuts_service as steam
+
+        try:
+            results = steam.add_to_steam()
+        except steam.SteamShortcutError as e:
+            QMessageBox.warning(self, "Add to Steam", str(e))
+            return
+        except OSError as e:
+            QMessageBox.critical(self, "Add to Steam", f"Couldn't write Steam's shortcut list:\n\n{e}")
+            return
+        words = {"added": "Added", "updated": "Updated"}
+        summary = "\n".join(f"{words[outcome]}: {path}" for path, outcome in results)
+        QMessageBox.information(
+            self, "Add to Steam",
+            f"{summary}\n\nLook for \"{steam.SHORTCUT_NAME}\" in Steam's library. "
+            "The old shortcut list was saved as a .bak file.",
+        )
+
+    def _remove_from_steam(self) -> None:
+        from bridge.services import steam_shortcuts_service as steam
+
+        try:
+            changed = steam.remove_from_steam()
+        except steam.SteamShortcutError as e:
+            QMessageBox.warning(self, "Remove from Steam", str(e))
+            return
+        except OSError as e:
+            QMessageBox.critical(self, "Remove from Steam", f"Couldn't write Steam's shortcut list:\n\n{e}")
+            return
+        QMessageBox.information(self, "Remove from Steam", "Removed it from Steam." if changed else "It wasn't in Steam's shortcut list.")
 
     # == Status polling (called by ManagerWindow's shared timer) ==
 

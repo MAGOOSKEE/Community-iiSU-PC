@@ -13,11 +13,11 @@
 
 ## Start here: Diagnostics
 
-Run the Manager's **Backup & Diagnostics > Diagnostics** page first. It is a non-destructive check of the installation, configuration, Android VM/ADB, bridge, PC apps, Steam integration, and logs, and its findings usually say what to do next.
+Run the Manager's **Backup & Tools > Diagnostics** page first. It is a non-destructive check of the installation, configuration, Android VM/ADB, bridge, PC apps, Steam integration, and logs, and its findings usually say what to do next.
 
 ## Logs
 
-Open them from the Manager's Home page: **Show Logs** for the drawer, or the ▾ next to Start for the logs folder. They all live in `bridge/`.
+Open them from the ▾ next to Start on the Manager's Home page: tick **Show Logs** for the drawer, or choose **Open Logs Folder**. They all live in `bridge/`.
 
 | File | Covers |
 |---|---|

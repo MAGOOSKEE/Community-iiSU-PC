@@ -152,35 +152,123 @@ class ManagerWindowSmokeTests(unittest.TestCase):
         window = self._window()
         page = window.display_page
         combo = page.resolution_combo
-        self.assertEqual(combo.currentIndex(), -1, "1080 x 1920 is not one of the presets")
+        self.assertEqual(combo.currentText(), "Custom", "1080 x 1920 is not one of the presets")
         page.width_edit.setText("1600")
         page.height_edit.setText("900")
         self.assertEqual(combo.currentText(), "1600 x 900")
         page.width_edit.setText("1234")
-        self.assertEqual(combo.currentIndex(), -1)
+        self.assertEqual(combo.currentText(), "Custom")
         combo.setCurrentIndex(combo.findText("2560 x 1440"))
         self.assertEqual((page.width_edit.text(), page.height_edit.text()), ("2560", "1440"))
+        combo.setCurrentIndex(combo.findText("Custom"))
+        self.assertEqual((page.width_edit.text(), page.height_edit.text()), ("2560", "1440"), "Custom changes nothing")
+        self.assertEqual(combo.currentText(), "Custom")
 
-    def test_the_next_start_line_stays_short_when_many_things_changed(self):
+    def test_the_menu_button_says_what_the_next_start_will_be(self):
         import bridge.ui.pages.home as home
 
         self.config_path.write_text(json.dumps(self.config), encoding="utf-8")
         window = self._window()
-        label = window.home_page.resume_reason_label
+        button = window.home_page.advanced_button
+        self.assertFalse(hasattr(window.home_page, "resume_reason_label"), "no longer a line on the page")
         many = ["the display settings changed", "the ROM library changed", "the emulator profile changed"]
         with unittest.mock.patch.object(home.start_iisu_pc, "describe_boot_fingerprint_diff", return_value=many):
             window.home_page.refresh_resume_reason()
-        self.assertEqual(label.text(), "Next start: cold boot (3 things changed)")
-        self.assertEqual(label.toolTip().splitlines(), many)
+        self.assertEqual(button.toolTip().splitlines(), ["Next start: cold boot (3 things changed)", *many])
         with unittest.mock.patch.object(home.start_iisu_pc, "describe_boot_fingerprint_diff", return_value=many[:1]):
             window.home_page.refresh_resume_reason()
-        self.assertEqual(label.text(), "Next start: cold boot (the display settings changed)")
-        self.assertEqual(label.toolTip(), "")
+        self.assertEqual(button.toolTip(), "Next start: cold boot (the display settings changed)")
         # Quick resume also needs a complete snapshot, which a CI runner has none of.
         with unittest.mock.patch.object(home.start_iisu_pc, "describe_boot_fingerprint_diff", return_value=[]), \
                 unittest.mock.patch.object(home.start_iisu_pc, "has_complete_quickboot_snapshot", return_value=True):
             window.home_page.refresh_resume_reason()
-        self.assertEqual(label.text(), "Next start: quick resume")
+        self.assertEqual(button.toolTip(), "Next start: quick resume")
+
+    def test_the_menu_next_to_start_holds_steam_and_the_show_logs_tick_box(self):
+        self.config_path.write_text(json.dumps(self.config), encoding="utf-8")
+        window = self._window()
+        page = window.home_page
+        self.assertFalse(hasattr(page, "logs_toggle_button"), "no Show Logs button on the page itself")
+        self.assertFalse(hasattr(window.advanced_page, "_add_to_steam"), "Steam moved off Settings > Advanced")
+        self.assertTrue(page.log_drawer.isHidden())
+
+        menu = page._build_advanced_menu()
+        self.addCleanup(menu.deleteLater)
+        actions = {action.text(): action for action in menu.actions() if action.text()}
+        for name in ("Add to Steam", "Remove from Steam"):
+            with self.subTest(name=name):
+                self.assertTrue(actions[name].isEnabled())
+        show_logs = actions["Show Logs"]
+        self.assertTrue(show_logs.isCheckable())
+        self.assertFalse(show_logs.isChecked())
+
+        was_dirty = window._is_settings_dirty()
+        show_logs.setChecked(True)
+        self.assertFalse(page.log_drawer.isHidden())
+        self.assertIs(json.loads(self.config_path.read_text(encoding="utf-8"))["home_show_logs"], True)
+        self.assertNotIn("home_show_logs", window._gather_settings(silent=True).keys() - window.config_data.keys())
+        self.assertEqual(window._is_settings_dirty(), was_dirty, "remembering it is not an unsaved edit")
+
+        # Still ticked in a menu opened later, and in a Manager opened later.
+        again = page._build_advanced_menu()
+        self.addCleanup(again.deleteLater)
+        self.assertTrue({a.text(): a for a in again.actions()}["Show Logs"].isChecked())
+        self.assertFalse(self._window().home_page.log_drawer.isHidden())
+
+        show_logs.setChecked(False)
+        self.assertTrue(page.log_drawer.isHidden())
+        self.assertIs(json.loads(self.config_path.read_text(encoding="utf-8"))["home_show_logs"], False)
+
+    def test_the_tagline_is_one_of_the_list(self):
+        import bridge.ui.pages.home as home
+
+        window = self._window()
+        self.assertIn(window.home_page.tagline_label.text(), home.TAGLINES)
+        self.assertIn("It's game time!", home.TAGLINES)
+
+    def test_the_collapsed_sidebar_shows_the_mark_and_the_short_version(self):
+        import bridge.ui.sidebar as sidebar
+
+        self.assertEqual(sidebar.short_version("v0.6.0-alpha"), "v0.6.0")
+        self.assertEqual(sidebar.short_version("dev"), "dev")
+        with unittest.mock.patch.object(sidebar.updater, "get_installed_version", return_value="v0.6.0-alpha"):
+            window = self._window()
+        bar = window.sidebar
+        labels = {key: label for key, _glyph, label in sidebar.NAV_ITEMS}
+        self.assertEqual(labels["backup_diagnostics"], "Backup & Tools")
+        self.assertEqual(bar._header_title.text(), "MANAGER")
+        self.assertFalse(bar._header_title.isHidden())
+        self.assertEqual(bar.version_label.text().strip(), "v0.6.0-alpha")
+
+        bar.set_expanded(False)
+        self.assertEqual(bar.maximumWidth(), sidebar.SIDEBAR_WIDTH_COLLAPSED)
+        self.assertTrue(bar._header_title.isHidden())
+        self.assertFalse(bar.version_label.isHidden(), "the version stays, shortened")
+        self.assertEqual(bar.version_label.text(), "v0.6.0")
+        if bar._header_mark.is_available():
+            self.assertFalse(bar._header_mark.isHidden(), "the mark is the collapsed header")
+            self.assertTrue(bar._header_button.icon().isNull(), "in place of the menu icon")
+
+        bar.set_expanded(True)
+        self.assertFalse(bar._header_title.isHidden())
+        self.assertFalse(bar._header_button.icon().isNull())
+        self.assertEqual(bar.version_label.text().strip(), "v0.6.0-alpha")
+
+    def test_the_controller_notice_remembers_dont_show_again(self):
+        import controller_bridge
+        import bridge.ui.controller_notice_app as notice
+
+        state_path = Path(self._tmp.name) / ".controller_notice.json"
+        with unittest.mock.patch.object(controller_bridge, "CONTROLLER_NOTICE_STATE_PATH", state_path):
+            box = notice.build_notice("DualSense Wireless Controller")
+            self.addCleanup(box.deleteLater)
+            self.assertIn("DualSense Wireless Controller", box.text())
+            self.assertIs(box.checkBox(), box.dont_show_again)
+            notice.finish(box)
+            self.assertFalse(controller_bridge.controller_notice_dismissed(), "closed without ticking the box")
+            box.dont_show_again.setChecked(True)
+            notice.finish(box)
+            self.assertTrue(controller_bridge.controller_notice_dismissed())
 
     def test_long_status_lines_never_overlap_the_start_button(self):
         from PySide6.QtCore import QRect
@@ -189,8 +277,7 @@ class ManagerWindowSmokeTests(unittest.TestCase):
         window = self._window()
         window.show_page("home")
         page = window.home_page
-        # The two lines that cut the button in half, at the window's smallest size.
-        page.resume_reason_label.setText("Next start: cold boot (the boot mode (window or headless) changed)")
+        # The line that cut the button in half, at the window's smallest size.
         page.stage_label.setText("Done in 4s. Bridge and Android VM should both be fully stopped now. " * 2)
         window.resize(window.minimumSizeHint())
         window.show()
@@ -201,10 +288,9 @@ class ManagerWindowSmokeTests(unittest.TestCase):
 
         button = rect(page.primary_button)
         self.assertGreaterEqual(button.height(), page.primary_button.minimumHeight())
-        for label in (page.resume_reason_label, page.stage_label):
-            with self.subTest(label=label.text()[:20]):
-                self.assertFalse(rect(label).intersects(button))
-                self.assertEqual(label.height(), label.fontMetrics().height(), "one line, never wrapped")
+        label = page.stage_label
+        self.assertFalse(rect(label).intersects(button))
+        self.assertEqual(label.height(), label.fontMetrics().height(), "one line, never wrapped")
         self.assertIn("Bridge and Android VM", page.stage_label.toolTip(), "the full text is in the tooltip")
 
     def test_an_iisu_on_an_older_patch_must_be_repatched_before_it_starts(self):

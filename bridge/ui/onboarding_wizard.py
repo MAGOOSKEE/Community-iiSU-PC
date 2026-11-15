@@ -48,7 +48,7 @@ from bridge.ui.dialogs.emulator_dialog import EmulatorDialog
 from bridge.ui.dialogs.emulator_download_dialog import EmulatorDownloadDialog
 from bridge.ui.dialogs.icon_choice_dialog import IconChoiceDialog
 from bridge.ui.widgets.card import Card
-from bridge.ui.pages.settings.display import REFRESH_RATE_PRESETS, RESOLUTION_PRESETS
+from bridge.ui.pages.settings.display import REFRESH_RATE_PRESETS, RESOLUTION_CUSTOM, RESOLUTION_PRESETS
 from bridge.ui.widgets.display_preview import DisplayPreview
 from bridge.ui.widgets.gradient_divider import GradientDivider
 from bridge.ui.workers.task_runner import run_in_background
@@ -579,8 +579,8 @@ class DisplayStep(QWidget):
         grid.addWidget(QLabel("Resolution:"), 0, 0)
         resolution_row = QHBoxLayout()
         self.resolution_combo = QComboBox()
-        self.resolution_combo.addItems(RESOLUTION_PRESETS)
-        self.resolution_combo.setCurrentIndex(-1)
+        self.resolution_combo.addItems(RESOLUTION_PRESETS + [RESOLUTION_CUSTOM])
+        self.resolution_combo.setCurrentIndex(self.resolution_combo.findText(RESOLUTION_CUSTOM))
         self.resolution_combo.currentTextChanged.connect(self._apply_resolution_preset)
         resolution_row.addWidget(self.resolution_combo)
         self.width_edit = QLineEdit(str(display.get("width", 1920)))
@@ -629,7 +629,8 @@ class DisplayStep(QWidget):
         self._redraw_preview()
 
     def _apply_resolution_preset(self, text: str) -> None:
-        if "x" not in text:
+        # "Custom" changes nothing: the width and height boxes are the custom size.
+        if text not in RESOLUTION_PRESETS:
             return
         width, height = (part.strip() for part in text.split("x"))
         self.width_edit.setText(width)
@@ -647,9 +648,9 @@ class DisplayStep(QWidget):
         self.refresh_edit.setText(str(hz))
 
     def _sync_resolution_preset(self) -> None:
-        """Shows the preset that matches the typed width and height, or none."""
+        """Shows the preset that matches the typed width and height, or Custom."""
         text = f"{self.width_edit.text().strip()} x {self.height_edit.text().strip()}"
-        index = self.resolution_combo.findText(text)
+        index = self.resolution_combo.findText(text if text in RESOLUTION_PRESETS else RESOLUTION_CUSTOM)
         if index != self.resolution_combo.currentIndex():
             self.resolution_combo.blockSignals(True)
             self.resolution_combo.setCurrentIndex(index)

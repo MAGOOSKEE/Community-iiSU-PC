@@ -24,6 +24,8 @@ from bridge.ui.pages.base import PageBase
 from bridge.ui.widgets.display_preview import DisplayPreview
 
 RESOLUTION_PRESETS = ["1280 x 720", "1600 x 900", "1920 x 1080", "2560 x 1440", "3840 x 2160"]
+# What the resolution menu shows for a typed size that is none of the presets.
+RESOLUTION_CUSTOM = "Custom"
 REFRESH_RATE_PRESETS = ["60", "90", "120", "144", "165", "240"]
 
 # This project's known-good baseline profile, auto-detect scales density
@@ -51,8 +53,8 @@ class DisplayPage(PageBase):
         grid.addWidget(QLabel("Resolution:"), 0, 0)
         resolution_row = QHBoxLayout()
         self.resolution_combo = QComboBox()
-        self.resolution_combo.addItems(RESOLUTION_PRESETS)
-        self.resolution_combo.setCurrentIndex(-1)
+        self.resolution_combo.addItems(RESOLUTION_PRESETS + [RESOLUTION_CUSTOM])
+        self.resolution_combo.setCurrentIndex(self.resolution_combo.findText(RESOLUTION_CUSTOM))
         self.resolution_combo.currentTextChanged.connect(self._apply_resolution_preset)
         resolution_row.addWidget(self.resolution_combo)
         self.width_edit = QLineEdit()
@@ -62,13 +64,12 @@ class DisplayPage(PageBase):
         self.height_edit = QLineEdit()
         self.height_edit.setFixedWidth(60)
         resolution_row.addWidget(self.height_edit)
-        resolution_row.addStretch(1)
         grid.addLayout(resolution_row, 0, 1)
 
         grid.addWidget(QLabel("Density (dpi):"), 1, 0)
         self.density_edit = QLineEdit()
         self.density_edit.setFixedWidth(70)
-        grid.addWidget(self.density_edit, 1, 1)
+        grid.addWidget(self.density_edit, 1, 1, Qt.AlignmentFlag.AlignLeft)
 
         grid.addWidget(QLabel("Refresh rate (Hz):"), 2, 0)
         # One editable box with the usual rates in its menu, in place of a
@@ -82,25 +83,36 @@ class DisplayPage(PageBase):
         self.refresh_edit = refresh_combo.lineEdit()
         grid.addWidget(refresh_combo, 2, 1, Qt.AlignmentFlag.AlignLeft)
 
-        settings_col.addLayout(grid)
+        # In the grid, across both columns, so it is exactly as wide as the
+        # fields above it and ends where the height box does, rather than
+        # running the width of the page.
         redetect_button = QPushButton("Auto-detect from primary monitor")
         redetect_button.setObjectName("ghost")
         redetect_button.clicked.connect(self._autodetect_display)
-        settings_col.addWidget(redetect_button)
+        grid.addWidget(redetect_button, 3, 0, 1, 2)
+
+        settings_col.addLayout(grid)
+        # Under the fields, beside the preview, not below it.
+        settings_col.addSpacing(8)
+        self.fullscreen_check = QCheckBox("Maximize the iiSU/AVD window automatically")
+        settings_col.addWidget(self.fullscreen_check)
         settings_col.addStretch(1)
 
         preview_col = QVBoxLayout()
-        preview_col.addWidget(QLabel("Aspect ratio preview"))
-        self.preview = DisplayPreview(box_width=150, box_height=110)
-        preview_col.addWidget(self.preview)
+        preview_label = QLabel("Aspect ratio preview")
+        preview_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+        preview_col.addWidget(preview_label)
+        self.preview = DisplayPreview(box_width=240, box_height=176)
+        preview_col.addWidget(self.preview, 0, Qt.AlignmentFlag.AlignHCenter)
         preview_col.addStretch(1)
 
-        columns.addLayout(settings_col, 1)
+        # The preview sits in the space right of the fields, nearer the
+        # page's right edge than the fields.
+        columns.addLayout(settings_col)
+        columns.addStretch(2)
         columns.addLayout(preview_col)
+        columns.addStretch(1)
         self.body_layout.addLayout(columns)
-
-        self.fullscreen_check = QCheckBox("Maximize the iiSU/AVD window automatically")
-        self.body_layout.addWidget(self.fullscreen_check)
         self.body_layout.addStretch(1)
 
         self.width_edit.textChanged.connect(self._redraw_preview)
@@ -135,16 +147,17 @@ class DisplayPage(PageBase):
         return self.fullscreen_check.isChecked()
 
     def _apply_resolution_preset(self, text: str) -> None:
-        if "x" not in text:
+        # "Custom" changes nothing: the width and height boxes are the custom size.
+        if text not in RESOLUTION_PRESETS:
             return
         width, height = (part.strip() for part in text.split("x"))
         self.width_edit.setText(width)
         self.height_edit.setText(height)
 
     def _sync_resolution_preset(self) -> None:
-        """Shows the preset that matches the typed width and height, or none."""
+        """Shows the preset that matches the typed width and height, or Custom."""
         text = f"{self.width_edit.text().strip()} x {self.height_edit.text().strip()}"
-        index = self.resolution_combo.findText(text)
+        index = self.resolution_combo.findText(text if text in RESOLUTION_PRESETS else RESOLUTION_CUSTOM)
         if index != self.resolution_combo.currentIndex():
             self.resolution_combo.blockSignals(True)
             self.resolution_combo.setCurrentIndex(index)

@@ -11,8 +11,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QMessageBox,
-    QPushButton,
     QSpinBox,
     QVBoxLayout,
     QWidget,
@@ -122,27 +120,8 @@ class AdvancedPage(PageBase):
         )
         debug_note.setStyleSheet(f"color: {TEXT_DIM};")
         self.body_layout.addWidget(debug_note)
-
-        self.body_layout.addWidget(QLabel("Steam:"))
-        steam_row = QHBoxLayout()
-        add_steam_button = QPushButton("Add to Steam")
-        add_steam_button.setObjectName("ghost")
-        add_steam_button.clicked.connect(self._add_to_steam)
-        steam_row.addWidget(add_steam_button)
-        remove_steam_button = QPushButton("Remove from Steam")
-        remove_steam_button.setObjectName("ghost")
-        remove_steam_button.clicked.connect(self._remove_from_steam)
-        steam_row.addWidget(remove_steam_button)
-        steam_row.addStretch(1)
-        self.body_layout.addLayout(steam_row)
-        self.steam_note = QLabel(
-            "Adds Community-iiSU-PC as a non-Steam game, for Steam's library, Big Picture or Game Mode. "
-            "Close Steam first, it rewrites this list on exit. The shortcut starts the VM and bridge, then "
-            "ends, so Steam shows it stopped while iiSU keeps running."
-        )
-        self.steam_note.setWordWrap(True)
-        self.steam_note.setStyleSheet(f"color: {TEXT_DIM};")
-        self.body_layout.addWidget(self.steam_note)
+        # Add to Steam / Remove from Steam live in the menu next to Start
+        # on the Home page (bridge/ui/pages/home.py).
         self.body_layout.addStretch(1)
 
         self.reload_from_config()
@@ -222,37 +201,3 @@ class AdvancedPage(PageBase):
 
     def get_debug_show_console_windows(self) -> bool:
         return self.debug_console_check.isChecked()
-
-    # == Steam shortcut ==
-
-    def _add_to_steam(self) -> None:
-        from bridge.services import steam_shortcuts_service as steam
-
-        try:
-            results = steam.add_to_steam()
-        except steam.SteamShortcutError as e:
-            QMessageBox.warning(self, "Add to Steam", str(e))
-            return
-        except OSError as e:
-            QMessageBox.critical(self, "Add to Steam", f"Couldn't write Steam's shortcut list:\n\n{e}")
-            return
-        words = {"added": "Added", "updated": "Updated"}
-        summary = "\n".join(f"{words[outcome]}: {path}" for path, outcome in results)
-        QMessageBox.information(
-            self, "Add to Steam",
-            f"{summary}\n\nLook for \"{steam.SHORTCUT_NAME}\" in Steam's library. "
-            "The old shortcut list was saved as a .bak file.",
-        )
-
-    def _remove_from_steam(self) -> None:
-        from bridge.services import steam_shortcuts_service as steam
-
-        try:
-            changed = steam.remove_from_steam()
-        except steam.SteamShortcutError as e:
-            QMessageBox.warning(self, "Remove from Steam", str(e))
-            return
-        except OSError as e:
-            QMessageBox.critical(self, "Remove from Steam", f"Couldn't write Steam's shortcut list:\n\n{e}")
-            return
-        QMessageBox.information(self, "Remove from Steam", "Removed it from Steam." if changed else "It wasn't in Steam's shortcut list.")

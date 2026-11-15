@@ -5,7 +5,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Thanks for reporting. Running **Backup & Diagnostics > Diagnostics** in the Manager first often says what is wrong.
+        Thanks for reporting. Running **Backup & Tools > Diagnostics** in the Manager first often says what is wrong.
         Please don't attach an iiSU APK, ROMs or BIOS files.
   - type: textarea
     id: what-happened

@@ -211,6 +211,15 @@ class ManagerWindow(QMainWindow):
         save_config(self.config_data)
         self._apply_window_icon()
 
+    def set_home_show_logs(self, shown: bool) -> None:
+        """Remembers whether the Home page's log drawer is shown, saved on
+        its own the same way as the icon choice. Before Setup there is no
+        config file yet, and this must not be what creates one."""
+        if not self.configured:
+            return
+        self.config_data["home_show_logs"] = shown
+        save_config(self.config_data)
+
     # == Config state ==
 
     def _reload_config(self) -> None:
