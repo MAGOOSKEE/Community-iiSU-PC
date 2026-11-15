@@ -6,6 +6,7 @@ placeholder mirror) and the Manager (to show whether iiSU will actually
 recognize your ROM folders before you save).
 """
 
+import difflib
 import json
 import re
 from pathlib import Path
@@ -47,7 +48,34 @@ def resolve_console_shortname(folder_name: str, exact: dict, by_compact: dict) -
         return by_compact[c]
     # Fallback: substring match against longer (>=5 char) known names only,
     # to avoid short codes like "gc" false-positive matching inside names.
+    # The longest overlap wins: "Playstation2" holds "playstation" (PS1) but
+    # sits inside "sonyplaystation2", and the first hit used to win.
+    best, best_overlap = None, 0
     for key, short in by_compact.items():
-        if len(key) >= 5 and (key in c or c in key):
+        if len(key) < 5:
+            continue
+        overlap = len(key) if key in c else len(c) if c in key else 0
+        if overlap > best_overlap:
+            best, best_overlap = short, overlap
+    return best
+
+
+# Words people add to a console folder's name that say nothing about which
+# console it is ("SNES Roms", "N64 games").
+FILLER_WORDS = {"rom", "roms", "game", "games", "iso", "isos", "collection", "library"}
+
+
+def suggest_folder_name(folder_name: str, exact: dict, by_compact: dict) -> str | None:
+    """The name to rename an unrecognized console folder to, or None when
+    nothing is close enough to guess. Drops filler words first, then allows
+    a small typo ("dreamcst"). The suggestion is iiSU's own short name for
+    the console, which always resolves."""
+    words = [w for w in re.split(r"[\s_\-\.]+", folder_name) if w and w.lower() not in FILLER_WORDS]
+    trimmed = " ".join(words)
+    if trimmed and trimmed != folder_name:
+        short = resolve_console_shortname(trimmed, exact, by_compact)
+        if short:
             return short
-    return None
+    close = difflib.get_close_matches(compact(trimmed or folder_name), list(by_compact), n=1, cutoff=0.75)
+    return by_compact[close[0]] if close else None
+

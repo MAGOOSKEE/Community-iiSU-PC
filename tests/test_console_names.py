@@ -47,3 +47,26 @@ class ResolveConsoleShortnameTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LongestOverlapAndSuggestionTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from console_names import suggest_folder_name
+
+        cls.exact, cls.by_compact = load_console_lookup()
+        cls.suggest = staticmethod(lambda name: suggest_folder_name(name, cls.exact, cls.by_compact))
+
+    def test_playstation2_without_a_space_is_ps2_not_ps1(self):
+        self.assertEqual(resolve_console_shortname("Playstation2", self.exact, self.by_compact), "ps2")
+        self.assertEqual(resolve_console_shortname("Playstation", self.exact, self.by_compact), "psx")
+
+    def test_filler_words_are_dropped(self):
+        self.assertEqual(self.suggest("SNES Roms"), "snes")
+        self.assertEqual(self.suggest("N64 games"), "n64")
+
+    def test_small_typo(self):
+        self.assertEqual(self.suggest("dreamcst"), "dreamcast")
+
+    def test_nothing_close(self):
+        self.assertIsNone(self.suggest("My Stuff"))

@@ -18,7 +18,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from console_names import load_console_lookup, resolve_console_shortname
+from console_names import load_console_lookup, resolve_console_shortname, suggest_folder_name
+
 from bridge.ui.pages.base import PageBase
 from shared.qt_theme import GREEN, RED, TEXT_DIM
 
@@ -131,8 +132,12 @@ class RomsPage(PageBase):
             self.roms_status_label.setText(f"iiSU will recognize all {len(recognized)} folder(s): {', '.join(recognized)}")
             self.roms_status_label.setStyleSheet(f"color: {GREEN};")
         else:
-            prefix = f"{len(recognized)} recognized, " if recognized else ""
-            self.roms_status_label.setText(f"{prefix}{len(unrecognized)} not recognized by iiSU (rename): {', '.join(unrecognized)}")
+            prefix = f"{len(recognized)} recognized. " if recognized else ""
+            hints = []
+            for name in unrecognized:
+                suggestion = suggest_folder_name(name, exact, by_compact)
+                hints.append(f"{name} (rename it to {suggestion})" if suggestion else f"{name} (skipped)")
+            self.roms_status_label.setText(f"{prefix}iiSU won't recognize: {', '.join(hints)}")
             self.roms_status_label.setStyleSheet(f"color: {RED};")
 
     def _browse_roms_dir(self) -> None:
