@@ -129,7 +129,30 @@ def show(
         return None
 
 
+PROBLEM_MAX_SECONDS = 15
+
+
+def show_problem(title: str, message: str) -> subprocess.Popen | None:
+    """A card over the whole screen saying a launch failed and what to do,
+    instead of a tray balloon: iiSU runs fullscreen, often on a TV, where a
+    balloon is hidden or unreadable. Closes by itself after a few seconds.
+    Best effort like show(): returns None if it can't be started."""
+    try:
+        return subprocess.Popen(
+            [sys.executable, "-m", "bridge.ui.boot_overlay_app", message, "",
+             "--problem", title, "--max-seconds", str(PROBLEM_MAX_SECONDS)],
+            cwd=str(_PROJECT_ROOT),
+            creationflags=subprocess_creationflags(),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except OSError:
+        return None
+
+
 def notify_error(title: str, message: str) -> None:
+
     """Best-effort Windows tray balloon notification, the bridge
     normally runs with no visible window at all (see the
     debug_show_console_windows setting), so a launch failure (no emulator mapped,

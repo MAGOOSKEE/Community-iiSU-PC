@@ -65,6 +65,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import game_overrides
+import launch_problems
 import portable_sdk  # noqa: F401; imported for its import-time PATH fix (adb), not used directly here
 from bridge_config import ConfigMissingError, load_config
 from controller_bridge import ControllerBridge
@@ -421,7 +422,29 @@ def end_game_handoff() -> None:
     print("[bridge] iiSU input/audio restored")
 
 
-def log_launch(line: str, notify: bool = False, notify_title: str = "Community-iiSU-PC") -> None:
+PROBLEM_TITLE = "Couldn't open that game"
+
+# An emulator that exits with an error after running this long was played
+# and then closed, not a launch that failed, so it's only logged.
+FAILED_LAUNCH_SECONDS = 60
+# When the quit hotkey or chord last asked a game to close (time.monotonic()).
+# A forced quit ends the emulator with a non-zero code, which isn't a failure.
+last_quit_request = 0.0
+
+
+def exit_looks_like_failure(returncode: int | None, started: float, ended: float, quit_requested: float) -> bool:
+    """Whether an emulator's exit is worth putting on screen: a non-zero
+    code soon after launch, that nobody asked for with the quit key."""
+    if returncode in (0, None):
+        return False
+    if quit_requested >= started:
+        return False
+    return ended - started <= FAILED_LAUNCH_SECONDS
+
+
+def log_launch(
+    line: str, notify: bool = False, notify_title: str = "Community-iiSU-PC", friendly: str | None = None,
+) -> None:
     """Appends one line to launch_history.log with a timestamp, every
     launch attempt gets logged here regardless of outcome, not just
     failures, so there's always a record to check against ("did this
@@ -431,7 +454,11 @@ def log_launch(line: str, notify: bool = False, notify_title: str = "Community-i
     notify_error) for anything worth interrupting someone over, a
     failure, not a routine successful launch, since the bridge runs
     with no visible window normally and a log file nobody's looking at
-    doesn't "make the user aware" of anything by itself."""
+    doesn't "make the user aware" of anything by itself.
+
+    friendly is the same failure in plain words with where to fix it (see
+    launch_problems.py). It's what the on-screen card and the Manager's
+    Home page show; the log keeps line, the technical version."""
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
     try:
         with open(LAUNCH_LOG_PATH, "a", encoding="utf-8") as f:
@@ -439,7 +466,10 @@ def log_launch(line: str, notify: bool = False, notify_title: str = "Community-i
     except OSError:
         pass
     if notify:
-        boot_overlay.notify_error(notify_title, line)
+        message = friendly or line
+        launch_problems.record(notify_title if notify_title != "Community-iiSU-PC" else PROBLEM_TITLE, message, line)
+        if boot_overlay.show_problem(PROBLEM_TITLE, message) is None:
+            boot_overlay.notify_error(notify_title, message)
 
 
 def _is_waydroid(config: dict) -> bool:
@@ -743,7 +773,13 @@ def wait_and_restore_iisu(
         if current_process is process:
             current_process = None
     if process.returncode not in (0, None):
-        log_launch(f"EXITED: {emulator_name} exited with code {process.returncode} (possible launch error)", notify=True, notify_title=emulator_name)
+        looks_failed = exit_looks_like_failure(process.returncode, started, time.monotonic(), last_quit_request)
+        log_launch(
+            f"EXITED: {emulator_name} exited with code {process.returncode}"
+            + (" (possible launch error)" if looks_failed else " (after play or a quit, not reported)"),
+            notify=looks_failed,
+            notify_title=emulator_name, friendly=launch_problems.emulator_exited(emulator_name, process.returncode),
+        )
     else:
         log_launch(f"EXITED: {emulator_name} exited normally")
     show_iisu_window(config)
@@ -780,7 +816,10 @@ def shutdown_everything() -> None:
     rather than given a visible console, a console window for a script
     that just prints a handful of status lines and exits is pure clutter,
     unless config.json's "debug_show_console_windows" says otherwise."""
+    global last_quit_request
+    last_quit_request = time.monotonic()
     with current_process_lock:
+
         proc = current_process
         native_hwnd = current_native_window
         native_pid = current_native_pid
@@ -870,6 +909,8 @@ def quit_tap_action(label: str = "quit") -> None:
     (controller_bridge.ControllerBridge), so both trigger identical
     behavior through one code path. label is just what gets printed/
     logged to say what triggered it."""
+    global last_quit_request
+    last_quit_request = time.monotonic()
     with current_process_lock:
         proc = current_process
         native_hwnd = current_native_window
@@ -1155,10 +1196,10 @@ def load_windows_apps() -> dict:
     try:
         data = json.loads(WINDOWS_APPS_PATH.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as e:
-        log_launch(f"FAILED: could not read windows_apps.json ({e})", notify=True)
+        log_launch(f"FAILED: could not read windows_apps.json ({e})", notify=True, friendly=launch_problems.unexpected())
         return {}
     if not isinstance(data, dict):
-        log_launch("FAILED: windows_apps.json must contain a JSON object", notify=True)
+        log_launch("FAILED: windows_apps.json must contain a JSON object", notify=True, friendly=launch_problems.unexpected())
         return {}
     return {str(name).casefold(): entry for name, entry in data.items()}
 
@@ -1287,6 +1328,7 @@ def launch_windows_app(app_name: str, config: dict) -> bool:
         log_launch(
             f"IGNORED: Windows app '{app_name}' requested while a game is already running",
             notify=True,
+            friendly=launch_problems.already_running(),
             notify_title=app_name,
         )
         return True
@@ -1295,7 +1337,7 @@ def launch_windows_app(app_name: str, config: dict) -> bool:
     if app is None:
         return False
     if not isinstance(app, dict):
-        log_launch(f"FAILED: Windows app '{app_name}' has an invalid config entry", notify=True)
+        log_launch(f"FAILED: Windows app '{app_name}' has an invalid config entry", notify=True, friendly=launch_problems.pc_game_misconfigured(app_name))
         return True
 
     # Backward compatibility: entries created before URI support have no
@@ -1305,6 +1347,7 @@ def launch_windows_app(app_name: str, config: dict) -> bool:
         log_launch(
             f"FAILED: Windows app '{app_name}' has unknown launch type '{launch_type}'",
             notify=True,
+            friendly=launch_problems.pc_game_misconfigured(app_name),
             notify_title=app_name,
         )
         return True
@@ -1317,32 +1360,32 @@ def launch_windows_app(app_name: str, config: dict) -> bool:
     if launch_type == "uri":
         uri_value = app.get("uri")
         if not isinstance(uri_value, str) or not uri_value.strip():
-            log_launch(f"FAILED: Windows app '{app_name}' has no URI configured", notify=True, notify_title=app_name)
+            log_launch(f"FAILED: Windows app '{app_name}' has no URI configured", notify=True, notify_title=app_name, friendly=launch_problems.pc_game_misconfigured(app_name))
             return True
         uri = uri_value.strip()
         if not re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://\S+$", uri):
-            log_launch(f"FAILED: Windows app '{app_name}' has an invalid protocol URI", notify=True, notify_title=app_name)
+            log_launch(f"FAILED: Windows app '{app_name}' has an invalid protocol URI", notify=True, notify_title=app_name, friendly=launch_problems.pc_game_misconfigured(app_name))
             return True
     else:
         exe_value = app.get("exe")
         if not isinstance(exe_value, str) or not exe_value.strip():
-            log_launch(f"FAILED: Windows app '{app_name}' has no executable configured", notify=True)
+            log_launch(f"FAILED: Windows app '{app_name}' has no executable configured", notify=True, friendly=launch_problems.pc_game_misconfigured(app_name))
             return True
 
         executable = Path(os.path.expandvars(os.path.expanduser(exe_value)))
         if not executable.is_file():
-            log_launch(f"FAILED: Windows app '{app_name}' executable not found: {executable}", notify=True, notify_title=app_name)
+            log_launch(f"FAILED: Windows app '{app_name}' executable not found: {executable}", notify=True, notify_title=app_name, friendly=launch_problems.pc_game_missing(app_name))
             return True
 
         configured_args = app.get("args", [])
         if not isinstance(configured_args, list) or not all(isinstance(arg, str) for arg in configured_args):
-            log_launch(f"FAILED: Windows app '{app_name}' args must be a list of strings", notify=True)
+            log_launch(f"FAILED: Windows app '{app_name}' args must be a list of strings", notify=True, friendly=launch_problems.pc_game_misconfigured(app_name))
             return True
 
         working_dir_value = app.get("working_dir")
         working_dir = Path(os.path.expandvars(os.path.expanduser(str(working_dir_value)))) if working_dir_value else executable.parent
         if not working_dir.is_dir():
-            log_launch(f"FAILED: Windows app '{app_name}' working directory not found: {working_dir}", notify=True, notify_title=app_name)
+            log_launch(f"FAILED: Windows app '{app_name}' working directory not found: {working_dir}", notify=True, notify_title=app_name, friendly=launch_problems.pc_game_missing(app_name))
             return True
 
     # Cut iiSU off immediately, before Steam or the executable is invoked.
@@ -1396,6 +1439,7 @@ def launch_windows_app(app_name: str, config: dict) -> bool:
             log_launch(
                 f"FAILED: Windows app '{app_name}' launched but no new visible window was detected",
                 notify=True,
+                friendly=launch_problems.pc_game_no_window(app_name),
                 notify_title=app_name,
             )
             if process is not None:
@@ -1448,6 +1492,7 @@ def launch_windows_app(app_name: str, config: dict) -> bool:
         log_launch(
             f"FAILED: could not launch Windows app '{app_name}' ({e})",
             notify=True,
+            friendly=launch_problems.pc_game_failed(app_name),
             notify_title=app_name,
         )
         with current_process_lock:
@@ -1505,6 +1550,7 @@ def launch_steam_game(app_id: str, config: dict) -> None:
             log_launch(
                 f"FAILED: Steam app {app_id} launched but no new visible game window was detected",
                 notify=True,
+                friendly=launch_problems.pc_game_no_window(f"Steam game {app_id}"),
             )
             show_iisu_window(config)
             return
@@ -1557,6 +1603,7 @@ def launch_steam_game(app_id: str, config: dict) -> None:
         log_launch(
             f"FAILED: could not launch Steam app {app_id} via GameNative ({e})",
             notify=True,
+            friendly=launch_problems.pc_game_failed(f"Steam game {app_id}"),
         )
         recover_from_request_exception(config)
         return
@@ -1657,7 +1704,7 @@ def answer_launch(conn, raw_intent: str) -> bool:
         if started:
             log_launch(f"ANDROID: started {package} on Android for an older iiSU patch")
         else:
-            log_launch(f"FAILED: couldn't start {package} on Android ({output})", notify=True)
+            log_launch(f"FAILED: couldn't start {package} on Android ({output})", notify=True, friendly=launch_problems.unexpected())
     return on_android
 
 
@@ -1681,6 +1728,7 @@ def handle_request(raw_intent: str) -> None:
         log_launch(
             "IGNORED: launch request while a game is already running",
             notify=True,
+            friendly=launch_problems.already_running(),
         )
         return
 
@@ -1693,7 +1741,7 @@ def handle_request(raw_intent: str) -> None:
         if package in WINDOWS_LAUNCH_PACKAGES:
             shortcut_match = re.search(r"^EXTRA:shortcut_path=(.+)$", raw_intent, re.MULTILINE)
             if not shortcut_match:
-                log_launch(f"FAILED: Windows launch from '{package}' had no shortcut_path extra", notify=True)
+                log_launch(f"FAILED: Windows launch from '{package}' had no shortcut_path extra", notify=True, friendly=launch_problems.unexpected())
                 return
 
             shortcut_path = shortcut_match.group(1).strip()
@@ -1706,6 +1754,7 @@ def handle_request(raw_intent: str) -> None:
                 log_launch(
                     f"FAILED: Windows app '{app_name}' is not registered in windows_apps.json",
                     notify=True,
+                    friendly=launch_problems.pc_game_not_registered(app_name),
                     notify_title=app_name,
                 )
             return
@@ -1740,7 +1789,7 @@ def handle_request(raw_intent: str) -> None:
     if package == GAMENATIVE_PACKAGE:
         app_id = extras.get("app_id")
         if app_id is None:
-            log_launch("FAILED: GameNative launch with no app_id extra, can't tell Steam what to run", notify=True)
+            log_launch("FAILED: GameNative launch with no app_id extra, can't tell Steam what to run", notify=True, friendly=launch_problems.unexpected())
             return
         log_launch(f"LAUNCHED: Steam app {app_id} via GameNative")
         hold_iisu_behind_stub(package)
@@ -1770,7 +1819,10 @@ def handle_request(raw_intent: str) -> None:
 
     profile = find_emulator_for_package(package, config["emulators"], rom_filename, extras.get("LIBRETRO"))
     if profile is None:
-        log_launch(f"FAILED: no known PC emulator mapped for package '{package}' (rom '{rom_filename}')", notify=True)
+        log_launch(
+            f"FAILED: no known PC emulator mapped for package '{package}' (rom '{rom_filename}')", notify=True,
+            friendly=launch_problems.no_emulator_for_console(),
+        )
         return
 
     # Per-game settings from the Manager's Console page: another emulator,
@@ -1787,7 +1839,10 @@ def handle_request(raw_intent: str) -> None:
     if executable is None:
         save_path_cache(path_cache)
         looked_for = profile["exe_names"] if IS_WINDOWS else linux_path_names(profile["exe_names"])
-        log_launch(f"FAILED: none of {looked_for} found under {search_roots} (rom '{rom_filename}')", notify=True)
+        log_launch(
+            f"FAILED: none of {looked_for} found under {search_roots} (rom '{rom_filename}')", notify=True,
+            friendly=launch_problems.emulator_missing(friendly_emulator_name(Path(profile["exe_names"][0])) if profile["exe_names"] else "The emulator"),
+        )
         return
     if not IS_WINDOWS and not os.access(executable, os.X_OK):
         # An AppImage or launcher script downloaded by hand. Starting it
@@ -1796,6 +1851,7 @@ def handle_request(raw_intent: str) -> None:
             f"FAILED: {executable} isn't marked as a program. Allow it to run "
             f"(right-click > Properties > Permissions, or `chmod +x`), then launch the game again.",
             notify=True, notify_title=friendly_emulator_name(executable),
+            friendly=launch_problems.not_runnable(friendly_emulator_name(executable)),
         )
         return
 
@@ -1803,7 +1859,10 @@ def handle_request(raw_intent: str) -> None:
     if rom_filename:
         rom_path = find_rom(rom_filename, roms_dir, path_cache, rom_location_in_vm(rom_address))
         if rom_path is None:
-            log_launch(f"FAILED: rom '{rom_filename}' not found under {roms_dir}", notify=True, notify_title=friendly_emulator_name(executable))
+            log_launch(
+                f"FAILED: rom '{rom_filename}' not found under {roms_dir}", notify=True,
+                notify_title=friendly_emulator_name(executable), friendly=launch_problems.rom_missing(rom_filename),
+            )
 
     save_path_cache(path_cache)
 
@@ -2068,6 +2127,7 @@ def main() -> None:
                         log_launch(
                             "FAILED: unexpected error while handling launch request",
                             notify=True,
+                            friendly=launch_problems.unexpected(),
                         )
                         # Do not force iiSU over a game that successfully
                         # launched before a later request-handling exception.

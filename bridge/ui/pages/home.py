@@ -42,8 +42,10 @@ from shared.vm_backend import supports_headless_boot
 from bridge.ui.workers.log_stream import LogStreamRedirector
 from bridge.ui.workers.task_runner import run_in_background
 import bridge_config
+import launch_problems
 from bridge_config import CONFIG_PATH
-from shared.qt_theme import Fonts, INPUT_BG, LOG_TEXT, TEXT_DIM
+from shared.qt_theme import Fonts, INPUT_BG, LOG_TEXT, RED, TEXT_DIM
+
 
 STATUS_POLL_INTERVAL_MS = 2000
 HERO_LOGO_HEIGHT = 72
@@ -218,6 +220,37 @@ class HomePage(PageBase):
         self.stage_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self.stage_label.setStyleSheet(f"color: {TEXT_DIM};")
         center_layout.addWidget(self.stage_label)
+        center_layout.addSpacing(14)
+
+        # The last game that failed to open, kept after the on-screen card
+        # has gone (see bridge/launch_problems.py), until it's dismissed.
+        self.problem_card = QFrame()
+        self.problem_card.setObjectName("ProblemCard")
+        self.problem_card.setFixedWidth(540)
+        problem_layout = QVBoxLayout(self.problem_card)
+        problem_layout.setContentsMargins(16, 12, 16, 12)
+        problem_layout.setSpacing(6)
+        self.problem_title = QLabel("")
+        self.problem_title.setStyleSheet(f"color: {RED}; font-weight: 600;")
+        problem_layout.addWidget(self.problem_title)
+        self.problem_text = QLabel("")
+        self.problem_text.setWordWrap(True)
+        self.problem_text.setFixedWidth(540 - 32)
+
+        problem_layout.addWidget(self.problem_text)
+        problem_buttons = QHBoxLayout()
+        problem_buttons.addStretch(1)
+        open_history = QPushButton("Open Launch Log")
+        open_history.setObjectName("ghost")
+        open_history.clicked.connect(lambda: open_uri(str(launch_problems.LAST_PROBLEM_PATH.parent / "launch_history.log")))
+        problem_buttons.addWidget(open_history)
+        dismiss = QPushButton("Dismiss")
+        dismiss.setObjectName("ghost")
+        dismiss.clicked.connect(self._dismiss_problem)
+        problem_buttons.addWidget(dismiss)
+        problem_layout.addLayout(problem_buttons)
+        self.problem_card.hide()
+        center_layout.addWidget(self.problem_card, 0, Qt.AlignmentFlag.AlignHCenter)
 
         self.body_layout.addWidget(center_col, 0, Qt.AlignmentFlag.AlignHCenter)
         self.body_layout.addStretch(3)
@@ -574,7 +607,25 @@ class HomePage(PageBase):
         now_configured = CONFIG_PATH.is_file() and bridge_config.config_problem() is None
         return (avd_up, bridge_up, now_configured)
 
+    def refresh_problem(self) -> None:
+        problem = launch_problems.load()
+        if problem is None:
+            self.problem_card.hide()
+            return
+        when = launch_problems.describe_time(float(problem.get("time", 0)))
+        title = problem.get("title") or ""
+        source = f" ({title})" if title and title != "Couldn't open that game" else ""
+        self.problem_title.setText(f"A game couldn't open {when}{source}")
+        self.problem_text.setText(problem.get("message", ""))
+        self.problem_text.setToolTip(problem.get("detail", ""))
+        self.problem_card.show()
+
+    def _dismiss_problem(self) -> None:
+        launch_problems.dismiss()
+        self.problem_card.hide()
+
     def _apply_status(self, result) -> None:
+        self.refresh_problem()
         avd_up, bridge_up, now_configured = result
         self.window.last_avd_up = avd_up
         self.window.last_bridge_up = bridge_up

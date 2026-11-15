@@ -49,6 +49,9 @@ import start_progress
 # its own tiny theme, not a consumer of that module.
 _GRADIENT_HEX = ["#71e0ff", "#68ccff", "#5e84ff", "#8258fa", "#c56eff"]
 
+# The problem card's title, a warm red readable on both themes.
+PROBLEM_COLOR = "#ff6b6b"
+
 _THEMES = {
     "dark": {
         "bg": QColor(4, 4, 6),
@@ -291,9 +294,15 @@ class OverlayWindow(QWidget):
 
     def __init__(
         self, context: str, flavor: str, status_path: Path | None = None,
-        parent_pid: int | None = None, max_seconds: float = 0,
+        parent_pid: int | None = None, max_seconds: float = 0, problem: str | None = None,
     ):
+        """problem, when given, is the title of a card saying a launch
+        failed ("Couldn't open that game"), with context as the sentence
+        saying why and what to do: no bar, no animated dots."""
         super().__init__()
+        self._problem = problem
+        if problem:
+            self._TITLE_TEXT = problem
         self._status_path = status_path
         self._shown_percent = 0.0
         self._shown_log: list[str] = []
@@ -330,7 +339,7 @@ class OverlayWindow(QWidget):
         # actual (copyrighted, not ours to include) font files.
         self._title = QLabel(self._TITLE_TEXT)
         self._title.setFont(Fonts.brand(32))
-        self._title.setStyleSheet(f"color: {theme['title'].name()};")
+        self._title.setStyleSheet(f"color: {PROBLEM_COLOR if problem else theme['title'].name()};")
         self._title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self._title)
 
@@ -338,12 +347,18 @@ class OverlayWindow(QWidget):
         self._context_label.setFont(Fonts.ui(14, semibold=True))
         self._context_label.setStyleSheet(f"color: {theme['context'].name()};")
         self._context_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self._context_label)
+        if problem:
+            self._context_label.setWordWrap(True)
+            self._context_label.setFixedWidth(min(900, screen.geometry().width() - 160))
+            self._context_label.setMinimumHeight(self._context_label.heightForWidth(self._context_label.width()))
+        layout.addWidget(self._context_label, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self._progress_bar = None
         self._percent_label = None
         self._log_view = None
-        if status_path is None:
+        if problem:
+            pass
+        elif status_path is None:
             layout.addWidget(_BounceBar(theme, self), alignment=Qt.AlignmentFlag.AlignCenter)
         else:
             self._progress_bar = _ProgressBar(theme, self)
@@ -397,7 +412,10 @@ class OverlayWindow(QWidget):
             self._status_timer.start(STATUS_POLL_MS)
             self._refresh_status()
 
-        hint_label = QLabel("Press Esc or click to hide this screen")
+        hint_label = QLabel(
+            "Closes by itself, or press Esc or click. The Manager's Home page keeps this message."
+            if problem else "Press Esc or click to hide this screen"
+        )
         hint_label.setFont(Fonts.ui(9))
         hint_label.setStyleSheet(f"color: {theme['flavor'].name()};")
         hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -424,7 +442,8 @@ class OverlayWindow(QWidget):
         self._dot_count = 0
         self._dot_timer = QTimer(self)
         self._dot_timer.timeout.connect(self._tick_dots)
-        self._dot_timer.start(450)
+        if not problem:
+            self._dot_timer.start(450)
 
     def _refresh_status(self) -> None:
         """Re-reads the status file and moves the bar. The bar never goes
@@ -501,6 +520,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--status", type=Path, default=None)
     parser.add_argument("--parent-pid", type=int, default=None)
     parser.add_argument("--max-seconds", type=float, default=0)
+    parser.add_argument("--problem", default=None)
     args, _unknown = parser.parse_known_args(argv)
     return args
 
@@ -508,7 +528,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main() -> None:
     args = parse_args(sys.argv[1:])
     app = QApplication(sys.argv[:1])
-    window = OverlayWindow(args.context, args.flavor, args.status, args.parent_pid, args.max_seconds)
+    window = OverlayWindow(args.context, args.flavor, args.status, args.parent_pid, args.max_seconds, args.problem)
+
     if IS_WINDOWS:
         window.show()
     else:

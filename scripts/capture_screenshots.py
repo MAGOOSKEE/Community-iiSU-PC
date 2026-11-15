@@ -131,8 +131,12 @@ def main() -> None:
                      "offer_config_recovery"):
             setattr(main_window.ManagerWindow, name, lambda window, *args: None)
 
-        # The Console page would otherwise list this install's own per-game exceptions.
+        # The Console page would otherwise list this install's own per-game exceptions,
+        # and Home this install's last launch problem.
         sync_library.load_dedupe_exceptions = lambda: set()
+        import launch_problems
+        launch_problems.LAST_PROBLEM_PATH = tmp_path / ".last_launch_problem.json"
+
 
         with unittest.mock.patch.object(iisu_install_record.load, "__defaults__", (record_path,)):
             window = main_window.ManagerWindow()
