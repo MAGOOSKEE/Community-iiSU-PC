@@ -34,12 +34,35 @@ from PySide6.QtWidgets import (
 import winapi
 from bridge.ui.widgets.card import Card
 from bridge.ui.widgets.gradient_divider import GradientDivider
+from bridge.ui.widgets.step_checklist import StepChecklist
 from bridge.ui.workers.log_stream import LogStreamRedirector
 from bridge.ui.workers.task_runner import run_in_background
 from shared import vm_storage
 from shared.qt_theme import Fonts, GREEN, RED, SPACING_LG, SPACING_MD, SPACING_SM, apply_theme
 
 BRIDGE_DIR = setup_wizard.BRIDGE_DIR
+
+DOWNLOAD_STAGE = "Downloading the latest iiSU release"
+
+# What to expect from the slow steps, shown beside them while they run.
+# Keyed by the names shown (STAGE_NAMES' values).
+STAGE_HINTS = {
+    DOWNLOAD_STAGE: "about 130 MB",
+    "Downloading and setting up Android": "the long one: about 3 GB",
+    "Patching iiSU": "a minute or two",
+    "Moving Android into this folder": "a few minutes",
+    "Installing iiSU in Android": "starts Android, several minutes",
+}
+
+# Plainer names for Setup's own steps (installer/setup_wizard.py's
+# SETUP_STAGES); the log keeps the originals.
+STAGE_NAMES = {
+    "Setting up the Android SDK and AVD": "Downloading and setting up Android",
+    "Setting up Android tooling": "Setting up Android tools",
+    "Preparing the signing key": "Preparing to sign iiSU",
+    "Copying to the portable AVD": "Moving Android into this folder",
+    "Installing iiSU and redirector stubs": "Installing iiSU in Android",
+}
 
 
 class SetupWindow(QMainWindow):
@@ -48,11 +71,12 @@ class SetupWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Community-iiSU-PC Setup")
-        self.resize(720, 600)
-        self.setMinimumSize(620, 480)
+        self.resize(760, 860)
+        self.setMinimumSize(640, 720)
 
         self.apk_path: Path | None = None
         self.running = False
+        self._has_run = False
         self._onboarding_process: subprocess.Popen | None = None
 
         self._log_stream = LogStreamRedirector()
@@ -166,19 +190,53 @@ class SetupWindow(QMainWindow):
         action_row.addWidget(self.progress, stretch=1)
         root.addLayout(action_row)
 
-        log_card = Card()
-        log_layout = QVBoxLayout(log_card)
+        self.steps_card = Card()
+        steps_layout = QVBoxLayout(self.steps_card)
+        steps_layout.setContentsMargins(SPACING_MD, SPACING_MD - 2, SPACING_MD, SPACING_MD - 2)
+        self.checklist = StepChecklist(self._planned_steps(), STAGE_HINTS)
+        steps_layout.addWidget(self.checklist)
+        self.steps_card.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        root.addWidget(self.steps_card)
+
+
+        details_row = QHBoxLayout()
+        self.details_button = QPushButton("Show details")
+        self.details_button.setObjectName("ghost")
+        self.details_button.setCheckable(True)
+        self.details_button.toggled.connect(self._set_details_shown)
+        details_row.addWidget(self.details_button)
+        details_row.addStretch(1)
+        root.addLayout(details_row)
+
+        self.log_card = Card()
+        log_layout = QVBoxLayout(self.log_card)
         log_layout.setContentsMargins(SPACING_SM + 2, SPACING_SM + 2, SPACING_SM + 2, SPACING_SM + 2)
         self.log_text = QPlainTextEdit()
         self.log_text.setReadOnly(True)
         self.log_text.setFont(Fonts.mono())
         log_layout.addWidget(self.log_text)
-        root.addWidget(log_card, stretch=1)
+        root.addWidget(self.log_card, stretch=1)
+        self.log_card.setVisible(False)
+        root.addStretch(0)
 
         self._update_mode()
         self.status_label = QLabel("Ready.")
         self.status_label.setProperty("role", "dim")
         root.addWidget(self.status_label)
+
+    def _planned_steps(self) -> list[str]:
+        """Setup's steps in the order they'll run, in plain words, with the
+        download first when Setup is fetching iiSU itself."""
+        backend = setup_wizard.preferred_backend()
+        stages = setup_wizard.WAYDROID_SETUP_STAGES if backend == setup_wizard.BACKEND_WAYDROID else setup_wizard.SETUP_STAGES
+        names = [STAGE_NAMES.get(stage, stage) for stage in stages]
+        if getattr(self, "latest_radio", None) is not None and self.latest_radio.isChecked():
+            names.insert(0, STAGE_NAMES.get(DOWNLOAD_STAGE, DOWNLOAD_STAGE))
+        return names
+
+    def _set_details_shown(self, shown: bool) -> None:
+        self.log_card.setVisible(shown)
+        self.details_button.setText("Hide details" if shown else "Show details")
 
     def _set_status(self, text: str, color: str | None = None) -> None:
         self.status_label.setText(text)
@@ -199,6 +257,10 @@ class SetupWindow(QMainWindow):
 
     def _update_mode(self) -> None:
         use_latest = self.latest_radio.isChecked()
+        # Before the first run only: afterwards the list keeps showing how
+        # that run went (which step failed) until Setup starts again.
+        if not self.running and not self._has_run and hasattr(self, "checklist"):
+            self.checklist.set_labels(self._planned_steps())
         self.browse_button.setEnabled(not use_latest and not self.running)
         self.apk_label.setEnabled(not use_latest)
         if not self.running:
@@ -237,8 +299,12 @@ class SetupWindow(QMainWindow):
         self.custom_radio.setEnabled(False)
         self.storage_spin.setEnabled(False)
         self.lean_check.setEnabled(False)
-        self._set_status("Running setup. The first run can take a while (several GB)...")
-        self.progress.setRange(0, 0)
+        self._has_run = True
+        self._set_status("Setting up. The first run takes a while; you can leave it running.")
+
+        self.checklist.set_labels(self._planned_steps())
+        self.progress.setRange(0, len(self.checklist.labels()))
+        self.progress.setValue(0)
 
         self._setup_signals = run_in_background(
             self._run_setup_thread, self._on_setup_finished,
@@ -271,12 +337,27 @@ class SetupWindow(QMainWindow):
         self.stage_changed.emit(label, index, total)
 
     def _apply_stage(self, label: str, index: int, total: int) -> None:
-        self._set_status(f"Step {index}/{total}: {label}...")
+        name = STAGE_NAMES.get(label, label)
+        labels = self.checklist.labels()
+        # Every stage name is on the list; the fallback only guards a stage
+        # added to setup_wizard.py without one here.
+        row = labels.index(name) if name in labels else min(index - 1, len(labels) - 1)
+        self.checklist.start(row)
+
+        self.progress.setValue(self.checklist.done_count())
+        self._set_status(f"Step {row + 1} of {len(labels)}: {name}...")
 
     def _on_setup_finished(self, error: Exception | None) -> None:
         self.running = False
-        self.progress.setRange(0, 100)
-        self.progress.setValue(100 if error is None else 0)
+        if error is None:
+            self.checklist.finish_all()
+            self.progress.setValue(self.progress.maximum())
+        else:
+            self.checklist.fail_current()
+            # What went wrong is in the log, so open it.
+            self.details_button.setChecked(True)
+            self.start_button.setText("Try Again")
+
         self.latest_radio.setEnabled(True)
         self.custom_radio.setEnabled(True)
         self._update_mode()
@@ -316,7 +397,6 @@ class SetupWindow(QMainWindow):
         self.running = True
         self.start_button.setEnabled(False)
         self.browse_button.setEnabled(False)
-        self.progress.setRange(0, 0)
         self._set_status("Installing Waydroid...")
         self._install_signals = run_in_background(self._install_waydroid_thread, self._on_waydroid_installed, plan=plan)
 
@@ -335,11 +415,9 @@ class SetupWindow(QMainWindow):
 
     def _on_waydroid_installed(self, error: Exception | None) -> None:
         self.running = False
-        self.progress.setRange(0, 100)
         self.browse_button.setEnabled(True)
         self.start_button.setEnabled(True)
         if error is not None:
-            self.progress.setValue(0)
             self._set_status(f"Waydroid install failed: {error}", RED)
             QMessageBox.critical(self, "Couldn't install Waydroid", f"{error}\n\nSee the log for details.")
             return
@@ -357,12 +435,12 @@ class SetupWindow(QMainWindow):
                 message, title="Enable Windows Hypervisor Platform?",
                 confirm=(
                     "Enable Windows Hypervisor Platform now? This needs admin permission and "
-                    "takes effect after you restart your PC. Then re-run Setup.bat."
+                    "takes effect after you restart your PC. Then open Setup again."
                 ),
                 enable=setup_wizard.enable_hypervisor_platform,
                 enabling_message=(
                     "Enabling Hypervisor Platform (you may see a UAC prompt). "
-                    "Restart your PC when it's done, then re-run Setup.bat."
+                    "Restart your PC when it's done, then open Setup again (the Manager's Run Setup)."
                 ),
                 manual_hint='Try enabling "Windows Hypervisor Platform" yourself via "Turn Windows features on or off".',
             )
@@ -371,12 +449,12 @@ class SetupWindow(QMainWindow):
                 message, title="Add yourself to the kvm group?",
                 confirm=(
                     "Add your account to the `kvm` group now? This asks for permission and "
-                    "takes effect after you log out and back in. Then re-run Setup.sh."
+                    "takes effect after you log out and back in. Then open Setup again."
                 ),
                 enable=setup_wizard.enable_kvm_access,
                 enabling_message=(
                     "You may see a permission prompt. Log out and back in when it's done, "
-                    "then re-run Setup.sh."
+                    "then open Setup again (the Manager's Run Setup)."
                 ),
                 manual_hint="Run in a terminal: sudo usermod -aG kvm $USER, then log out and back in.",
             )

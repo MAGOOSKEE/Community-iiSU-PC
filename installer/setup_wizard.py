@@ -631,7 +631,7 @@ def boot_avd_and_install(
             )
 
         diag = virtualization_diagnostics()
-        setup_script = "Setup.bat" if IS_WINDOWS else "Setup.sh"
+        setup_script = "Setup"
         if crashed_early and not diag["cpu_virtualization_enabled"]:
             if IS_WINDOWS:
                 raise VirtualizationError(
@@ -1060,7 +1060,7 @@ def install_default_redirectors() -> None:
             f"build-tools not found under {stub_apk.BUILD_TOOLS_DIR} (tried to copy them from "
             f"{expected_source}, which {'exists' if expected_source.is_dir() else 'does not exist'}), "
             "redirector apps can't be built without them, and most consoles won't appear as playable "
-            "in iiSU without their stub. Re-run Setup.bat; if this keeps happening, check that the SDK "
+            "in iiSU without their stub. Run Setup again; if this keeps happening, check that the SDK "
             "download actually included build-tools."
         )
 
