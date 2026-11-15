@@ -29,8 +29,11 @@ from shared.qt_theme import Fonts, GREEN, RED, SPACING_MD, SPACING_SM, TEXT_DIM
 class EmulatorDownloadDialog(QDialog):
     download_finished = Signal(bool)  # True if anything was actually installed
 
-    def __init__(self, parent=None, search_roots: list[str] | None = None):
+    def __init__(self, parent=None, search_roots: list[str] | None = None, preselect: list[str] | None = None):
+        """preselect: catalog ids to tick (the emulators your library still
+        needs); without it every emulator that isn't installed is ticked."""
         super().__init__(parent)
+        self._preselect = set(preselect) if preselect is not None else None
         self.setWindowTitle("Download Emulators")
         self.resize(700, 540)
         self.running = False
@@ -113,7 +116,8 @@ class EmulatorDownloadDialog(QDialog):
         for emu in get_catalog_with_status(self._search_roots):
             item = QTreeWidgetItem([emu["name"], emu["systems"], "Installed" if emu["installed"] else "Not installed"])
             item.setFlags(item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-            item.setCheckState(0, Qt.CheckState.Unchecked if emu["installed"] else Qt.CheckState.Checked)
+            wanted = (not emu["installed"]) if self._preselect is None else (emu["id"] in self._preselect)
+            item.setCheckState(0, Qt.CheckState.Checked if wanted else Qt.CheckState.Unchecked)
             item.setData(0, Qt.ItemDataRole.UserRole, emu)
             item.setForeground(2, Qt.GlobalColor.green if emu["installed"] else Qt.GlobalColor.gray)
             self.tree.addTopLevelItem(item)

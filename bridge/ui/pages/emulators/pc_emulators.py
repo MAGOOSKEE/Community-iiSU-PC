@@ -1,6 +1,15 @@
-"""PC Emulators settings page. The package-prefix mapping list is a
-QTreeWidget; per the layout rule in pages/base.py, it's placed directly in the page's own layout with
-an Expanding size policy rather than inside a QScrollArea."""
+"""PC Emulators settings page.
+
+Leads with the console-first list (bridge/ui/widgets/emulator_overview.py):
+which emulator each console opens and whether it's installed, with Download
+and Change buttons on each row. The raw mapping table config.json stores
+(Android package, executable names, launch flags) sits behind "Show the raw
+mapping table" for the rare edit the list can't express.
+
+Both are views of the same mappings: the raw table is the one get_emulators()
+reads when saving, and a change made in the list is written into it.
+Per the layout rule in pages/base.py, the lists sit directly in the page's
+own layout rather than inside a QScrollArea."""
 
 from pathlib import Path
 
@@ -17,14 +26,15 @@ from PySide6.QtWidgets import (
     QPushButton,
     QTreeWidget,
     QTreeWidgetItem,
+    QVBoxLayout,
     QWidget,
 )
 
 from launch_bridge import find_emulator_for_package, find_executable, find_rom
 from bridge.ui.dialogs.emulator_dialog import EmulatorDialog
-from bridge.ui.dialogs.emulator_download_dialog import EmulatorDownloadDialog
 from bridge.ui.dialogs.redirector_install_dialog import RedirectorInstallDialog
 from bridge.ui.pages.base import PageBase
+from bridge.ui.widgets.emulator_overview import EmulatorOverview
 from shared.emulator_defaults import build_emulators_map, describe_profile
 from shared.qt_theme import TEXT_DIM
 
@@ -34,10 +44,37 @@ class EmulatorsPage(PageBase):
         super().__init__(parent, scrollable_body=False)
         self.window = window
 
-        self.add_header("PC Emulators", "Maps the Android package name iiSU tries to launch to a real PC emulator.")
+        self.add_header("PC Emulators", "Which PC emulator each console's games open in.")
+        self._shown_once = False
+
+        self.overview = EmulatorOverview(
+            get_emulators=self.get_emulators,
+            set_emulators=self._fill_tree,
+            get_search_roots=lambda: self.window.roms_page.get_search_roots(),
+            add_search_root=lambda folder: self.window.roms_page.search_roots_list.addItem(folder),
+            get_roms_dir=lambda: self.window.roms_page.get_roms_dir(),
+        )
+        self.body_layout.addWidget(self.overview, 3)
+
+        self.advanced_toggle = QPushButton("Show the raw mapping table (advanced)")
+        self.advanced_toggle.setObjectName("ghost")
+        self.advanced_toggle.setCheckable(True)
+        self.advanced_toggle.toggled.connect(self._set_advanced_shown)
+        self.body_layout.addWidget(self.advanced_toggle, 0, Qt.AlignmentFlag.AlignLeft)
+
+        self.advanced_box = QWidget()
+        advanced_layout = QVBoxLayout(self.advanced_box)
+        advanced_layout.setContentsMargins(0, 0, 0, 0)
+        explain = QLabel(
+            "iiSU asks Android to open an emulator app by its package name; this table says which PC program "
+            "each package name opens instead, with the options it's started with."
+        )
+        explain.setWordWrap(True)
+        explain.setStyleSheet(f"color: {TEXT_DIM};")
+        advanced_layout.addWidget(explain)
 
         self.tree = QTreeWidget()
-        self.tree.setHeaderLabels(["Package prefix", "Executable name(s)", "Launch flags"])
+        self.tree.setHeaderLabels(["Android package", "Program name(s)", "Launch options"])
         self.tree.setRootIsDecorated(False)
         self.tree.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.tree.setColumnWidth(0, 320)
@@ -46,7 +83,7 @@ class EmulatorsPage(PageBase):
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._show_context_menu)
         self.tree.itemDoubleClicked.connect(lambda *_: self._edit_emulator())
-        self.body_layout.addWidget(self.tree, 1)
+        advanced_layout.addWidget(self.tree, 1)
 
         btn_row = QWidget()
         btn_row_layout = QHBoxLayout(btn_row)
@@ -55,24 +92,34 @@ class EmulatorsPage(PageBase):
         add_button.setObjectName("ghost")
         add_button.clicked.connect(self._add_emulator)
         btn_row_layout.addWidget(add_button)
+        self.edit_button = QPushButton("Edit...")
+        self.edit_button.setObjectName("ghost")
+        self.edit_button.clicked.connect(self._edit_emulator)
+        btn_row_layout.addWidget(self.edit_button)
+        self.test_button = QPushButton("Test...")
+        self.test_button.setObjectName("ghost")
+        self.test_button.setToolTip("Says whether the selected mapping's program is found. Save first.")
+        self.test_button.clicked.connect(self._test_emulator_mapping)
+        btn_row_layout.addWidget(self.test_button)
+        self.remove_button = QPushButton("Remove")
+        self.remove_button.setObjectName("ghost")
+        self.remove_button.clicked.connect(self._remove_emulator)
+        btn_row_layout.addWidget(self.remove_button)
         btn_row_layout.addStretch(1)
-        # Same convention as Console Games: left-click selection never
-        # surfaces Edit/Remove/Test as buttons, only this status hint;
-        # the actions themselves live in the right-click menu.
         self.selection_hint = QLabel("")
         self.selection_hint.setStyleSheet(f"color: {TEXT_DIM};")
         btn_row_layout.addWidget(self.selection_hint)
-        self.body_layout.addWidget(btn_row)
+        advanced_layout.addWidget(btn_row)
 
         btn_row2 = QWidget()
         btn_row2_layout = QHBoxLayout(btn_row2)
         btn_row2_layout.setContentsMargins(0, 0, 0, 0)
-        download_button = QPushButton("Download Emulators...")
-        download_button.setObjectName("accent")
-        download_button.clicked.connect(self._open_downloader)
-        btn_row2_layout.addWidget(download_button)
-        redirector_button = QPushButton("Install Redirector Apps...")
+        redirector_button = QPushButton("Reinstall iiSU's Emulator Placeholders...")
         redirector_button.setObjectName("ghost")
+        redirector_button.setToolTip(
+            "iiSU only offers a console once it sees an emulator app for it in Android. Setup installs a "
+            "tiny placeholder app for each; this puts them back if they went missing."
+        )
         redirector_button.clicked.connect(lambda: RedirectorInstallDialog(self.window).exec())
         btn_row2_layout.addWidget(redirector_button)
         restore_button = QPushButton("Restore Defaults")
@@ -80,20 +127,38 @@ class EmulatorsPage(PageBase):
         restore_button.clicked.connect(self._restore_default_emulators)
         btn_row2_layout.addWidget(restore_button)
         btn_row2_layout.addStretch(1)
-        self.body_layout.addWidget(btn_row2)
+        advanced_layout.addWidget(btn_row2)
+
+        self.advanced_box.setVisible(False)
+        self.body_layout.addWidget(self.advanced_box, 2)
 
         self.reload_from_config()
         self._update_selection_hint()
 
-    def _open_downloader(self) -> None:
-        search_roots = self.window.roms_page.get_search_roots() if hasattr(self.window, "roms_page") else []
-        EmulatorDownloadDialog(self.window, search_roots=search_roots).exec()
+    def _set_advanced_shown(self, shown: bool) -> None:
+        self.advanced_box.setVisible(shown)
+        self.advanced_toggle.setText(
+            "Hide the raw mapping table" if shown else "Show the raw mapping table (advanced)"
+        )
+
+    def on_shown(self) -> None:
+        """The first visit looks for every emulator (it can take a few
+        seconds on a big folder); after that, Check Again does it."""
+        if not self._shown_once:
+            self._shown_once = True
+            self.overview.refresh()
 
     def reload_from_config(self) -> None:
+        self._fill_tree(self.window.config_data.get("emulators", {}))
+        if self._shown_once:
+            self.overview.refresh()
+
+    def _fill_tree(self, emulators: dict) -> None:
         self.tree.clear()
-        for prefix, profile in self.window.config_data.get("emulators", {}).items():
+        for prefix, profile in emulators.items():
             exe_display, pre_args_display = describe_profile(profile)
             self.tree.addTopLevelItem(QTreeWidgetItem([prefix, exe_display, pre_args_display]))
+        self._update_selection_hint()
 
     def get_emulators(self) -> dict:
         original_emulators = self.window.config_data.get("emulators", {})
@@ -113,10 +178,10 @@ class EmulatorsPage(PageBase):
 
     def _update_selection_hint(self) -> None:
         count = len(self.tree.selectedItems())
-        if count:
-            self.selection_hint.setText(f"{count} selected, right-click for actions.")
-        else:
-            self.selection_hint.setText("Select a mapping, then right-click for actions.")
+        self.edit_button.setEnabled(count == 1)
+        self.test_button.setEnabled(count == 1)
+        self.remove_button.setEnabled(count > 0)
+        self.selection_hint.setText(f"{count} selected" if count else "")
 
     def _show_context_menu(self, pos) -> None:
         item = self.tree.itemAt(pos)
@@ -157,9 +222,8 @@ class EmulatorsPage(PageBase):
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
-        self.window.config_data["emulators"] = build_emulators_map()
-        self.reload_from_config()
-        self._update_selection_hint()
+        self._fill_tree(build_emulators_map())
+        self.overview.refresh()
 
     def _add_emulator(self) -> None:
         dialog = EmulatorDialog(self, "Add emulator mapping")
@@ -172,6 +236,7 @@ class EmulatorsPage(PageBase):
                 QMessageBox.critical(self, "Duplicate", f"A mapping for '{prefix}' already exists.")
                 return
             self.tree.addTopLevelItem(QTreeWidgetItem([prefix, ", ".join(exe_names), ", ".join(pre_args)]))
+            self._raw_table_changed()
 
     def _edit_emulator(self) -> None:
         selected = self.tree.selectedItems()
@@ -195,11 +260,18 @@ class EmulatorsPage(PageBase):
             self.tree.takeTopLevelItem(index)
             self.tree.addTopLevelItem(QTreeWidgetItem([new_prefix, ", ".join(exe_names), ", ".join(pre_args)]))
             self._update_selection_hint()
+            self._raw_table_changed()
 
     def _remove_emulator(self) -> None:
         for item in self.tree.selectedItems():
             self.tree.takeTopLevelItem(self.tree.indexOfTopLevelItem(item))
         self._update_selection_hint()
+        self._raw_table_changed()
+
+    def _raw_table_changed(self) -> None:
+        """Keeps the console list in step with an edit made in the raw table."""
+        if self._shown_once:
+            self.overview.refresh()
 
     def _test_emulator_mapping(self) -> None:
         selected = self.tree.selectedItems()

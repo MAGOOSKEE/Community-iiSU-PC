@@ -210,6 +210,16 @@ QPushButton#ghost:hover {{
 QPushButton#ghost:disabled {{
     color: {TEXT_DIM};
 }}
+QPushButton#RowButton {{
+    background-color: {PANEL_BG_HOVER};
+    color: {TEXT};
+    padding: 3px 10px;
+    border-radius: 6px;
+}}
+QPushButton#RowButton:hover {{
+    background-color: {ACCENT_BG};
+}}
+
 QPushButton#HomePrimary {{
     border-radius: 14px;
     padding: 10px 28px;

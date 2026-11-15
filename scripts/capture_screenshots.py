@@ -9,8 +9,12 @@ Android VM, no adb call, no update check.
 
 Run from the repo root after a change to how the Manager looks:
     python scripts/capture_screenshots.py
+
+--out DIR writes somewhere else (for a quick look while working), and
+--only NAME[,NAME] takes just those shots, by file name without .png.
 """
 
+import argparse
 import json
 import sys
 import tempfile
@@ -42,8 +46,41 @@ SHOTS = [
     ("manager-display.png", "settings", "settings"),
 ]
 
+# Empty stand-ins, so some consoles show their emulator as installed.
+EXAMPLE_EMULATORS = ["pcsx2-qt.exe", "Dolphin.exe", "retroarch.exe"]
+
+
+def wait_until(condition, timeout_ms: int = 8000) -> None:
+    """Runs a real event loop until condition() holds. QTest.qWait's own
+    loop barely lets a worker thread run, so a page's background scan could
+    take many times longer under it than in the app."""
+    from PySide6.QtCore import QElapsedTimer, QEventLoop, QTimer
+
+    loop = QEventLoop()
+    clock = QElapsedTimer()
+    clock.start()
+    timer = QTimer()
+
+    def check() -> None:
+        if condition() or clock.elapsed() > timeout_ms:
+            loop.quit()
+
+    timer.timeout.connect(check)
+    timer.start(50)
+    loop.exec()
+    timer.stop()
+
+
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--out", type=Path, default=OUTPUT_DIR)
+    parser.add_argument("--only", default="")
+    args = parser.parse_args()
+    only = {name.strip() for name in args.only.split(",") if name.strip()}
+    shots = [shot for shot in SHOTS if not only or shot[0].removesuffix(".png") in only]
+    output_dir = args.out
+
     import bridge.ui  # noqa: F401; puts bridge/ and installer/ on sys.path
     from PySide6.QtCore import Qt
     from PySide6.QtTest import QTest
@@ -71,9 +108,15 @@ def main() -> None:
             "Moonfall Tactics (Disc 1).chd\nMoonfall Tactics (Disc 2).chd\n", encoding="utf-8"
         )
 
+        emulator_dir = tmp_path / "Emulators"
+        emulator_dir.mkdir()
+        for name in EXAMPLE_EMULATORS:
+            (emulator_dir / name).write_bytes(b"")
+
         config_path = tmp_path / "config.json"
         config_path.write_text(json.dumps({
             "avd_name": "iisuwin", "roms_dir": str(roms), "bridge_port": 7737,
+            "search_roots": [str(emulator_dir)],
             "emulators": build_emulators_map(),
             "display": {"width": 1920, "height": 1080, "density": 240}, "vm_backend": "avd",
         }), encoding="utf-8")
@@ -101,8 +144,8 @@ def main() -> None:
             window.show()
             QTest.qWait(PAGE_SETTLE_MS)
 
-            OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-            for file_name, page, sub_page in SHOTS:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            for file_name, page, sub_page in shots:
                 window.show_page(page)
                 if sub_page:
                     window._show_subpage(page, sub_page)
@@ -115,13 +158,15 @@ def main() -> None:
                 if page == "games":
                     games_page = window.subpages[sub_page]
                     games_page.on_shown()  # scans the example library on a worker thread
-                    for _ in range(50):
-                        if games_page.status_label.text() != "Scanning...":
-                            break
-                        QTest.qWait(100)
+                    wait_until(lambda: games_page.status_label.text() != "Scanning...")
+                if sub_page == "emulators":
+                    emulators_page = window.subpages[sub_page]
+                    emulators_page.on_shown()  # looks for each emulator on a worker thread
+                    wait_until(lambda: emulators_page.overview.rows)
                 QTest.qWait(PAGE_SETTLE_MS)  # the page's fade-in has to finish
-                window.grab().save(str(OUTPUT_DIR / file_name))
-                print(f"wrote docs/images/{file_name}")
+                window.grab().save(str(output_dir / file_name))
+                print(f"wrote {output_dir / file_name}")
+
             window.close()
 
 
