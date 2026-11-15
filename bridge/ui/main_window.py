@@ -295,6 +295,12 @@ class ManagerWindow(QMainWindow):
             settings["debug_show_console_windows"] = self.advanced_page.get_debug_show_console_windows()
             settings["startup_volume"] = self.advanced_page.get_startup_volume()
             settings["boot_overlay_details"] = self.advanced_page.get_boot_overlay_details()
+            # Only written once it's been changed from its default (on), so a
+            # config from before the setting existed doesn't read as unsaved.
+            auto_rescan = self.advanced_page.get_auto_rescan_library()
+            if not auto_rescan or "auto_rescan_library" in self.config_data:
+                settings["auto_rescan_library"] = auto_rescan
+
 
         if hasattr(self, "emulator_page"):
             settings["emulator_profiles"] = self.emulator_page.get_emulator_profiles()

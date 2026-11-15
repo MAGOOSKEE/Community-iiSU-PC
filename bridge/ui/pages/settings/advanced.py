@@ -102,6 +102,13 @@ class AdvancedPage(PageBase):
         volume_note.setStyleSheet(f"color: {TEXT_DIM};")
         self.body_layout.addWidget(volume_note)
 
+        self.auto_rescan_check = QCheckBox("Rescan iiSU's library by itself when games are added or removed")
+        self.auto_rescan_check.setToolTip(
+            "After a start finds your ROM folder changed, iiSU is asked to run its own \"Rescan full library\", "
+            "so new games appear without opening iiSU's settings."
+        )
+        self.body_layout.addWidget(self.auto_rescan_check)
+
         self.show_overlay_check = QCheckBox("Show the loading overlay during boot and game launch")
         self.body_layout.addWidget(self.show_overlay_check)
 
@@ -157,6 +164,7 @@ class AdvancedPage(PageBase):
         for name, check in self._chord_checks.items():
             check.setChecked(name in initial_chord)
 
+        self.auto_rescan_check.setChecked(bool(config.get("auto_rescan_library", True)))
         self.show_overlay_check.setChecked(bool(config.get("show_boot_overlay", True)))
         self.overlay_details_check.setChecked(bool(config.get("boot_overlay_details", False)))
         self.overlay_details_check.setEnabled(self.show_overlay_check.isChecked())
@@ -196,7 +204,11 @@ class AdvancedPage(PageBase):
     def get_boot_overlay_details(self) -> bool:
         return self.overlay_details_check.isChecked()
 
+    def get_auto_rescan_library(self) -> bool:
+        return self.auto_rescan_check.isChecked()
+
     def get_show_boot_overlay(self) -> bool:
+
         return self.show_overlay_check.isChecked()
 
     def get_debug_show_console_windows(self) -> bool:

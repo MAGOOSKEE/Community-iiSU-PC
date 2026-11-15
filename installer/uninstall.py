@@ -180,6 +180,7 @@ def collect_targets(avd_name: str) -> list[Path]:
         BRIDGE_DIR / ".boot_fingerprint.json",
         BRIDGE_DIR / ".controller_notice.json",
         BRIDGE_DIR / ".last_launch_problem.json",
+        BRIDGE_DIR / ".library_changed",
         BRIDGE_DIR / ".iisu_installed.json",
         BRIDGE_DIR / "windows_apps.json",
         BRIDGE_DIR / "windows_stubs",

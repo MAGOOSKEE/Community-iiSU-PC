@@ -54,6 +54,7 @@ from pathlib import Path, PurePosixPath
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+import library_rescan
 import portable_sdk  # noqa: F401; imported for its import-time PATH fix (adb), not used directly here
 from bridge_config import ConfigMissingError, read_config_file
 from console_names import load_console_lookup, resolve_console_shortname
@@ -464,7 +465,12 @@ def main() -> None:
         print(result.stderr)
         sys.exit(1)
 
-    print("Done. Now hit \"Rescan full library\" in iiSU's Library settings.")
+    library_rescan.mark_changed()
+    if config.get("auto_rescan_library", True):
+        print("Done. iiSU will rescan its library by itself once it's open.")
+    else:
+        print("Done. Now hit \"Rescan full library\" in iiSU's Library settings.")
+
 
 
 if __name__ == "__main__":

@@ -22,6 +22,7 @@
 /bridge/.boot_fingerprint.json
 /bridge/.controller_notice.json
 /bridge/.last_launch_problem.json
+/bridge/.library_changed
 /bridge/.iisu_installed.json
 /bridge/emulator.log
 /bridge/bridge.log

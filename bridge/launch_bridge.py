@@ -66,6 +66,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import game_overrides
 import launch_problems
+import library_rescan
+
 import portable_sdk  # noqa: F401; imported for its import-time PATH fix (adb), not used directly here
 from bridge_config import ConfigMissingError, load_config
 from controller_bridge import ControllerBridge
@@ -474,6 +476,23 @@ def log_launch(
 
 def _is_waydroid(config: dict) -> bool:
     return resolve_backend(config) == BACKEND_WAYDROID
+
+
+def start_library_rescan_if_needed(config: dict) -> None:
+    """When this start's ROM sync changed the library, asks iiSU to rescan
+    it once its main screen is up (see library_rescan.py), on a thread of its
+    own so the bridge is listening for launches meanwhile."""
+    if not config.get("auto_rescan_library", True) or not library_rescan.pending():
+        return
+
+    def run() -> None:
+        if library_rescan.rescan_when_ready(adb_client.shell, log=lambda line: print(f"[bridge] {line}")):
+            library_rescan.clear()
+            log_launch("RESCAN: the library changed, so iiSU was asked to rescan it")
+        else:
+            log_launch("RESCAN: the library changed, but iiSU didn't start a rescan; trying again next start")
+
+    threading.Thread(target=run, daemon=True).start()
 
 
 def launch_iisu(config: dict) -> None:
@@ -2098,6 +2117,7 @@ def main() -> None:
     # restarted against an AVD that's already up.
     print("[bridge] launching iiSU...")
     launch_iisu(config)
+    start_library_rescan_if_needed(config)
 
     # If the AVD is already running when the bridge starts, apply the
     # fullscreen preference to it immediately rather than waiting for the

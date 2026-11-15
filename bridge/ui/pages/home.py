@@ -315,6 +315,10 @@ class HomePage(PageBase):
             and supports_headless_boot(self.window.config_data)
         )
         menu.addSeparator()
+        sync_now = menu.addAction("Sync Library Now", self._sync_library_now)
+        sync_now.setToolTip("Brings new or removed games into iiSU without restarting, then has iiSU rescan.")
+        # Needs Android up and nothing else running from here.
+        sync_now.setEnabled(bool(self.window.last_avd_up) and not self.busy)
         menu.addAction("ROMs Folder", self._open_roms_folder)
         menu.addAction("Open Logs Folder", self._open_logs)
         menu.addAction("Recreate Shortcut", self._recreate_desktop_shortcut)
@@ -473,7 +477,38 @@ class HomePage(PageBase):
         self._append_log("\n=== Stop ===\n")
         self._guarded_signals = run_in_background(self._run_guarded, self._on_guarded_done, self._on_guarded_error, stop_iisu_pc.main)
 
+    def _sync_library_now(self) -> None:
+        """The start's library sync, run on demand while iiSU is open, then
+        the rescan (see bridge/library_rescan.py). The log drawer opens so
+        there's something to watch."""
+        if self.busy:
+            return
+        self.set_logs_shown(True)
+        self._set_busy(True)
+        self._append_log("\n[manager] syncing your ROM library into Android...\n")
+        self._guarded_signals = run_in_background(
+            self._run_guarded, self._on_guarded_done, self._on_guarded_error, self._sync_and_rescan
+        )
+
+    @staticmethod
+    def _sync_and_rescan() -> None:
+        import library_rescan
+        import sync_library
+        from shared import adb_client
+
+        try:
+            sync_library.main()
+        except SystemExit as exc:
+            if exc.code not in (0, None):
+                raise
+        if not library_rescan.pending():
+            print("[manager] nothing new to rescan.")
+            return
+        if library_rescan.rescan_when_ready(adb_client.shell, timeout=30, settle=0):
+            library_rescan.clear()
+
     def _run_guarded(self, func) -> None:
+
         old_stdout = sys.stdout
         sys.stdout = self._log_redirector
         try:
