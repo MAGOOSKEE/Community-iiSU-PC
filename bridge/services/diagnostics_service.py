@@ -2,12 +2,21 @@
 callable/testable without a Qt event loop.
 
 Each diagnostic check is a plain (status, check, details) tuple with
-status one of "OK"/"WARNING"/"ERROR", same vocabulary the original used."""
+status one of "OK"/"WARNING"/"ERROR", same vocabulary the original used.
+
+Only real problems are warnings or errors: something that's simply not in
+use (Steam not installed, the bridge stopped while iiSU is stopped) is OK
+with a note, so a healthy install reads as healthy. fix_for() says what the
+Diagnostics page can offer to do about each problem, and report_text() is
+the copyable summary for a bug report, with this PC's user folder and
+account name taken out."""
 
 from __future__ import annotations
 
+import getpass
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -15,7 +24,8 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from services import backup_service, windows_apps_service
+import launch_problems
+from services import backup_service, emulator_overview_service, windows_apps_service
 from shared import app_version, vm_storage
 
 BRIDGE_DIR = Path(__file__).resolve().parent.parent
@@ -116,10 +126,10 @@ def run_diagnostics(config_data: dict) -> list[tuple[str, str, str]]:
     if roms_dir:
         rp = Path(roms_dir)
         add("OK" if rp.is_dir() else "ERROR", "ROMs directory", str(rp) if rp.is_dir() else f"Configured path does not exist: {rp}")
-        windows_roms = rp / "windows"
-        add("OK" if windows_roms.is_dir() else "WARNING", "Windows ROMs folder", str(windows_roms) if windows_roms.is_dir() else f"Not found: {windows_roms}")
+        if rp.is_dir() and isinstance(config.get("emulators"), dict):
+            add(*emulators_check(config))
     else:
-        add("WARNING", "ROMs directory", "roms_dir is not configured")
+        add("WARNING", "ROMs directory", "No ROM folder is set yet.")
 
     if adb_path.is_file():
         try:
@@ -142,7 +152,10 @@ def run_diagnostics(config_data: dict) -> list[tuple[str, str, str]]:
                 else:
                     add("ERROR", "Android shared storage", (listing.stderr or listing.stdout or "Unable to access shared storage").strip())
             else:
-                add("ERROR", "Android VM / ADB", state_text or (state.stderr or "ADB device is not ready").strip())
+                add(
+                    "WARNING", "Android VM / ADB",
+                    "Android isn't running, so its checks were skipped. Start iiSU, then run Diagnostics again.",
+                )
         except Exception as exc:
             add("ERROR", "Android VM / ADB", str(exc))
 
@@ -151,7 +164,7 @@ def run_diagnostics(config_data: dict) -> list[tuple[str, str, str]]:
         with socket.create_connection(("127.0.0.1", port), timeout=0.35):
             add("OK", "Launch Bridge listener", f"Listening on localhost:{port}")
     except Exception:
-        add("WARNING", "Launch Bridge listener", f"Nothing accepted a connection on localhost:{bridge_port} (normal if the bridge is not running)")
+        add("OK", "Launch Bridge listener", f"Not running (normal while iiSU is stopped), port {bridge_port}")
 
     steam_libraries = windows_apps_service.steam_library_paths()
     found_steam = steam_libraries[0] if steam_libraries else None
@@ -160,7 +173,7 @@ def run_diagnostics(config_data: dict) -> list[tuple[str, str, str]]:
         add("OK", "Steam installation", str(found_steam))
         add("OK" if vdf.is_file() else "WARNING", "Steam library config", str(vdf) if vdf.is_file() else f"Not found: {vdf}")
     else:
-        add("WARNING", "Steam installation", "Default Steam installation was not detected")
+        add("OK", "Steam installation", "Not installed (only needed for Steam games)")
 
     if os.name != "nt":
         if shutil.which("xdotool"):
@@ -184,7 +197,7 @@ def run_diagnostics(config_data: dict) -> list[tuple[str, str, str]]:
             except Exception:
                 add("OK", label, str(path))
         else:
-            add("WARNING", label, f"Not found yet: {path}")
+            add("OK", label, f"None yet: {path}")
 
     safety = backup_service.RESTORE_SAFETY_DIR
     if safety.is_dir():
@@ -196,7 +209,83 @@ def run_diagnostics(config_data: dict) -> list[tuple[str, str, str]]:
     else:
         add("OK", "Restore safety copies", "No restore safety folder yet")
 
+    problem = launch_problems.load()
+    if problem is not None:
+        add("WARNING", "Last game launch", problem.get("message", ""))
+
     return results
+
+
+def emulators_check(config: dict, finder=None) -> tuple[str, str, str]:
+    """Whether every console in the ROM folder has its emulator installed,
+    the same check as the PC Emulators page's list."""
+    from console_names import load_console_lookup, resolve_console_shortname
+
+    exact, by_compact = load_console_lookup()
+    rows = emulator_overview_service.build_rows(config.get("emulators", {}))
+    kwargs = {"finder": finder} if finder is not None else {}
+    emulator_overview_service.check_installed(rows, config.get("search_roots", []), **kwargs)
+    consoles = emulator_overview_service.library_consoles(
+        config.get("roms_dir"), lambda name: resolve_console_shortname(name, exact, by_compact)
+    )
+    emulator_overview_service.mark_library(rows, consoles)
+    missing = [row for row in rows if row.in_library and row.status == emulator_overview_service.STATUS_MISSING]
+    if not missing:
+        return "OK", "Emulators for your games", f"Every console in your ROM folder has its emulator ({len(consoles)} consoles)."
+    needs = ", ".join(sorted({f"{row.emulator} ({row.console_label})" for row in missing}))
+    return "WARNING", "Emulators for your games", f"Not installed: {needs}. Those games won't open."
+
+
+# What the Diagnostics page can offer for a problem: (action id, button label).
+# The page maps each action id to what it does.
+FIXES = {
+    "Bridge config": ("setup", "Run Setup"),
+    "Bridge config JSON": ("repair_config", "Repair Settings..."),
+    "Bundled ADB": ("setup", "Run Setup"),
+    "ROMs directory": ("roms", "Choose ROM Folder"),
+    "Emulators for your games": ("emulators", "Open PC Emulators"),
+    "Android VM / ADB": ("home", "Go to Start"),
+    "Android VM storage": ("storage", "Open Storage"),
+    "PC Apps JSON": ("pc_games", "Open PC Games"),
+    "Last game launch": ("launch_log", "Open Launch Log"),
+    "xdotool": ("copy:sudo apt install xdotool", "Copy Install Command"),
+    "flatpak": ("copy:sudo apt install flatpak", "Copy Install Command"),
+}
+
+
+def fix_for(status: str, check: str) -> tuple[str, str] | None:
+    if status == "OK":
+        return None
+    return FIXES.get(check)
+
+
+def sort_problems_first(results: list[tuple[str, str, str]]) -> list[tuple[str, str, str]]:
+    order = {"ERROR": 0, "WARNING": 1, "OK": 2}
+    return sorted(results, key=lambda row: order.get(row[0], 3))
+
+
+def redact(text: str, home: str | None = None, user: str | None = None) -> str:
+    """Takes this PC's user folder and account name out of a report, so it
+    can be pasted into a public issue as it is."""
+    home = home if home is not None else str(Path.home())
+    if user is None:
+        try:
+            user = getpass.getuser()
+        except Exception:  # noqa: BLE001; no account name to hide then
+            user = ""
+    for variant in {home, home.replace("\\", "/"), home.replace("/", "\\")}:
+        if variant and len(variant) > 3:
+            text = text.replace(variant, "~")
+    if user and len(user) > 2:
+        text = re.sub(rf"(?<![A-Za-z0-9]){re.escape(user)}(?![A-Za-z0-9])", "<user>", text, flags=re.IGNORECASE)
+    return text
+
+
+def report_text(results: list[tuple[str, str, str]], **redact_kwargs) -> str:
+    lines = [f"Community-iiSU-PC diagnostics: {summarize(results)}", ""]
+    for status, check, details in sort_problems_first(results):
+        lines.append(f"[{status}] {check}: {details}")
+    return redact("\n".join(lines), **redact_kwargs)
 
 
 def summarize(results: list[tuple[str, str, str]]) -> str:

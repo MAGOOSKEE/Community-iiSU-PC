@@ -370,7 +370,15 @@ class ManagerWindow(QMainWindow):
         stack.addWidget(widget)
         self.subpages[sub_key] = widget
 
+    def open_page(self, page: str, sub_page: str | None = None) -> None:
+        """Shows a page, and one of its sub-pages: for buttons elsewhere in
+        the Manager that send someone to where a thing is fixed."""
+        self.show_page(page)
+        if sub_page is not None:
+            self._show_subpage(page, sub_page)
+
     def _group_for_sub(self, sub_key: str) -> str:
+
         for group_key, subs in NAV_GROUPS.items():
             if any(sub_key == sk for sk, _label in subs):
                 return group_key

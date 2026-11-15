@@ -22,6 +22,7 @@ TEXT_DIM = "#9a9aa2"
 GRADIENT_STOPS = ["#71e0ff", "#68ccff", "#5e84ff", "#8258fa", "#c56eff"]
 GREEN = "#4fd67a"
 RED = "#ff6161"
+AMBER = "#e8a33d"
 GRAY = "#5a5a60"
 
 # Shared by every input widget.
