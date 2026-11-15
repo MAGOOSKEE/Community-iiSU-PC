@@ -18,6 +18,7 @@ import threading
 import traceback
 from pathlib import Path
 
+import iisu_release
 import setup_wizard
 
 # PySide6 is this file's own GUI toolkit, has to be confirmed installed
@@ -26,7 +27,7 @@ setup_wizard.ensure_pyside6()
 
 from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
-    QCheckBox, QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QProgressBar, QPlainTextEdit, QPushButton,
+    QButtonGroup, QCheckBox, QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QProgressBar, QPlainTextEdit, QPushButton, QRadioButton,
     QSizePolicy, QSpinBox, QVBoxLayout, QWidget,
 )
 
@@ -93,9 +94,24 @@ class SetupWindow(QMainWindow):
         apk_heading.setFont(Fonts.heading())
         apk_layout.addWidget(apk_heading)
 
+        self.latest_radio = QRadioButton("Download the latest official release (from iiSU's GitHub)")
+        self.latest_radio.setToolTip(
+            "Fetches the newest non-prerelease APK from github.com/iisu-network/iiSU on your machine "
+            "and checks it against GitHub's SHA-256. Nothing is bundled with this project."
+        )
+        self.custom_radio = QRadioButton("Use my own APK (custom build or pre-release)")
+        self.latest_radio.setChecked(True)
+        mode_group = QButtonGroup(self)
+        mode_group.addButton(self.latest_radio)
+        mode_group.addButton(self.custom_radio)
+        self.latest_radio.toggled.connect(self._update_mode)
+        apk_layout.addWidget(self.latest_radio)
+        apk_layout.addWidget(self.custom_radio)
+
         apk_row = QHBoxLayout()
         self.apk_label = QLabel("No APK selected.")
         self.apk_label.setProperty("role", "dim")
+        apk_row.addSpacing(22)
         apk_row.addWidget(self.apk_label, stretch=1)
         self.browse_button = QPushButton("Browse...")
         self.browse_button.clicked.connect(self._browse_apk)
@@ -140,7 +156,6 @@ class SetupWindow(QMainWindow):
         action_row = QHBoxLayout()
         self.start_button = QPushButton("Start Setup")
         self.start_button.setObjectName("accent")
-        self.start_button.setEnabled(False)
         self.start_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.start_button.clicked.connect(self._start_setup)
         action_row.addWidget(self.start_button)
@@ -160,6 +175,7 @@ class SetupWindow(QMainWindow):
         log_layout.addWidget(self.log_text)
         root.addWidget(log_card, stretch=1)
 
+        self._update_mode()
         self.status_label = QLabel("Ready.")
         self.status_label.setProperty("role", "dim")
         root.addWidget(self.status_label)
@@ -179,6 +195,14 @@ class SetupWindow(QMainWindow):
         found = setup_wizard.find_input_apk()
         if found is not None:
             self._set_apk(found)
+            self.custom_radio.setChecked(True)
+
+    def _update_mode(self) -> None:
+        use_latest = self.latest_radio.isChecked()
+        self.browse_button.setEnabled(not use_latest and not self.running)
+        self.apk_label.setEnabled(not use_latest)
+        if not self.running:
+            self.start_button.setEnabled(use_latest or self.apk_path is not None)
 
     def _browse_apk(self) -> None:
         chosen, _filter = QFileDialog.getOpenFileName(self, "Select your iiSU APK", "", "Android APK (*.apk)")
@@ -191,8 +215,7 @@ class SetupWindow(QMainWindow):
         self.apk_label.setProperty("role", "")
         self.apk_label.style().unpolish(self.apk_label)
         self.apk_label.style().polish(self.apk_label)
-        if not self.running:
-            self.start_button.setEnabled(True)
+        self._update_mode()
 
     # == Log handling ==
 
@@ -204,11 +227,14 @@ class SetupWindow(QMainWindow):
     # == Setup run ==
 
     def _start_setup(self) -> None:
-        if self.apk_path is None or self.running:
+        use_latest = self.latest_radio.isChecked()
+        if (self.apk_path is None and not use_latest) or self.running:
             return
         self.running = True
         self.start_button.setEnabled(False)
         self.browse_button.setEnabled(False)
+        self.latest_radio.setEnabled(False)
+        self.custom_radio.setEnabled(False)
         self.storage_spin.setEnabled(False)
         self.lean_check.setEnabled(False)
         self._set_status("Running setup. The first run can take a while (several GB)...")
@@ -216,16 +242,19 @@ class SetupWindow(QMainWindow):
 
         self._setup_signals = run_in_background(
             self._run_setup_thread, self._on_setup_finished,
-            apk_path=self.apk_path, storage_gb=self.storage_spin.value(), lean=self.lean_check.isChecked(),
+            apk_path=None if use_latest else self.apk_path, storage_gb=self.storage_spin.value(), lean=self.lean_check.isChecked(),
         )
 
-    def _run_setup_thread(self, apk_path: Path, storage_gb: int, lean: bool) -> Exception | None:
+    def _run_setup_thread(self, apk_path: Path | None, storage_gb: int, lean: bool) -> Exception | None:
         old_stdout = sys.stdout
         sys.stdout = self._log_stream
         error: Exception | None = None
         try:
             with setup_wizard.session_log():
                 try:
+                    if apk_path is None:
+                        self._on_stage("Downloading the latest iiSU release", 1, 1)
+                        apk_path = iisu_release.download_latest(setup_wizard.INPUT_DIR)
                     setup_wizard.run_setup(apk_path, on_stage=self._on_stage, storage_gb=storage_gb, lean=lean)
                 except Exception as e:  # noqa: BLE001; surfaced to the user below, not swallowed
                     error = e
@@ -248,10 +277,11 @@ class SetupWindow(QMainWindow):
         self.running = False
         self.progress.setRange(0, 100)
         self.progress.setValue(100 if error is None else 0)
-        self.browse_button.setEnabled(True)
+        self.latest_radio.setEnabled(True)
+        self.custom_radio.setEnabled(True)
+        self._update_mode()
         self.storage_spin.setEnabled(True)
         self.lean_check.setEnabled(True)
-        self.start_button.setEnabled(True)
 
         if error is None:
             self._set_status("Setup complete, opening the setup wizard...", GREEN)

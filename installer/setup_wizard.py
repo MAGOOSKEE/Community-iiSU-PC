@@ -1220,11 +1220,15 @@ def run_setup(
 
 def main() -> None:
     apk_path = find_input_apk()
+    if "--download-latest" in sys.argv:
+        import iisu_release
+        apk_path = iisu_release.download_latest(INPUT_DIR)
     if apk_path is None:
         INPUT_DIR.mkdir(parents=True, exist_ok=True)
         print(f"No iiSU APK found in {INPUT_DIR}.")
         print("Drop your own copy of the iiSU APK into that folder (any filename, .apk extension)")
-        print("and run this again. This tool patches your copy, it doesn't come with one.")
+        print("and run this again, or run it with --download-latest to fetch the latest official")
+        print("release from iiSU's GitHub. This tool patches your copy, it doesn't come with one.")
         sys.exit(1)
     with session_log():
         run_setup(apk_path)

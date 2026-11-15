@@ -39,6 +39,7 @@ KNOWN_BUILDS: dict[str, str] = {
     "0e9008b2b66c48f98edb7cfa42b3dbde2185ea439179ac673ed2e360769de6e8": "iiSU Alpha 7.4",
     "9c8dcd4349ea0d39ef578b06c23857722c9e23f0922ee452231878cd5916a4cf": "iiSU Alpha 7.5-prerelease1",
     "b8374b68bd54d43fd0e055e8831714155a286b3cd6ad2fa86342d9a24b678ace": "iiSU Alpha 7.5-prerelease-2",
+    "0abbfb46d945e4fcb4fa729d5590d4fe6d86fcdf9fa10b217d0a43fb7393a534": "iiSU Alpha 7.5",
 }
 
 
