@@ -165,61 +165,61 @@ class FindExecutableAndRomTests(unittest.TestCase):
 
     def test_finds_an_executable_a_few_folders_down(self):
         exe = self._touch("Emulators", "Duck", "duck.exe")
-        self.assertEqual(find_executable(["duck.exe"], [self.root], self._cache()), exe)
+        self.assertEqual(find_executable(["duck.exe"], [self.root], self._cache(), is_windows=True), exe)
 
     def test_a_shallower_match_beats_a_deeper_one(self):
         shallow = self._touch("a", "duck.exe")
         self._touch("b", "c", "d", "duck.exe")
-        self.assertEqual(find_executable(["duck.exe"], [self.root], self._cache()), shallow)
+        self.assertEqual(find_executable(["duck.exe"], [self.root], self._cache(), is_windows=True), shallow)
 
     def test_nothing_deeper_than_the_depth_cap_is_found(self):
         self._touch("1", "2", "3", "4", "5", "6", "duck.exe")
-        self.assertIsNone(find_executable(["duck.exe"], [self.root], self._cache()))
+        self.assertIsNone(find_executable(["duck.exe"], [self.root], self._cache(), is_windows=True))
 
     def test_skipped_folders_are_not_searched(self):
         self._touch(".git", "duck.exe")
-        self.assertIsNone(find_executable(["duck.exe"], [self.root], self._cache()))
+        self.assertIsNone(find_executable(["duck.exe"], [self.root], self._cache(), is_windows=True))
 
     def test_a_missing_search_root_is_ignored(self):
-        self.assertIsNone(find_executable(["duck.exe"], [self.root / "nope"], self._cache()))
+        self.assertIsNone(find_executable(["duck.exe"], [self.root / "nope"], self._cache(), is_windows=True))
 
     def test_the_path_wins_over_the_search_roots(self):
         on_path = self._touch("bin", "duck.exe")
         self._touch("elsewhere", "duck.exe")
         with patch.object(emulator_lookup.shutil, "which", return_value=str(on_path)):
-            self.assertEqual(find_executable(["duck.exe"], [self.root / "elsewhere"], self._cache()), on_path)
+            self.assertEqual(find_executable(["duck.exe"], [self.root / "elsewhere"], self._cache(), is_windows=True), on_path)
 
     def test_a_hit_is_cached_and_reused(self):
         exe = self._touch("duck.exe")
         cache = self._cache()
-        find_executable(["duck.exe"], [self.root], cache)
+        find_executable(["duck.exe"], [self.root], cache, is_windows=True)
         self.assertEqual(list(cache["executables"].values()), [str(exe)])
         with patch.object(emulator_lookup, "_find_by_name") as scan:
-            self.assertEqual(find_executable(["duck.exe"], [self.root], cache), exe)
+            self.assertEqual(find_executable(["duck.exe"], [self.root], cache, is_windows=True), exe)
         scan.assert_not_called()
 
     def test_a_cached_path_that_vanished_is_searched_again(self):
         old = self._touch("old", "duck.exe")
         cache = self._cache()
-        find_executable(["duck.exe"], [self.root], cache)
+        find_executable(["duck.exe"], [self.root], cache, is_windows=True)
         old.unlink()
         moved = self._touch("new", "duck.exe")
-        self.assertEqual(find_executable(["duck.exe"], [self.root], cache), moved)
+        self.assertEqual(find_executable(["duck.exe"], [self.root], cache, is_windows=True), moved)
 
     def test_a_failed_search_clears_the_stale_entry(self):
         exe = self._touch("duck.exe")
         cache = self._cache()
-        find_executable(["duck.exe"], [self.root], cache)
+        find_executable(["duck.exe"], [self.root], cache, is_windows=True)
         exe.unlink()
-        self.assertIsNone(find_executable(["duck.exe"], [self.root], cache))
+        self.assertIsNone(find_executable(["duck.exe"], [self.root], cache, is_windows=True))
         self.assertEqual(cache["executables"], {})
 
     def test_changing_the_search_roots_does_not_reuse_the_old_entry(self):
         first = self._touch("one", "duck.exe")
         cache = self._cache()
-        find_executable(["duck.exe"], [self.root / "one"], cache)
+        find_executable(["duck.exe"], [self.root / "one"], cache, is_windows=True)
         second = self._touch("two", "duck.exe")
-        self.assertEqual(find_executable(["duck.exe"], [self.root / "two"], cache), second)
+        self.assertEqual(find_executable(["duck.exe"], [self.root / "two"], cache, is_windows=True), second)
         self.assertNotEqual(first, second)
 
     def test_find_rom_finds_and_caches_a_rom(self):
@@ -280,6 +280,11 @@ class EnsureRetroarchCoreTests(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self._tmp.cleanup)
         self.retroarch = Path(self._tmp.name)
+        # The core download is Windows-only (Linux RetroArch manages its own
+        # cores); these tests check that path on any OS.
+        windows = patch.object(emulator_lookup, "IS_WINDOWS", True)
+        windows.start()
+        self.addCleanup(windows.stop)
 
     @staticmethod
     def _response(payload: bytes):
