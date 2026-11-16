@@ -114,7 +114,7 @@ Settings can only be saved while iiSU is stopped; the save bar has a **Stop iiSU
 
 | Page | What's on it |
 |---|---|
-| **General** | Rescanning iiSU's library by itself, Android's volume each time iiSU starts (a new Android VM starts at about half volume), and the loading screen. |
+| **General** | The Manager's theme (match Windows, dark or light; applies the next time it opens), matching Android's dark mode to Windows each time iiSU starts (off by default), rescanning iiSU's library by itself, Android's volume each time iiSU starts (a new Android VM starts at about half volume), and the loading screen. |
 | **Display** | See [Display](#display). |
 | **Controls** | The quit key, an optional key that shuts everything down, and the controller buttons that quit a game. |
 | **VM Profiles** | See [VM profiles](#vm-profiles). |

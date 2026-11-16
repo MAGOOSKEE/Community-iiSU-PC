@@ -66,6 +66,7 @@ docs/          these guides and their images
 | `apply_display.py` | Applies `config.json`'s display settings to the AVD |
 | `bridge_config.py` | Loads and saves `config.json` |
 | `start_progress.py` | The loading screen's percentage and current step |
+| `system_theme.py` | Whether the PC is in light or dark mode, and matching Android's dark mode to it |
 | `updater.py` | Checks for (and, on a git checkout, applies) updates |
 | `emulator_downloader.py` | Downloads PC emulators via winget (Windows) or Flatpak (Linux) |
 | `portable_sdk.py` | Keeps the SDK and AVD in a self-contained folder |
@@ -77,7 +78,7 @@ docs/          these guides and their images
 
 `bridge/services/`: one module per Manager page that has real logic behind it (diagnostics, backups, PC games, the console-first emulator list, Android storage, media library, iiSU updates, Steam shortcuts, VM storage, lean VM), kept free of Qt so it can be tested without a GUI.
 
-`bridge/ui/widgets/emulator_overview.py` is the console list shared by the PC Emulators page and onboarding, `step_checklist.py` is Setup's step list, and `bridge/ui/help_links.py` says which section of these guides each page's ? opens (`tests/test_help_links.py` checks every one still exists).
+`bridge/ui/widgets/emulator_overview.py` is the console list shared by the PC Emulators page and onboarding, `step_checklist.py` is Setup's step list, `bridge/ui/gamepad_nav.py` lets a controller move around the Manager, and `bridge/ui/help_links.py` says which section of these guides each page's ? opens (`tests/test_help_links.py` checks every one still exists).
 
 ### installer/
 
@@ -103,13 +104,13 @@ docs/          these guides and their images
 | `vm_backend.py` | Picks the Android runtime (SDK emulator or Waydroid) |
 | `vm_storage.py`, `vm_storage_breakdown.py`, `vm_trim.py` | VM storage sizing, the Storage page's categories, the lean VM profile |
 | `adb_client.py` | A small client for the adb server's socket protocol |
-| `qt_theme.py`, `qt_avatars.py` | The shared dark theme and fonts, and Credits page avatars |
+| `qt_theme.py`, `qt_avatars.py` | The shared dark and light themes and fonts, and Credits page avatars. The theme is picked once at import: `IIPC_THEME` (`dark` or `light`) wins, then `manager_theme` in the config, then Windows' app mode |
 | `assets/fonts/` | Bundled fonts: Lexend (the UI font) and Material Icons |
 | `app_version.py`, `system_info.py`, `emulation_info.py`, `log_stamp.py`, `stage_timer.py` | What the logs say: version banner, PC details, acceleration, line times, stage timings |
 | `iisu_install_record.py` | Which iiSU APK and patch version this install has |
 | `steam_deck.py` | Steam Deck and gamescope (Game Mode) detection |
 
-**Fonts.** The UI font is Lexend, bundled so Windows and Linux look the same. The product name is always set in Bahnschrift (`Fonts.brand()`), which ships with Windows and falls back to Lexend elsewhere. Get fonts from `shared.qt_theme.Fonts` instead of naming a family in page code.
+**Fonts.** The UI font is Lexend, bundled so Windows and Linux look the same. The product name is always set in Bahnschrift (`Fonts.brand()`), which ships with Windows and falls back to Lexend elsewhere. Get fonts from `shared.qt_theme.Fonts` instead of naming a family in page code, and colours from its constants (`TEXT`, `PANEL_BG` and so on) rather than hex values, so both themes work. `scripts/capture_screenshots.py` takes the docs screenshots in the dark theme unless `IIPC_THEME=light` is set.
 
 Every module opens with a docstring that says what it is for and why it exists, so the source is the best reference for anything not listed here.
 
