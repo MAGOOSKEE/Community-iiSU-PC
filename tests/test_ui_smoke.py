@@ -174,15 +174,15 @@ class ManagerWindowSmokeTests(unittest.TestCase):
         many = ["the display settings changed", "the ROM library changed", "the emulator profile changed"]
         with unittest.mock.patch.object(home.start_iisu_pc, "describe_boot_fingerprint_diff", return_value=many):
             window.home_page.refresh_resume_reason()
-        self.assertEqual(button.toolTip().splitlines(), ["Next start: cold boot (3 things changed)", *many])
+        self.assertEqual(button.toolTip().splitlines(), ["Next start: full restart (3 things changed)", *many])
         with unittest.mock.patch.object(home.start_iisu_pc, "describe_boot_fingerprint_diff", return_value=many[:1]):
             window.home_page.refresh_resume_reason()
-        self.assertEqual(button.toolTip(), "Next start: cold boot (the display settings changed)")
+        self.assertEqual(button.toolTip(), "Next start: full restart (the display settings changed)")
         # Quick resume also needs a complete snapshot, which a CI runner has none of.
         with unittest.mock.patch.object(home.start_iisu_pc, "describe_boot_fingerprint_diff", return_value=[]), \
                 unittest.mock.patch.object(home.start_iisu_pc, "has_complete_quickboot_snapshot", return_value=True):
             window.home_page.refresh_resume_reason()
-        self.assertEqual(button.toolTip(), "Next start: quick resume")
+        self.assertEqual(button.toolTip(), "Next start: quick (resumes where Android left off)")
 
     def test_the_menu_next_to_start_holds_steam_and_the_show_logs_tick_box(self):
         self.config_path.write_text(json.dumps(self.config), encoding="utf-8")

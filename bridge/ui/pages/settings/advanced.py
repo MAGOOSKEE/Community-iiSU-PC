@@ -31,17 +31,21 @@ class AdvancedPage(PageBase):
         self.add_header("Advanced", "Names, port and hotkeys. Rarely needed.")
 
         names = QGridLayout()
-        names.addWidget(QLabel("iiSU window title match:"), 0, 0)
+        title_label = QLabel("iiSU window title:")
+        title_label.setToolTip("How the bridge recognizes iiSU's window. Only change it if iiSU's window has another title.")
+        names.addWidget(title_label, 0, 0)
         self.window_title_edit = QLineEdit()
         self.window_title_edit.setFixedWidth(320)
         names.addWidget(self.window_title_edit, 0, 1)
 
-        names.addWidget(QLabel("Bridge listen port:"), 1, 0)
+        port_label = QLabel("Launch bridge port:")
+        port_label.setToolTip("The local network port iiSU uses to ask the PC to open a game. Change it only if another program uses 7737.")
+        names.addWidget(port_label, 1, 0)
         self.port_edit = QLineEdit()
         self.port_edit.setFixedWidth(80)
         names.addWidget(self.port_edit, 1, 1, Qt.AlignmentFlag.AlignLeft)
 
-        self.avd_name_label = QLabel("AVD name:")
+        self.avd_name_label = QLabel("Android VM name (AVD):")
         names.addWidget(self.avd_name_label, 2, 0)
         self.avd_name_edit = QLineEdit()
         self.avd_name_edit.setFixedWidth(200)
@@ -119,7 +123,7 @@ class AdvancedPage(PageBase):
         self.body_layout.addWidget(self.overlay_details_check)
         self.show_overlay_check.toggled.connect(self.overlay_details_check.setEnabled)
 
-        self.debug_console_check = QCheckBox("Show AVD and bridge console windows (debugging)")
+        self.debug_console_check = QCheckBox("Show the Android VM's and launch bridge's console windows (debugging)")
         self.body_layout.addWidget(self.debug_console_check)
         debug_note = QLabel(
             "Off by default: output goes to emulator.log, bridge.log and stop.log.\n"

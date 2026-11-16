@@ -208,8 +208,11 @@ class HomePage(PageBase):
         status_row_layout.setSpacing(10)
         status_row_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         avd_chip, self.avd_dot, self.avd_status_label = self._status_chip("Android VM")
+        avd_chip.setToolTip("The Android system iiSU runs in, on this PC.")
         status_row_layout.addWidget(avd_chip)
         bridge_chip, self.bridge_dot, self.bridge_status_label = self._status_chip("Launch bridge")
+        bridge_chip.setToolTip("The part on your PC that opens a game in its PC emulator when you pick it in iiSU.")
+
         status_row_layout.addWidget(bridge_chip)
         center_layout.addWidget(self.status_row, 0, Qt.AlignmentFlag.AlignHCenter)
         center_layout.addSpacing(14)
@@ -308,7 +311,8 @@ class HomePage(PageBase):
     def _build_advanced_menu(self) -> QMenu:
         menu = QMenu(self)
         menu.setToolTipsVisible(True)
-        boot_headless = menu.addAction("Boot Headless (no window)", self._start_headless)
+        boot_headless = menu.addAction("Start in the Background (no window)", self._start_headless)
+        boot_headless.setToolTip("Starts Android without its window or the launch bridge, for running it unattended.")
         # Only meaningful when nothing is running yet.
         boot_headless.setEnabled(
             self.window.configured and not self.busy and not (self.window.last_bridge_up or self.window.last_avd_up)
@@ -337,7 +341,8 @@ class HomePage(PageBase):
         show_logs.setToolTip("Shows the log of what Start and Stop are doing at the bottom of this page.")
         show_logs.toggled.connect(self.set_logs_shown)
         menu.addSeparator()
-        menu.addAction("Clear Resume State", self._clear_resume_state)
+        forget = menu.addAction("Make Next Start a Full Restart", self._clear_resume_state)
+        forget.setToolTip("Starts Android from scratch next time instead of resuming where it left off. Try it if iiSU seems stuck.")
         return menu
 
     def set_logs_shown(self, shown: bool) -> None:
@@ -374,24 +379,25 @@ class HomePage(PageBase):
             return LAUNCH_OPTIONS_TOOLTIP
         reasons = start_iisu_pc.cold_boot_reasons(self.window.config_data)
         if not reasons:
-            return "Next start: quick resume"
+            return "Next start: quick (resumes where Android left off)"
         if len(reasons) == 1:
-            return f"Next start: cold boot ({reasons[0]})"
+            return f"Next start: full restart ({reasons[0]})"
         # One reason per line: together they are too long for one.
-        return "\n".join([f"Next start: cold boot ({len(reasons)} things changed)", *reasons])
+        return "\n".join([f"Next start: full restart ({len(reasons)} things changed)", *reasons])
 
     def _clear_resume_state(self) -> None:
         reply = QMessageBox.question(
             self,
-            "Clear Resume State",
-            "Forces the next start to cold boot instead of resuming.\n\n"
-            "Use it if the VM is stuck after a resume. Your settings, ROMs and the VM are unaffected.",
+            "Make Next Start a Full Restart",
+            "The next start will start Android from scratch instead of resuming where it left off. "
+            "It takes a little longer.\n\n"
+            "Use it if iiSU seems stuck after starting. Your settings, games and Android are unaffected.",
         )
         if reply != QMessageBox.StandardButton.Yes:
             return
         start_iisu_pc.clear_boot_fingerprint()
         self._refresh_resume_reason()
-        QMessageBox.information(self, "Clear Resume State", "Done. The next start will cold boot.")
+        QMessageBox.information(self, "Make Next Start a Full Restart", "Done. The next start will be a full restart.")
 
     def _refresh_primary_button(self) -> None:
         if self.window.config_problem:
@@ -460,7 +466,7 @@ class HomePage(PageBase):
             self.window.open_repatch_wizard()
             return
         self._set_busy(True)
-        self.stage_label.setText("Starting (headless)..." if headless else "Starting...")
+        self.stage_label.setText("Starting in the background..." if headless else "Starting...")
         self._append_log("\n=== Start (headless, no window) ===\n" if headless else "\n=== Start ===\n")
         self._guarded_signals = run_in_background(
             self._run_guarded, self._on_guarded_done, self._on_guarded_error, lambda: start_iisu_pc.main(headless=headless)

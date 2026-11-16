@@ -534,7 +534,7 @@ class DisplayStep(QWidget):
         columns.addLayout(preview_col)
         layout.addLayout(columns)
 
-        self.fullscreen_check = QCheckBox("Maximize the iiSU/AVD window automatically")
+        self.fullscreen_check = QCheckBox("Show iiSU fullscreen")
         layout.addWidget(self.fullscreen_check)
         layout.addStretch()
 
@@ -827,7 +827,7 @@ class OnboardingWizard(QMainWindow):
         if self._display_changed():
             lines.append(
                 f"Display: {self.display_step.width_edit.text()}×{self.display_step.height_edit.text()} "
-                f"@ {self.display_step.refresh_edit.text()}Hz (will cold-boot the VM once to apply)"
+                f"@ {self.display_step.refresh_edit.text()}Hz (the first start takes a little longer to apply it)"
             )
 
         if _hotkey_signature(self.hotkeys_step.quit_editor.read_hotkey()) != _hotkey_signature(self._original_quit_hotkey):

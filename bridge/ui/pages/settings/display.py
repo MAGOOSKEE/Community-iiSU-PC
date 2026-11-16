@@ -42,8 +42,8 @@ class DisplayPage(PageBase):
 
         self.add_header(
             "Display",
-            "The VM's hardware profile; applying it cold-boots the VM. It only affects iiSU's own UI, "
-            "games run at your monitor's real refresh rate.",
+            "The size iiSU's screen is drawn at. It only affects iiSU itself: games run at your "
+            "monitor's own resolution. A change makes the next start a full restart.",
         )
 
         columns = QHBoxLayout()
@@ -66,7 +66,9 @@ class DisplayPage(PageBase):
         resolution_row.addWidget(self.height_edit)
         grid.addLayout(resolution_row, 0, 1)
 
-        grid.addWidget(QLabel("Density (dpi):"), 1, 0)
+        density_label = QLabel("Text and icon size (dpi):")
+        density_label.setToolTip("Higher makes iiSU's text and icons bigger. 240 suits 1080p, 320 suits 1440p, 480 suits 4K.")
+        grid.addWidget(density_label, 1, 0)
         self.density_edit = QLineEdit()
         self.density_edit.setFixedWidth(70)
         grid.addWidget(self.density_edit, 1, 1, Qt.AlignmentFlag.AlignLeft)
@@ -94,7 +96,7 @@ class DisplayPage(PageBase):
         settings_col.addLayout(grid)
         # Under the fields, beside the preview, not below it.
         settings_col.addSpacing(8)
-        self.fullscreen_check = QCheckBox("Maximize the iiSU/AVD window automatically")
+        self.fullscreen_check = QCheckBox("Show iiSU fullscreen")
         settings_col.addWidget(self.fullscreen_check)
         settings_col.addStretch(1)
 

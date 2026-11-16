@@ -49,7 +49,7 @@ class EmulatorPage(PageBase):
 
         self.add_header(
             "VM Profiles",
-            "Launch profiles for the Android emulator. Pick one, Save, then Open.",
+            "How the Android VM is run: graphics, sound, processor cores and memory. The default suits most PCs; try another only to fix a problem.",
         )
 
         self.waydroid_note = QLabel(
@@ -108,7 +108,7 @@ class EmulatorPage(PageBase):
         grid.addWidget(QLabel("CPU cores:"), row, 0)
         self.cores_spin = QSpinBox()
         self.cores_spin.setRange(0, 32)
-        self.cores_spin.setSpecialValueText("AVD default")
+        self.cores_spin.setSpecialValueText("Automatic")
         grid.addWidget(self.cores_spin, row, 1)
         row += 1
 
@@ -116,7 +116,7 @@ class EmulatorPage(PageBase):
         self.ram_spin = QSpinBox()
         self.ram_spin.setRange(0, 65536)
         self.ram_spin.setSingleStep(512)
-        self.ram_spin.setSpecialValueText("AVD default")
+        self.ram_spin.setSpecialValueText("Automatic")
         grid.addWidget(self.ram_spin, row, 1)
         row += 1
 
@@ -145,7 +145,7 @@ class EmulatorPage(PageBase):
         note = QLabel(
             "To debug audio: duplicate a profile and change one thing (\"Speakers only\",\n"
             "\"No audio at all\", or another GPU mode), then Save, Stop, Open.\n"
-            "A profile change cold-boots the VM once."
+            "A profile change makes the next start a full restart."
         )
         note.setStyleSheet(f"color: {TEXT_DIM};")
         self.body_layout.addWidget(note)
