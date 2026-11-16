@@ -68,6 +68,7 @@ import game_overrides
 import launch_problems
 import pc_games_paths
 import library_rescan
+import system_theme
 
 import portable_sdk  # noqa: F401; imported for its import-time PATH fix (adb), not used directly here
 from bridge_config import ConfigMissingError, load_config
@@ -461,6 +462,19 @@ def log_launch(
 
 def _is_waydroid(config: dict) -> bool:
     return resolve_backend(config) == BACKEND_WAYDROID
+
+
+def sync_android_theme_if_enabled(config: dict) -> None:
+    """Puts Android's dark mode (and iiSU's, where it follows the system) in
+    step with this PC's light or dark mode, each time iiSU starts. Off unless
+    ticked in Settings > General."""
+    if not config.get("sync_android_theme", False):
+        return
+    try:
+        theme, ok = system_theme.sync_android_theme(adb_client.shell)
+        log_launch(f"THEME: Android set to {theme} to match this PC" if ok else "THEME: couldn't set Android's theme")
+    except Exception as exc:
+        print(f"[bridge] couldn't set Android's theme: {exc}")
 
 
 def start_library_rescan_if_needed(config: dict) -> None:
@@ -2050,6 +2064,7 @@ def main() -> None:
     # restarted against an AVD that's already up.
     print("[bridge] launching iiSU...")
     launch_iisu(config)
+    sync_android_theme_if_enabled(config)
     start_library_rescan_if_needed(config)
 
     # If the AVD is already running when the bridge starts, apply the

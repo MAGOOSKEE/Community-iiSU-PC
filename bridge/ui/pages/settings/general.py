@@ -49,6 +49,13 @@ class GeneralPage(PageBase):
         volume_note.setStyleSheet(f"color: {TEXT_DIM};")
         self.body_layout.addWidget(volume_note)
 
+        self.theme_sync_check = QCheckBox("Match Android's light or dark mode to Windows each time iiSU starts")
+        self.theme_sync_check.setToolTip(
+            "Sets Android's dark mode the same as Windows' app mode (Settings > Personalization > Colors). "
+            "iiSU follows it where its own theme is set to follow the system."
+        )
+        self.body_layout.addWidget(self.theme_sync_check)
+
         self.show_overlay_check = QCheckBox("Show a loading screen while iiSU starts and while a game opens")
         self.body_layout.addWidget(self.show_overlay_check)
         self.overlay_details_check = QCheckBox("Show details (the start log) on the loading screen")
@@ -64,6 +71,7 @@ class GeneralPage(PageBase):
     def reload_from_config(self) -> None:
         config = self.window.config_data
         self.auto_rescan_check.setChecked(bool(config.get("auto_rescan_library", True)))
+        self.theme_sync_check.setChecked(bool(config.get("sync_android_theme", False)))
         self.show_overlay_check.setChecked(bool(config.get("show_boot_overlay", True)))
         self.overlay_details_check.setChecked(bool(config.get("boot_overlay_details", False)))
         self.overlay_details_check.setEnabled(self.show_overlay_check.isChecked())
@@ -74,6 +82,9 @@ class GeneralPage(PageBase):
 
     def get_auto_rescan_library(self) -> bool:
         return self.auto_rescan_check.isChecked()
+
+    def get_sync_android_theme(self) -> bool:
+        return self.theme_sync_check.isChecked()
 
     def get_startup_volume(self) -> int | None:
         """The percent to set, or None to leave Android's volume alone."""

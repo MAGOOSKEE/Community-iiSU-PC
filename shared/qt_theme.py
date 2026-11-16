@@ -221,6 +221,14 @@ QPushButton#RowButton:hover {{
     background-color: {ACCENT_BG};
 }}
 
+QFrame#HomePanel {{
+    background-color: rgba(14, 14, 16, 165);
+    border: 1px solid rgba(255, 255, 255, 18);
+    border-radius: 22px;
+}}
+QFrame#HomePanel QLabel {{
+    background: transparent;
+}}
 QPushButton#HomePrimary {{
     border-radius: 14px;
     padding: 10px 28px;

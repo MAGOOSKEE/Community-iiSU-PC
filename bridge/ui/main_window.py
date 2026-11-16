@@ -322,6 +322,10 @@ class ManagerWindow(QMainWindow):
             settings["boot_overlay_details"] = self.general_page.get_boot_overlay_details()
             # Only written once it's been changed from its default (on), so a
             # config from before the setting existed doesn't read as unsaved.
+            # Same for the theme sync, which defaults to off.
+            theme_sync = self.general_page.get_sync_android_theme()
+            if theme_sync or "sync_android_theme" in self.config_data:
+                settings["sync_android_theme"] = theme_sync
             auto_rescan = self.general_page.get_auto_rescan_library()
             if not auto_rescan or "auto_rescan_library" in self.config_data:
                 settings["auto_rescan_library"] = auto_rescan

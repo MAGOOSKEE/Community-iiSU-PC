@@ -72,73 +72,11 @@ _THEMES = {
 }
 
 
-def _detect_linux_theme() -> str:
-    """Best-effort light/dark detection via the freedesktop desktop
-    portal (org.freedesktop.appearance color-scheme), the modern,
-    desktop-environment-agnostic standard GNOME, KDE Plasma, and most
-    others implement, so this doesn't need a separate code path per
-    desktop environment. Falls back to gsettings (GNOME/Cinnamon
-    specifically, for older setups predating the portal) and finally to
-    "dark" (matching this project's own brand theme) if neither is
-    available or the query fails for any reason, same "cosmetic, never
-    worth failing over" reasoning as the Windows registry read."""
-    import subprocess
-    try:
-        result = subprocess.run(
-            [
-                "gdbus", "call", "--session", "--dest", "org.freedesktop.portal.Desktop",
-                "--object-path", "/org/freedesktop/portal/desktop",
-                "--method", "org.freedesktop.portal.Settings.Read",
-                "org.freedesktop.appearance", "color-scheme",
-            ],
-            capture_output=True, text=True, timeout=2,
-        )
-        if result.returncode == 0:
-            # Response embeds a uint32: 0=no preference, 1=prefer-dark, 2=prefer-light.
-            if "uint32 1" in result.stdout:
-                return "dark"
-            if "uint32 2" in result.stdout:
-                return "light"
-    except (OSError, subprocess.TimeoutExpired):
-        pass
-    try:
-        result = subprocess.run(
-            ["gsettings", "get", "org.gnome.desktop.interface", "color-scheme"],
-            capture_output=True, text=True, timeout=2,
-        )
-        if result.returncode == 0:
-            value = result.stdout.strip().lower()
-            # "default"/"prefer-light" both mean "no explicit dark
-            # preference", only an explicit dark string counts, same
-            # reasoning as the portal case above: a false "light" read
-            # confidently claiming a preference nobody actually set is
-            # worse than just falling through to the safe default below.
-            if "dark" in value:
-                return "dark"
-            if "light" in value:
-                return "light"
-    except (OSError, subprocess.TimeoutExpired):
-        pass
-    return "dark"
-
-
 def _detect_windows_theme() -> str:
-    """Reads the same registry value Windows' own Settings > Colors page
-    ("Choose your default app mode") writes, best-effort, since a
-    loading screen guessing wrong about system theme is purely cosmetic,
-    never worth failing the boot sequence over."""
-    if not IS_WINDOWS:
-        return _detect_linux_theme()
-    import winreg
-    try:
-        with winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER,
-            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
-        ) as key:
-            value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
-            return "light" if value else "dark"
-    except OSError:
-        return "dark"
+    """Light or dark, matching this PC (see bridge/system_theme.py)."""
+    from bridge.system_theme import detect_theme
+
+    return detect_theme()
 
 
 class _AnimatedBackground(QWidget):
@@ -338,13 +276,13 @@ class OverlayWindow(QWidget):
         # project's usual UI font, a blockier, more technical/console-ish
         # face echoing iiSU's own branding without using any of iiSU's
         # actual (copyrighted, not ours to include) font files.
-        # The iiPC mark above the title, in place of the product's name.
-        # Its "PC" is white, so it's left out on the light theme and the
+        # The iiPC mark above the title, in place of the product's name:
+        # white on the dark theme, black on the light one. Left off the
         # problem card.
-        if not problem and theme is _THEMES["dark"]:
+        if not problem:
             from bridge.ui.widgets.brand_mark import BrandMark
 
-            mark = BrandMark(64, animated=True)
+            mark = BrandMark(64, animated=True, ink="dark" if theme is _THEMES["light"] else "light")
             if mark.is_available():
                 layout.addWidget(mark, 0, Qt.AlignmentFlag.AlignHCenter)
                 layout.addSpacing(6)

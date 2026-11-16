@@ -8,6 +8,8 @@ Renders the brand artwork from its SVG sources in docs/images/brand/:
     logo-manager.svg    ->  bridge/assets/manager.png and .ico
                                                     the Manager's own icon: its window and shortcuts
     iipc-mark.svg       ->  bridge/assets/iipc_mark.png
+    iipc-mark-dark.svg  ->  bridge/assets/iipc_mark_dark.png
+                                                    the same in black, for light backgrounds
                                                     the bare mark the Home page shows, trimmed
 
 The SVGs keep their text as live text in Bahnschrift and Lexend, so they stay
@@ -89,15 +91,18 @@ def main() -> None:
     save_icon("logo.svg", "iisu_launch")
     save_icon("logo-manager.svg", "manager")
 
-    # The mark sits in a square artboard; the UI wants just the glyphs.
+    # The mark sits in a square artboard; the UI wants just the glyphs. The
+    # black version is cut to the white one's box, so the two line up exactly.
     mark_path = ASSETS_DIR / "iipc_mark.png"
+    dark_path = ASSETS_DIR / "iipc_mark_dark.png"
     render("iipc-mark.svg", 1024).save(str(mark_path))
-    mark = Image.open(mark_path).convert("RGBA")
-    mark = mark.crop(mark.getbbox())
-    mark = mark.resize((MARK_WIDTH, round(MARK_WIDTH * mark.height / mark.width)), Image.LANCZOS)
-    mark.save(mark_path)
-    print(f"wrote {mark_path.relative_to(PROJECT_ROOT).as_posix()} ({mark.width} x {mark.height})")
-
+    render("iipc-mark-dark.svg", 1024).save(str(dark_path))
+    box = Image.open(mark_path).convert("RGBA").getbbox()
+    for path in (mark_path, dark_path):
+        mark = Image.open(path).convert("RGBA").crop(box)
+        mark = mark.resize((MARK_WIDTH, round(MARK_WIDTH * mark.height / mark.width)), Image.LANCZOS)
+        mark.save(path)
+        print(f"wrote {path.relative_to(PROJECT_ROOT).as_posix()} ({mark.width} x {mark.height})")
 
 if __name__ == "__main__":
     main()

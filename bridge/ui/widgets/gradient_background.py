@@ -26,7 +26,8 @@ _BLOBS = [
     {"color": GRADIENT_STOPS[2], "radius": 0.48, "amp": 0.26, "speed": 0.017, "phase": 2.1},
     {"color": GRADIENT_STOPS[4], "radius": 0.38, "amp": 0.34, "speed": 0.026, "phase": 4.4},
 ]
-_BLOB_ALPHA = 70
+# Kept low so the text and buttons on top stand out against it.
+_BLOB_ALPHA = 48
 _TICK_MS = 50
 
 

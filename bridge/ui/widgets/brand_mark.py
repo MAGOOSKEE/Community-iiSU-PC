@@ -15,12 +15,14 @@ import math
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QTimer
-from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter
+from PySide6.QtGui import QColor, QFont, QImage, QLinearGradient, QPainter
 from PySide6.QtWidgets import QWidget
 
 from shared.qt_theme import GRADIENT_STOPS
 
 MARK_PATH = Path(__file__).resolve().parent.parent.parent / "assets" / "iipc_mark.png"
+# The same mark in black, for a light background (docs/images/brand/iipc-mark-dark.svg).
+MARK_DARK_PATH = MARK_PATH.with_name("iipc_mark_dark.png")
 # The "ii" takes up the left quarter of the mark; this falls in the gap before the "P".
 II_FRACTION = 0.29
 _TICK_MS = 40
@@ -28,12 +30,20 @@ _CYCLE_SECONDS = 7.0
 
 
 class BrandMark(QWidget):
-    def __init__(self, height: int, animated: bool = False, parent=None):
+    def __init__(self, height: int, animated: bool = False, parent=None, ink: str = "light"):
+        """ink is "light" (the white mark, for dark backgrounds) or "dark"
+        (the black one, for light backgrounds)."""
         super().__init__(parent)
         self._animated = animated
         self._t = 0.0
         self._mark: QImage | None = None
         source = QImage(str(MARK_PATH))
+        # The gradient "ii" takes its shading from the white mark either way.
+        self._shading_source = source
+        if ink == "dark":
+            dark = QImage(str(MARK_DARK_PATH))
+            if not dark.isNull():
+                source = dark
         if source.isNull():
             # No picture, no widget: the layout closes up around it.
             self.setFixedSize(0, 0)
@@ -61,6 +71,9 @@ class BrandMark(QWidget):
             target_w, target_h, Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation
         ).convertToFormat(QImage.Format.Format_ARGB32_Premultiplied)
         self._mark.setDevicePixelRatio(ratio)
+        self._shading = self._shading_source.scaled(
+            target_w, target_h, Qt.AspectRatioMode.IgnoreAspectRatio, Qt.TransformationMode.SmoothTransformation
+        ).convertToFormat(QImage.Format.Format_ARGB32_Premultiplied)
 
     def is_available(self) -> bool:
         return self._mark is not None
@@ -84,7 +97,7 @@ class BrandMark(QWidget):
         """The "ii" strip of the mark, filled with the brand gradient at its
         current position. The mark's own shading (the grey seam between the
         two strokes) is kept by multiplying it into the gradient."""
-        mark = self._mark
+        mark = self._shading
         width, height = math.ceil(mark.width() * II_FRACTION), mark.height()
         # Pixel work below is all in device pixels; the stored DPR would make
         # Qt rescale these images by the display scale when drawing them.
@@ -152,9 +165,13 @@ class BrandTitle(QWidget):
         layout.setSpacing(round(mark_height * 0.3))
         self.mark = BrandMark(mark_height, animated=animated)
         label = QLabel(word.upper() if self.mark.is_available() else f"Community-iiSU-PC {word}")
-        font = Fonts.ui(11, semibold=True)
+        # Bahnschrift, the face the mark's own "PC" is drawn in, so the word
+        # reads as part of the logo; light and spaced out beside the heavy mark.
+        font = Fonts.brand(11)
+        font.setWeight(QFont.Weight.Light)
+        font.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 112)
         # The word's capitals stand as tall as the "PC" in the mark.
-        font.setPixelSize(round(mark_height * 0.75))
+        font.setPixelSize(round(mark_height * 0.78))
         label.setFont(font)
         label.setStyleSheet(f"color: {TEXT}; background: transparent;")
         if self.mark.is_available():
