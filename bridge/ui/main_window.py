@@ -33,7 +33,7 @@ from bridge.ui.pages.backup_diagnostics.diagnostics import DiagnosticsPage
 from bridge.ui.pages.credits import CreditsPage
 from bridge.ui.pages.emulators.pc_emulators import EmulatorsPage
 from bridge.ui.pages.games.console_browser import ConsoleBrowserPage
-from bridge.ui.pages.games.windows_apps import WindowsAppsPage
+from bridge.ui.pages.games.pc_games import PcGamesPage
 from bridge.ui.pages.home import HomePage
 from bridge.ui.pages.library.android_storage import AndroidStoragePage
 from bridge.ui.pages.library.media_library import MediaLibraryPage
@@ -159,8 +159,8 @@ class ManagerWindow(QMainWindow):
         self.register_subpage("roms", self.roms_page)
         self.emulators_page = EmulatorsPage(self)
         self.register_subpage("emulators", self.emulators_page)
-        self.windows_apps_page = WindowsAppsPage(self)
-        self.register_subpage("windows_apps", self.windows_apps_page)
+        self.pc_games_page = PcGamesPage(self)
+        self.register_subpage("pc_games", self.pc_games_page)
         self.register_subpage("android_storage", AndroidStoragePage(self))
         self.register_subpage("media_library", MediaLibraryPage(self))
         self.register_subpage("games_console", ConsoleBrowserPage(self))

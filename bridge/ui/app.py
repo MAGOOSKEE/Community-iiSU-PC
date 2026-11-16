@@ -20,6 +20,9 @@ from shared.qt_theme import apply_theme
 
 def main() -> None:
     ensure_pillow()
+    import pc_games_paths
+
+    pc_games_paths.migrate_old_names()
     app = QApplication(sys.argv)
     apply_theme(app)
     window = ManagerWindow()

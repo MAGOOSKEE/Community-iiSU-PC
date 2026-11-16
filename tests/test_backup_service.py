@@ -23,6 +23,8 @@ class SafeMemberTests(unittest.TestCase):
     def test_accepts_known_names(self):
         self.assertTrue(svc.backup_safe_member("bridge/config.json"))
         self.assertTrue(svc.backup_safe_member("windows_apps.json"))
+        self.assertTrue(svc.backup_safe_member("bridge/pc_games.json"))
+        self.assertTrue(svc.backup_safe_member("bridge/windows_apps.json"))
 
     def test_rejects_unknown_names(self):
         self.assertFalse(svc.backup_safe_member("some_random_file.json"))
@@ -83,11 +85,11 @@ class CreateAndRestoreBackupTests(unittest.TestCase):
 
     def test_apply_restore_skips_safety_copy_when_target_is_new(self):
         with tempfile.TemporaryDirectory() as tmp:
-            target = Path(tmp) / "windows_apps.json"
+            target = Path(tmp) / "pc_games.json"
 
-            with patch.object(svc, "_RESTORE_MAP", {"windows_apps.json": target}), \
+            with patch.object(svc, "_RESTORE_MAP", {"pc_games.json": target}), \
                  patch.object(svc, "RESTORE_SAFETY_DIR", Path(tmp) / "restore_safety"):
-                restored, safety_count, _safety_dir = svc.apply_restore({"windows_apps.json": b"{}"})
+                restored, safety_count, _safety_dir = svc.apply_restore({"pc_games.json": b"{}"})
 
             self.assertEqual(restored, 1)
             self.assertEqual(safety_count, 0)

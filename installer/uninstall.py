@@ -182,6 +182,9 @@ def collect_targets(avd_name: str) -> list[Path]:
         BRIDGE_DIR / ".last_launch_problem.json",
         BRIDGE_DIR / ".library_changed",
         BRIDGE_DIR / ".iisu_installed.json",
+        BRIDGE_DIR / "pc_games.json",
+        BRIDGE_DIR / "pc_game_stubs",
+        # Their names before v0.6.1, on an install the Manager never moved.
         BRIDGE_DIR / "windows_apps.json",
         BRIDGE_DIR / "windows_stubs",
         BRIDGE_DIR / "dedupe_exceptions.json",

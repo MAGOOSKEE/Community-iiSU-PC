@@ -2,7 +2,7 @@
 is just "wire a service call to a signal/slot".
 
 Every function here takes its state as plain arguments instead of reading
-instance attributes, and reports errors by raising WindowsAppsServiceError
+instance attributes, and reports errors by raising PcGamesServiceError
 instead of popping up a messagebox, whichever UI toolkit calls this
 decides how (or whether) to show that to the user.
 """
@@ -17,33 +17,33 @@ from datetime import datetime
 from pathlib import Path
 
 BRIDGE_DIR = Path(__file__).resolve().parent.parent
-WINDOWS_APPS_PATH = BRIDGE_DIR / "windows_apps.json"
-WINDOWS_STUBS_DIR = BRIDGE_DIR / "windows_stubs"
+# One source for these paths, shared with the launch bridge and the sync.
+from pc_games_paths import PC_GAME_STUBS_DIR, PC_GAMES_PATH  # noqa: E402
 
 
-class WindowsAppsServiceError(Exception):
+class PcGamesServiceError(Exception):
     """Raised instead of showing a messagebox directly, callers decide
     how to present this (a QMessageBox, a log line, etc.)."""
 
 
-# == windows_apps.json ==
+# == pc_games.json ==
 
 
-def load_windows_apps() -> dict:
-    if not WINDOWS_APPS_PATH.is_file():
+def load_pc_games() -> dict:
+    if not PC_GAMES_PATH.is_file():
         return {}
     try:
-        data = json.loads(WINDOWS_APPS_PATH.read_text(encoding="utf-8"))
+        data = json.loads(PC_GAMES_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as e:
-        raise WindowsAppsServiceError(f"Couldn't read {WINDOWS_APPS_PATH.name}:\n\n{e}") from e
+        raise PcGamesServiceError(f"Couldn't read {PC_GAMES_PATH.name}:\n\n{e}") from e
     return data if isinstance(data, dict) else {}
 
 
-def save_windows_apps(apps: dict) -> None:
+def save_pc_games(apps: dict) -> None:
     try:
-        WINDOWS_APPS_PATH.write_text(json.dumps(apps, indent=2) + "\n", encoding="utf-8")
+        PC_GAMES_PATH.write_text(json.dumps(apps, indent=2) + "\n", encoding="utf-8")
     except OSError as e:
-        raise WindowsAppsServiceError(f"Couldn't save {WINDOWS_APPS_PATH.name}:\n\n{e}") from e
+        raise PcGamesServiceError(f"Couldn't save {PC_GAMES_PATH.name}:\n\n{e}") from e
 
 
 def ensure_added_at(entry: dict) -> dict:
@@ -88,7 +88,7 @@ def safe_steam_pcgame_name(name: str) -> str:
     return cleaned
 
 
-def unique_windows_app_name(base: str, apps: dict) -> str:
+def unique_pc_game_name(base: str, apps: dict) -> str:
     """Return a collision-free app/placeholder name."""
     if base not in apps:
         return base
@@ -101,27 +101,27 @@ def unique_windows_app_name(base: str, apps: dict) -> str:
 # == Legacy stub-folder migration ==
 
 
-def legacy_windows_stubs_dir(roms_dir: str) -> Path | None:
+def legacy_pc_game_stubs_dir(roms_dir: str) -> Path | None:
     if not roms_dir:
         return None
     legacy_dir = Path(roms_dir) / "windows"
     return legacy_dir if legacy_dir.is_dir() else None
 
 
-def migrate_legacy_windows_stubs(roms_dir: str) -> int:
+def migrate_legacy_pc_game_stubs(roms_dir: str) -> int:
     """One-time, additive copy of pre-relocation .pcgame placeholders from
-    <roms_dir>/windows into WINDOWS_STUBS_DIR. Never deletes or modifies
+    <roms_dir>/windows into PC_GAME_STUBS_DIR. Never deletes or modifies
     anything under roms_dir, that's live content in the user's own ROM
     directory. Returns how many files were copied (0 if there was nothing
     to migrate)."""
-    legacy_dir = legacy_windows_stubs_dir(roms_dir)
+    legacy_dir = legacy_pc_game_stubs_dir(roms_dir)
     if legacy_dir is None:
         return 0
     try:
-        WINDOWS_STUBS_DIR.mkdir(parents=True, exist_ok=True)
+        PC_GAME_STUBS_DIR.mkdir(parents=True, exist_ok=True)
         copied = 0
         for stub in legacy_dir.glob("*.pcgame"):
-            target = WINDOWS_STUBS_DIR / stub.name
+            target = PC_GAME_STUBS_DIR / stub.name
             if not target.exists():
                 shutil.copy2(stub, target)
                 copied += 1
@@ -130,14 +130,14 @@ def migrate_legacy_windows_stubs(roms_dir: str) -> int:
         return 0
 
 
-def delete_legacy_windows_stubs(roms_dir: str) -> None:
-    legacy_dir = legacy_windows_stubs_dir(roms_dir)
+def delete_legacy_pc_game_stubs(roms_dir: str) -> None:
+    legacy_dir = legacy_pc_game_stubs_dir(roms_dir)
     if legacy_dir is None:
-        raise WindowsAppsServiceError("No old placeholder folder found under your ROM directory, nothing to delete.")
+        raise PcGamesServiceError("No old placeholder folder found under your ROM directory, nothing to delete.")
     try:
         shutil.rmtree(legacy_dir)
     except OSError as e:
-        raise WindowsAppsServiceError(f"Couldn't delete {legacy_dir}:\n\n{e}") from e
+        raise PcGamesServiceError(f"Couldn't delete {legacy_dir}:\n\n{e}") from e
 
 
 # == Steam discovery ==
@@ -289,7 +289,7 @@ def steam_artwork_cache_file(appid: str) -> Path:
 # == Per-row status/display ==
 
 
-def windows_app_status(name: str, entry: dict, installed_steam_ids_set: set[str] | None = None) -> str:
+def pc_game_status(name: str, entry: dict, installed_steam_ids_set: set[str] | None = None) -> str:
     if not isinstance(entry, dict):
         return "✗ Invalid entry"
 
@@ -317,12 +317,12 @@ def windows_app_status(name: str, entry: dict, installed_steam_ids_set: set[str]
     else:
         return "✗ Unknown type"
 
-    if not (WINDOWS_STUBS_DIR / f"{name}.pcgame").is_file():
+    if not (PC_GAME_STUBS_DIR / f"{name}.pcgame").is_file():
         return "✗ Missing placeholder"
     return "✓ Ready"
 
 
-def windows_app_display_type(entry: dict) -> str:
+def pc_game_display_type(entry: dict) -> str:
     launch_type = str(entry.get("type", "executable")).lower()
     if launch_type == "uri":
         return "Steam Game" if is_steam_uri(str(entry.get("uri", ""))) else "Custom URI"
@@ -332,23 +332,23 @@ def windows_app_display_type(entry: dict) -> str:
 # == Create / edit / remove / repair placeholders ==
 
 
-def create_windows_app(name: str, entry: dict, apps: dict, windows_dir: Path) -> None:
+def create_pc_game(name: str, entry: dict, apps: dict, windows_dir: Path) -> None:
     """Adds `name` to `apps` (in place) and creates its .pcgame placeholder.
     Raises on a case-insensitive name collision or filesystem failure,
     callers that already validated uniqueness (e.g. edit, which excludes
     the entry being edited) should check before calling this."""
     if any(existing.casefold() == name.casefold() for existing in apps):
-        raise WindowsAppsServiceError(f"A Windows app named '{name}' already exists.")
+        raise PcGamesServiceError(f"A Windows app named '{name}' already exists.")
     entry = ensure_added_at(entry)
     try:
         windows_dir.mkdir(parents=True, exist_ok=True)
         (windows_dir / f"{name}.pcgame").touch(exist_ok=True)
     except OSError as e:
-        raise WindowsAppsServiceError(f"Couldn't create the .pcgame placeholder:\n\n{e}") from e
+        raise PcGamesServiceError(f"Couldn't create the .pcgame placeholder:\n\n{e}") from e
     apps[name] = entry
 
 
-def rename_windows_app_placeholder(windows_dir: Path, old_name: str, new_name: str) -> None:
+def rename_pc_game_placeholder(windows_dir: Path, old_name: str, new_name: str) -> None:
     old_stub = windows_dir / f"{old_name}.pcgame"
     new_stub = windows_dir / f"{new_name}.pcgame"
     try:
@@ -358,10 +358,10 @@ def rename_windows_app_placeholder(windows_dir: Path, old_name: str, new_name: s
         else:
             new_stub.touch(exist_ok=True)
     except OSError as e:
-        raise WindowsAppsServiceError(f"Couldn't update the .pcgame placeholder:\n\n{e}") from e
+        raise PcGamesServiceError(f"Couldn't update the .pcgame placeholder:\n\n{e}") from e
 
 
-def remove_windows_app_placeholder(windows_dir: Path, name: str) -> None:
+def remove_pc_game_placeholder(windows_dir: Path, name: str) -> None:
     try:
         (windows_dir / f"{name}.pcgame").unlink(missing_ok=True)
     except OSError:
@@ -396,7 +396,7 @@ def find_missing_and_orphan_placeholders(apps: dict, windows_dir: Path) -> tuple
 # == Health scan ==
 
 
-def scan_windows_apps_health(apps: dict, windows_dir: Path, installed_steam_ids_set: set[str]) -> dict:
+def scan_pc_games_health(apps: dict, windows_dir: Path, installed_steam_ids_set: set[str]) -> dict:
     """Non-destructive health findings for Windows Apps and placeholders."""
     findings = {
         "missing_placeholders": [],
@@ -472,7 +472,7 @@ def parse_import_payload(payload) -> dict | None:
     return incoming if isinstance(incoming, dict) else None
 
 
-def import_windows_apps(incoming: dict, apps: dict, windows_dir: Path, existing_steam_ids: set[str]) -> tuple[int, int]:
+def import_pc_games(incoming: dict, apps: dict, windows_dir: Path, existing_steam_ids: set[str]) -> tuple[int, int]:
     """Merges `incoming` into `apps` (in place), skipping invalid names,
     existing names, and Steam games already mapped by App ID. Returns
     (added, skipped)."""
@@ -507,36 +507,36 @@ def import_windows_apps(incoming: dict, apps: dict, windows_dir: Path, existing_
 def resolve_uri_launch(entry: dict) -> str:
     uri = entry.get("uri")
     if not isinstance(uri, str) or not valid_uri(uri):
-        raise WindowsAppsServiceError("This entry has an invalid URI.")
+        raise PcGamesServiceError("This entry has an invalid URI.")
     return uri.strip()
 
 
 def resolve_executable_launch(entry: dict) -> tuple[Path, list[str], Path]:
     """Returns (executable, args, working_dir), all validated to exist.
-    Raises WindowsAppsServiceError with a user-facing message otherwise."""
+    Raises PcGamesServiceError with a user-facing message otherwise."""
     exe_value = entry.get("exe")
     if not isinstance(exe_value, str) or not exe_value.strip():
-        raise WindowsAppsServiceError("This entry has no executable configured.")
+        raise PcGamesServiceError("This entry has no executable configured.")
 
     executable = Path(os.path.expandvars(os.path.expanduser(exe_value)))
     if not executable.is_file():
-        raise WindowsAppsServiceError(f"The configured executable does not exist:\n\n{executable}")
+        raise PcGamesServiceError(f"The configured executable does not exist:\n\n{executable}")
 
     args = entry.get("args", [])
     if not isinstance(args, list) or not all(isinstance(arg, str) for arg in args):
-        raise WindowsAppsServiceError("This entry has invalid arguments. The args value must be a list of strings.")
+        raise PcGamesServiceError("This entry has invalid arguments. The args value must be a list of strings.")
 
     working_dir_value = entry.get("working_dir")
     working_dir = (
         Path(os.path.expandvars(os.path.expanduser(str(working_dir_value)))) if working_dir_value else executable.parent
     )
     if not working_dir.is_dir():
-        raise WindowsAppsServiceError(f"The configured working directory does not exist:\n\n{working_dir}")
+        raise PcGamesServiceError(f"The configured working directory does not exist:\n\n{working_dir}")
 
     return executable, args, working_dir
 
 
-def windows_app_sort_key(column: str, name: str, entry: dict, display_type: str, status: str):
+def pc_game_sort_key(column: str, name: str, entry: dict, display_type: str, status: str):
     """column is one of "name"/"type"/"status"/"added", callers already
     have display_type/status computed per row for the UI, so this takes
     them rather than recomputing (which would also need the installed-

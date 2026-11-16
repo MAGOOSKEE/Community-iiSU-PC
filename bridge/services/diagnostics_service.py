@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import launch_problems
-from services import backup_service, emulator_overview_service, windows_apps_service
+from services import backup_service, emulator_overview_service, pc_games_service
 from shared import app_version, vm_storage
 
 BRIDGE_DIR = Path(__file__).resolve().parent.parent
@@ -86,12 +86,12 @@ def run_diagnostics(config_data: dict) -> list[tuple[str, str, str]]:
     add("OK", "Version", app_version.banner("diagnostics"))
 
     config_path = BRIDGE_DIR / "config.json"
-    apps_path = BRIDGE_DIR / "windows_apps.json"
+    apps_path = BRIDGE_DIR / "pc_games.json"
     adb_path = BRIDGE_DIR / "android-sdk-portable" / "sdk" / "platform-tools" / ("adb.exe" if os.name == "nt" else "adb")
 
     add("OK" if BRIDGE_DIR.is_dir() else "ERROR", "Bridge directory", str(BRIDGE_DIR) if BRIDGE_DIR.is_dir() else f"Missing: {BRIDGE_DIR}")
     add("OK" if config_path.is_file() else "ERROR", "Bridge config", str(config_path) if config_path.is_file() else "bridge/config.json is missing")
-    add("OK" if apps_path.is_file() else "WARNING", "PC Apps config", str(apps_path) if apps_path.is_file() else "windows_apps.json is missing")
+    add("OK" if apps_path.is_file() else "WARNING", "PC Apps config", str(apps_path) if apps_path.is_file() else "pc_games.json is missing")
     add("OK" if adb_path.is_file() else "ERROR", "Bundled ADB", str(adb_path) if adb_path.is_file() else f"Missing: {adb_path}")
 
     config: dict = {}
@@ -166,7 +166,7 @@ def run_diagnostics(config_data: dict) -> list[tuple[str, str, str]]:
     except Exception:
         add("OK", "Launch Bridge listener", f"Not running (normal while iiSU is stopped), port {bridge_port}")
 
-    steam_libraries = windows_apps_service.steam_library_paths()
+    steam_libraries = pc_games_service.steam_library_paths()
     found_steam = steam_libraries[0] if steam_libraries else None
     if found_steam:
         vdf = found_steam / "steamapps" / "libraryfolders.vdf"

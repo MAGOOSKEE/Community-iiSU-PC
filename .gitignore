@@ -38,6 +38,8 @@
 /bridge/_icon_extract_tmp/
 
 # Windows Apps / Manager runtime data
+/bridge/pc_games.json
+/bridge/pc_game_stubs/
 /bridge/windows_apps.json
 /bridge/windows_stubs/
 /bridge/dedupe_exceptions.json

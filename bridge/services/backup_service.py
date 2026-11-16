@@ -18,7 +18,9 @@ PROJECT_ROOT = BRIDGE_DIR.parent
 RESTORE_SAFETY_DIR = PROJECT_ROOT / "restore_safety"
 
 _RESTORE_MAP = {
-    "bridge/windows_apps.json": BRIDGE_DIR / "windows_apps.json",
+    "bridge/pc_games.json": BRIDGE_DIR / "pc_games.json",
+    # Backups made before PC games were renamed (see bridge/pc_games_paths.py).
+    "bridge/windows_apps.json": BRIDGE_DIR / "pc_games.json",
     "bridge/config.json": BRIDGE_DIR / "config.json",
     "config.json": PROJECT_ROOT / "config.json",
     "windows_apps.json": PROJECT_ROOT / "windows_apps.json",
@@ -46,7 +48,7 @@ def backup_candidates() -> list[tuple[Path, str]]:
         except Exception:
             pass
 
-    add(BRIDGE_DIR / "windows_apps.json", "bridge/windows_apps.json")
+    add(BRIDGE_DIR / "pc_games.json", "bridge/pc_games.json")
     add(BRIDGE_DIR / "config.json", "bridge/config.json")
     add(PROJECT_ROOT / "config.json", "config.json")
     for name in ("windows_apps.json", "manager_config.json", "settings.json"):

@@ -23,14 +23,14 @@ from PySide6.QtWidgets import (
     QDialog,
 )
 
-from bridge.services import windows_apps_service as svc
+from bridge.services import pc_games_service as svc
 from bridge.ui.dialogs.steam_library_dialog import SteamLibraryDialog
 from shared.qt_theme import SPACING_MD, SPACING_SM
 
 _LAUNCH_TYPES = ["Executable", "Steam Game", "Custom URI"]
 
 
-class WindowsAppDialog(QDialog):
+class PcGameDialog(QDialog):
     def __init__(self, parent=None, title: str = "", initial_name: str = "", initial: dict | None = None):
         super().__init__(parent)
         self.setWindowTitle(title)

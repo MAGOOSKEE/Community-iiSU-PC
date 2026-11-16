@@ -38,7 +38,7 @@ FIX_PAGES = {
     "roms": ("library", "roms"),
     "emulators": ("settings", "emulators"),
     "storage": ("settings", "storage"),
-    "pc_games": ("games", "windows_apps"),
+    "pc_games": ("games", "pc_games"),
     "home": ("home", None),
     "setup": ("home", None),
 }

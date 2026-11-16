@@ -217,10 +217,10 @@ def write_shortcuts_file(path: Path, tree: dict) -> Path | None:
 
 def steam_roots() -> list[Path]:
     """Steam install folders that contain a userdata directory."""
-    from services import windows_apps_service
+    from services import pc_games_service
 
     roots = []
-    for candidate in windows_apps_service.steam_library_paths()[:1]:
+    for candidate in pc_games_service.steam_library_paths()[:1]:
         if (candidate / "userdata").is_dir():
             roots.append(candidate)
     return roots

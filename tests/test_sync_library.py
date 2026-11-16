@@ -15,7 +15,7 @@ sys.path.insert(0, str(PROJECT_ROOT / "bridge"))
 
 import sync_library
 from console_names import load_console_lookup
-from sync_library import merge_windows_stubs, referenced_disc_filenames, scan_library
+from sync_library import merge_pc_game_stubs, referenced_disc_filenames, scan_library
 
 
 
@@ -177,20 +177,20 @@ class DedupeExceptionsPersistenceTests(unittest.TestCase):
 class MergeWindowsStubsTests(unittest.TestCase):
     def test_merge_adds_windows_console(self):
         consoles = {"psx": [("Game.cue", 4096, 0)]}
-        with patch.object(sync_library, "scan_windows_stubs", return_value=[("Notepad.pcgame", 4096, 0)]):
-            merge_windows_stubs(consoles)
+        with patch.object(sync_library, "scan_pc_game_stubs", return_value=[("Notepad.pcgame", 4096, 0)]):
+            merge_pc_game_stubs(consoles)
         self.assertEqual(consoles["windows"], [("Notepad.pcgame", 4096, 0)])
 
     def test_merge_dedups_against_legacy_folder_entries(self):
         consoles = {"windows": [("Notepad.pcgame", 100, 1)]}
-        with patch.object(sync_library, "scan_windows_stubs", return_value=[("Notepad.pcgame", 4096, 2)]):
-            merge_windows_stubs(consoles)
+        with patch.object(sync_library, "scan_pc_game_stubs", return_value=[("Notepad.pcgame", 4096, 2)]):
+            merge_pc_game_stubs(consoles)
         self.assertEqual(consoles["windows"], [("Notepad.pcgame", 4096, 2)])
 
     def test_merge_is_a_noop_when_no_stubs_exist(self):
         consoles = {"psx": [("Game.cue", 4096, 0)]}
-        with patch.object(sync_library, "scan_windows_stubs", return_value=[]):
-            merge_windows_stubs(consoles)
+        with patch.object(sync_library, "scan_pc_game_stubs", return_value=[]):
+            merge_pc_game_stubs(consoles)
         self.assertNotIn("windows", consoles)
 
 

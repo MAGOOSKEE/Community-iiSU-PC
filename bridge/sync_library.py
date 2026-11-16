@@ -55,6 +55,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import library_rescan
+import pc_games_paths
 import portable_sdk  # noqa: F401; imported for its import-time PATH fix (adb), not used directly here
 from bridge_config import ConfigMissingError, read_config_file
 from console_names import load_console_lookup, resolve_console_shortname
@@ -62,7 +63,7 @@ from shared import adb_client
 from shared.platform_compat import subprocess_creationflags
 
 CONFIG_PATH = Path(__file__).parent / "config.json"
-WINDOWS_STUBS_DIR = Path(__file__).parent / "windows_stubs"
+PC_GAME_STUBS_DIR = pc_games_paths.PC_GAME_STUBS_DIR
 DEDUPE_EXCEPTIONS_PATH = Path(__file__).parent / "dedupe_exceptions.json"
 
 AVD_SDCARD_ROOT = "/sdcard"
@@ -319,28 +320,28 @@ def scan_library(
     return consoles, skipped
 
 
-def scan_windows_stubs() -> list[tuple[str, int, int]]:
+def scan_pc_game_stubs() -> list[tuple[str, int, int]]:
     """Windows Apps' .pcgame placeholders live in the install directory
-    (see WINDOWS_STUBS_DIR in windows_apps_service.py), not under roms_dir, so they
+    (see PC_GAME_STUBS_DIR in pc_games_service.py), not under roms_dir, so they
     never clutter the real ROM library on disk, scanned separately here
     and merged into the "windows" console's entries so Windows Apps games
     still show up in iiSU."""
-    if not WINDOWS_STUBS_DIR.is_dir():
+    if not PC_GAME_STUBS_DIR.is_dir():
         return []
     entries = []
-    for file_path in WINDOWS_STUBS_DIR.glob("*.pcgame"):
+    for file_path in PC_GAME_STUBS_DIR.glob("*.pcgame"):
         st = file_path.stat()
         entries.append((file_path.name, st.st_size, int(st.st_mtime)))
     return entries
 
 
-def merge_windows_stubs(consoles: dict[str, list[tuple[str, int, int]]]) -> None:
-    """Merges scan_windows_stubs() into consoles["windows"] in place,
+def merge_pc_game_stubs(consoles: dict[str, list[tuple[str, int, int]]]) -> None:
+    """Merges scan_pc_game_stubs() into consoles["windows"] in place,
     de-duplicating by filename against whatever scan_library() already
     found under a legacy <roms_dir>/windows folder, an install mid-
-    migration (see _migrate_legacy_windows_stubs in windows_apps_service.py) can
+    migration (see _migrate_legacy_pc_game_stubs in pc_games_service.py) can
     otherwise have the same placeholder in both places."""
-    stub_entries = scan_windows_stubs()
+    stub_entries = scan_pc_game_stubs()
     if not stub_entries:
         return
     merged = {name: (name, size, mtime) for name, size, mtime in consoles.get("windows", [])}
@@ -409,6 +410,7 @@ def build_placeholder_tar(consoles: dict[str, list[tuple[str, int, int]]], curre
 
 
 def main() -> None:
+    pc_games_paths.migrate_old_names()
     try:
         config = read_config_file(CONFIG_PATH)
     except (ConfigMissingError, OSError) as e:  # damaged, or not there
@@ -426,7 +428,7 @@ def main() -> None:
 
     exact, by_compact = load_console_lookup()
     consoles, skipped = scan_library(roms_dir, exact, by_compact)
-    merge_windows_stubs(consoles)
+    merge_pc_game_stubs(consoles)
 
     if skipped:
         print("Skipped folders with no matching iiSU console name (rename the folder, or add it to console_names.NAME_OVERRIDES):")

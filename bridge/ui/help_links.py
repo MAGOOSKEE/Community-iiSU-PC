@@ -19,7 +19,7 @@ TOPICS = {
     "media_library": "using.md#backup--restore",
     "android_storage": "using.md#the-manager",
     "games_console": "using.md#console-games-and-multi-disc-playlists",
-    "windows_apps": "using.md#pc-apps-and-games",
+    "pc_games": "using.md#pc-apps-and-games",
     "general": "using.md#settings",
     "settings": "using.md#display",
     "controls": "using.md#quitting-a-game-escape-and-selectstart",

@@ -166,7 +166,7 @@ Program paths are specific to the PC they were set up on, while Steam links work
 <details>
 <summary>How it's stored</summary>
 
-Each entry is represented in iiSU by an empty `.pcgame` placeholder under `bridge/windows_stubs/` (the name is historical, from before Linux support), kept out of your actual ROM folder so it never shows up when you're browsing your real library. The real launch information stays in `bridge/windows_apps.json`; the launch bridge intercepts iiSU's request for the placeholder and starts the configured program instead. Syncing into Android merges these placeholders into iiSU's `windows` folder automatically. `windows_apps.json` is local to your PC and is ignored by Git.
+Each entry is represented in iiSU by an empty `.pcgame` placeholder under `bridge/pc_game_stubs/`, kept out of your actual ROM folder so it never shows up when you're browsing your real library. The real launch information stays in `bridge/pc_games.json`; the launch bridge intercepts iiSU's request for the placeholder and starts the configured program instead. Syncing into Android merges these placeholders into iiSU's `windows` folder automatically. `pc_games.json` is local to your PC and is ignored by Git. Installs from before v0.6.1 called these `windows_apps.json` and `windows_stubs/`; they're renamed automatically the first time the Manager, a start or a sync runs.
 
 </details>
 

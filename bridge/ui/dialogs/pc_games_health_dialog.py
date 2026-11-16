@@ -1,4 +1,4 @@
-"""Windows Apps Health Check. Shows scan_windows_apps_health()'s findings and
+"""Windows Apps Health Check. Shows scan_pc_games_health()'s findings and
 offers to repair the safely-automatable ones (missing placeholders only,
 everything else needs a human decision)."""
 
@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, QVBoxLayout
 
-from bridge.services import windows_apps_service as svc
+from bridge.services import pc_games_service as svc
 from bridge.ui.widgets.card import Card
 from shared.qt_theme import Fonts, GREEN, TEXT_DIM
 
@@ -20,7 +20,7 @@ _SECTIONS = [
 ]
 
 
-class WindowsAppsHealthDialog(QDialog):
+class PcGamesHealthDialog(QDialog):
     def __init__(self, parent, windows_dir: Path, on_repaired):
         super().__init__(parent)
         self.setWindowTitle("PC Apps Health Check")
@@ -28,8 +28,8 @@ class WindowsAppsHealthDialog(QDialog):
         self._windows_dir = windows_dir
         self._on_repaired = on_repaired
 
-        apps = svc.load_windows_apps()
-        self._findings = svc.scan_windows_apps_health(apps, windows_dir, svc.installed_steam_ids())
+        apps = svc.load_pc_games()
+        self._findings = svc.scan_pc_games_health(apps, windows_dir, svc.installed_steam_ids())
         problem_total = sum(len(v) for v in self._findings.values())
 
         layout = QVBoxLayout(self)

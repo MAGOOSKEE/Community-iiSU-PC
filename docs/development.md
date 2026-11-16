@@ -22,7 +22,7 @@
 ```
 
 1. **Patching.** `installer/patch_iisu.py` decompiles your iiSU APK, redirects its ROM-launch code to a small injected class (`installer/smali_patch/`) that sends the launch request to the bridge over a local socket, then rebuilds and signs it.
-2. **Routing.** `bridge/launch_bridge.py` matches normal ROM requests to a PC emulator (configured in `bridge/config.json`). PC app/game requests are instead matched against `bridge/windows_apps.json` and launched directly as native executables or registered URI/protocol targets.
+2. **Routing.** `bridge/launch_bridge.py` matches normal ROM requests to a PC emulator (configured in `bridge/config.json`). PC game requests are instead matched against `bridge/pc_games.json` and launched directly as native executables or registered URI/protocol targets.
 3. **Redirector apps.** iiSU needs to think a real emulator is installed for each console before it'll treat it as playable. Setup installs a placeholder "redirector" app for each one (`installer/stub_apk.py`) that does nothing itself, since the patched launch never reaches it. The Manager's PC Emulators page has an "Install Redirector Apps..." button to re-run this any time.
 4. **Library sync.** `bridge/sync_library.py` mirrors your ROM library into the VM as tiny placeholder files, so iiSU can catalog it without the real multi-GB files.
 
@@ -52,6 +52,10 @@ docs/          these guides and their images
 | `start_iisu_pc.py` | Checks for updates, boots the VM, starts `launch_bridge.py` |
 | `stop_iisu_pc.py` | Tears both back down |
 | `launch_bridge.py` | Handles iiSU's launch requests for PC emulators and native PC apps |
+| `launch_requests.py` | The launch protocol with the patched iiSU, and reading the Intent it sends |
+| `launch_problems.py` | A failed launch in plain words, and the last one kept for the Home page |
+| `library_rescan.py` | Asks iiSU to rescan its library after the ROM sync changed it |
+| `pc_games_paths.py` | Where the PC games list and placeholders live, and the move from their old `windows_*` names |
 | `emulator_lookup.py` | Finds the emulator and ROM for a launch and builds its command line |
 | `sync_library.py` | Mirrors your ROM library into the VM as placeholders |
 | `console_names.py` | Resolves a ROM folder name to one of iiSU's known consoles |
@@ -71,7 +75,9 @@ docs/          these guides and their images
 
 `bridge/ui/`: `app.py` is the Manager's entry point and `setup_app.py` is Setup's. `main_window.py` and `sidebar.py` hold the window and its navigation, `pages/` and `dialogs/` hold each screen, `widgets/` the shared building blocks, and `workers/` the background-thread helpers. `boot_overlay_app.py` is the loading screen, run as its own process.
 
-`bridge/services/`: one module per Manager page that has real logic behind it (diagnostics, backups, PC apps, Android storage, media library, iiSU updates, Steam shortcuts, VM storage, lean VM), kept free of Qt so it can be tested without a GUI.
+`bridge/services/`: one module per Manager page that has real logic behind it (diagnostics, backups, PC games, the console-first emulator list, Android storage, media library, iiSU updates, Steam shortcuts, VM storage, lean VM), kept free of Qt so it can be tested without a GUI.
+
+`bridge/ui/widgets/emulator_overview.py` is the console list shared by the PC Emulators page and onboarding, `step_checklist.py` is Setup's step list, and `bridge/ui/help_links.py` says which section of these guides each page's ? opens (`tests/test_help_links.py` checks every one still exists).
 
 ### installer/
 
@@ -109,7 +115,7 @@ Every module opens with a docstring that says what it is for and why it exists, 
 
 ### Files an install creates
 
-`bridge/config.json` (your settings), `bridge/windows_apps.json` (PC apps), `bridge/android-sdk-portable/` (the SDK and VM), the logs, and a few dot-prefixed state files. All of them are in `.gitignore` and are specific to one machine.
+`bridge/config.json` (your settings), `bridge/pc_games.json` (PC games), `bridge/android-sdk-portable/` (the SDK and VM), the logs, and a few dot-prefixed state files. All of them are in `.gitignore` and are specific to one machine.
 
 ## Running from source
 

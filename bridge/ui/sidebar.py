@@ -77,7 +77,7 @@ NAV_GROUPS: dict[str, list[tuple[str, str]]] = {
     ],
     "games": [
         ("games_console", "Console"),
-        ("windows_apps", "PC"),
+        ("pc_games", "PC"),
     ],
     "settings": [
         ("general", "General"),

@@ -1,5 +1,5 @@
 """Browse locally-installed Steam games. Used both for bulk import (multi_select)
-and, from WindowsAppDialog, to pick a single game when adding/editing a
+and, from PcGameDialog, to pick a single game when adding/editing a
 Steam Game mapping (multi_select=False)."""
 
 from PySide6.QtWidgets import (
@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
     QDialog,
 )
 
-from bridge.services import windows_apps_service as svc
+from bridge.services import pc_games_service as svc
 from shared.qt_theme import Fonts, TEXT_DIM
 
 
@@ -25,7 +25,7 @@ class SteamLibraryDialog(QDialog):
         self.chosen: list[tuple[str, str]] = []
 
         self._games = svc.installed_steam_games()
-        self._already = svc.steam_ids_already_added(svc.load_windows_apps())
+        self._already = svc.steam_ids_already_added(svc.load_pc_games())
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(18, 16, 18, 16)

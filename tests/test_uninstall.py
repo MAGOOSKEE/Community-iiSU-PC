@@ -138,7 +138,7 @@ class TargetListTests(unittest.TestCase):
         targets = set(uninstall.collect_targets("iisuwin"))
         bridge = uninstall.BRIDGE_DIR
         for name in (
-            ".boot_fingerprint.json", ".iisu_installed.json", "windows_apps.json", "windows_stubs",
+            ".boot_fingerprint.json", ".iisu_installed.json", "pc_games.json", "pc_game_stubs",
             "dedupe_exceptions.json", "cache", "setup.log", "bridge_debug.log", "manager_debug.log",
             "config.json", "android-sdk-portable",
         ):

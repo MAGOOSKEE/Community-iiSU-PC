@@ -66,6 +66,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import game_overrides
 import launch_problems
+import pc_games_paths
 import library_rescan
 
 import portable_sdk  # noqa: F401; imported for its import-time PATH fix (adb), not used directly here
@@ -119,7 +120,7 @@ from winapi import (
 STOP_SCRIPT = Path(__file__).parent / "stop_iisu_pc.py"
 STOP_LOG_PATH = Path(__file__).parent / "stop.log"
 LAUNCH_LOG_PATH = Path(__file__).parent / "launch_history.log"
-WINDOWS_APPS_PATH = Path(__file__).parent / "windows_apps.json"
+PC_GAMES_PATH = pc_games_paths.PC_GAMES_PATH
 
 DEFAULT_IISU_COMPONENT = "com.iisulauncher/com.iisulauncher.launcher.StartupSafeModeActivity"
 
@@ -161,43 +162,26 @@ def _is_key_down(vk: int) -> bool:
 # so binding 0.0.0.0 would expose the bridge unnecessarily.
 HOST = "127.0.0.1"
 
-INTENT_CMP_RE = re.compile(r"cmp=(\S+)")
-INTENT_DAT_RE = re.compile(r"dat=(\S+)")
-
-# iiSU's own default emulator list routes Steam/GOG/Epic-style entries to
-# GameNative, an Android app that runs Windows PC games under Wine/Box64,
-# irrelevant here, since this project always has the real thing (Steam
-# itself) available PC-side already. Its launch command
-# (emuladores_default.json's "%PACKAGE%/.MainActivity -a
-# app.gamenative.LAUNCH_GAME -e app_id %GAMENATIVE_APP_ID_INT%") passes the
-# Steam App ID as a plain int Intent extra, not a file path or ClipData URI,
-# there's no "rom" to find under roms_dir at all, unlike every other
-# entry in config.json's emulators map, so this is handled as its own
-# special case below rather than forced into the exe_names/rom_path shape
-# every other profile uses.
-GAMENATIVE_PACKAGE = "app.gamenative"
-WINDOWS_LAUNCH_PACKAGES = {"com.winlator.cmod", "com.winlator", "com.cmodded.winlator"}
-
-# The one byte answered to the patched iiSU after each launch (see
-# installer/smali_patch/LaunchBridge$1.smali). "A" hands the launch back to
-# Android unchanged; "P" means the PC took it.
-REPLY_LAUNCH_ON_ANDROID = b"A"
-REPLY_HANDLED_ON_PC = b"P"
-# The line a patched iiSU adds to every launch once it reads that answer. An
-# iiSU patched before then hangs up without reading it, so for that one the
-# bridge starts the Android app itself, and nobody has to re-patch.
-REPLY_CAPABLE_LINE = "BRIDGE_REPLY:1"
-# The line that ends a request from an iiSU with patch 6 or later. Earlier
-# patches ended theirs by half-closing the connection, which the bridge still
-# accepts; over the adb route patch 6 uses, a half-close would close the
-# connection both ways and lose the answer.
-REQUEST_END_LINE = b"\nBRIDGE_END:1"
-# A connection that neither ends its request nor closes is dropped after this
-# long, so one stuck client can't stop the bridge taking launches.
-REQUEST_TIMEOUT_SECONDS = 15.0
-INTENT_ACT_RE = re.compile(r"\bact=(\S+)")
-INTENT_CAT_RE = re.compile(r"\bcat=\[([^\]]*)\]")
-INTENT_FLG_RE = re.compile(r"\bflg=(0x[0-9a-fA-F]+)")
+# The launch protocol and Intent parsing live in launch_requests.py; these
+# names stay importable from here for the rest of the bridge and the tests.
+import launch_requests
+from launch_requests import (  # noqa: E402
+    INTENT_CMP_RE,
+    INTENT_DAT_RE,
+    GAMENATIVE_PACKAGE,
+    WINDOWS_LAUNCH_PACKAGES,
+    REPLY_LAUNCH_ON_ANDROID,
+    REPLY_HANDLED_ON_PC,
+    REPLY_CAPABLE_LINE,
+    REQUEST_END_LINE,
+    REQUEST_TIMEOUT_SECONDS,
+    INTENT_ACT_RE,
+    INTENT_CAT_RE,
+    INTENT_FLG_RE,
+    android_start_command,
+    belongs_on_android,
+    launch_package,
+)
 
 # Set to the currently-running emulator Popen while a game is active, so the
 # quit hotkey listener (on its own thread) has something to terminate.
@@ -210,7 +194,7 @@ current_native_window: int | None = None
 # for controller gating and the quit hotkey.
 current_native_pid: int | None = None
 # True while the tracked native window is a Windows program or Steam game
-# (launch_windows_app, launch_steam_game), as opposed to an emulator that
+# (launch_pc_game, launch_steam_game), as opposed to an emulator that
 # relaunched itself. The quit key treats the two differently, see
 # quit_key_watcher.
 current_native_is_app = False
@@ -1209,17 +1193,17 @@ def _linux_key_watcher(config: dict) -> None:
                             quit_tap_action("Escape tapped")
 
 
-def load_windows_apps() -> dict:
+def load_pc_games() -> dict:
     """Load native Windows app mappings fresh for every launch."""
-    if not WINDOWS_APPS_PATH.is_file():
+    if not PC_GAMES_PATH.is_file():
         return {}
     try:
-        data = json.loads(WINDOWS_APPS_PATH.read_text(encoding="utf-8"))
+        data = json.loads(PC_GAMES_PATH.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError) as e:
-        log_launch(f"FAILED: could not read windows_apps.json ({e})", notify=True, friendly=launch_problems.unexpected())
+        log_launch(f"FAILED: could not read pc_games.json ({e})", notify=True, friendly=launch_problems.unexpected())
         return {}
     if not isinstance(data, dict):
-        log_launch("FAILED: windows_apps.json must contain a JSON object", notify=True, friendly=launch_problems.unexpected())
+        log_launch("FAILED: pc_games.json must contain a JSON object", notify=True, friendly=launch_problems.unexpected())
         return {}
     return {str(name).casefold(): entry for name, entry in data.items()}
 
@@ -1337,12 +1321,12 @@ def wait_and_restore_iisu_for_window(
     show_iisu_window(config)
 
 
-def launch_windows_app(app_name: str, config: dict) -> bool:
+def launch_pc_game(app_name: str, config: dict) -> bool:
     global pending_native_quit
-    """Launch a native Windows app or registered protocol URI from windows_apps.json."""
+    """Launch a native Windows app or registered protocol URI from pc_games.json."""
 
     # Defend this launch path independently as well. handle_request() normally
-    # rejects overlapping launches, but launch_windows_app() must not overwrite
+    # rejects overlapping launches, but launch_pc_game() must not overwrite
     # active process/window tracking if called from another path.
     if is_game_running():
         log_launch(
@@ -1353,7 +1337,7 @@ def launch_windows_app(app_name: str, config: dict) -> bool:
         )
         return True
 
-    app = load_windows_apps().get(app_name.casefold())
+    app = load_pc_games().get(app_name.casefold())
     if app is None:
         return False
     if not isinstance(app, dict):
@@ -1538,7 +1522,7 @@ def launch_steam_game(app_id: str, config: dict) -> None:
     global current_native_window, current_native_pid, pending_native_quit
 
     # GameNative ultimately launches a normal Windows Steam game, so use the
-    # same handoff/tracking lifecycle as native URI entries from windows_apps.
+    # same handoff/tracking lifecycle as native URI entries from pc_games.
     _set_native_is_app(True)
     begin_game_handoff()
 
@@ -1632,62 +1616,8 @@ def launch_steam_game(app_id: str, config: dict) -> None:
 
 
 def read_request(conn) -> str:
-    """One launch request from a connection: everything up to its end line
-    (patch 6 on) or up to the sender closing its side (older patches). The
-    end line itself is left out."""
-    conn.settimeout(REQUEST_TIMEOUT_SECONDS)
-    data = b""
-    try:
-        while True:
-            chunk = conn.recv(4096)
-            if not chunk:
-                break
-            data += chunk
-            end = data.find(REQUEST_END_LINE)
-            if end != -1:
-                data = data[:end]
-                break
-    except (TimeoutError, OSError):
-        debug_log("a launch request stopped arriving before it was complete; using what came")
-    return data.decode("utf-8", errors="replace")
-
-
-def launch_package(raw_intent: str) -> str | None:
-    cmp_match = INTENT_CMP_RE.search(raw_intent)
-    return cmp_match.group(1).split("/")[0] if cmp_match else None
-
-
-def belongs_on_android(raw_intent: str, config: dict) -> bool:
-    """Whether a launch from iiSU is an Android app no PC program stands in
-    for, such as Chrome or the Play Store. iiSU sends those through the same
-    call as games, so the patch used to send them here, where they failed
-    with "no known PC emulator mapped" and could never be opened. Anything
-    this bridge would handle stays on the PC: a mapped emulator package,
-    Winlator for Windows apps, or GameNative for Steam."""
-    package = launch_package(raw_intent)
-    if package is None:
-        return True
-    if package in WINDOWS_LAUNCH_PACKAGES or package == GAMENATIVE_PACKAGE:
-        return False
-    return not any(package.startswith(prefix) for prefix in config.get("emulators", {}))
-
-
-def android_start_command(raw_intent: str) -> str | None:
-    """The `am start` that opens an app the way iiSU asked to: its component,
-    action, categories and flags, all of which Intent.toString() shows in
-    full. None when the launch names no component to start."""
-    cmp_match = INTENT_CMP_RE.search(raw_intent)
-    if not cmp_match:
-        return None
-    args = ["am", "start", "-n", cmp_match.group(1)]
-    if act := INTENT_ACT_RE.search(raw_intent):
-        args += ["-a", act.group(1)]
-    if cat := INTENT_CAT_RE.search(raw_intent):
-        for category in filter(None, (c.strip() for c in cat.group(1).split(","))):
-            args += ["-c", category]
-    if flg := INTENT_FLG_RE.search(raw_intent):
-        args += ["-f", flg.group(1)]
-    return " ".join(adb_client.quote(arg) for arg in args)
+    """See launch_requests.read_request; a request cut short goes to bridge_debug.log."""
+    return launch_requests.read_request(conn, log=debug_log)
 
 
 def start_on_android(raw_intent: str) -> tuple[bool, str]:
@@ -1769,10 +1699,10 @@ def handle_request(raw_intent: str) -> None:
             print(f"[bridge] Windows app requested: {app_name}")
 
             hold_iisu_behind_stub(package)
-            if not launch_windows_app(app_name, config):
+            if not launch_pc_game(app_name, config):
                 release_iisu_from_stub()
                 log_launch(
-                    f"FAILED: Windows app '{app_name}' is not registered in windows_apps.json",
+                    f"FAILED: Windows app '{app_name}' is not registered in pc_games.json",
                     notify=True,
                     friendly=launch_problems.pc_game_not_registered(app_name),
                     notify_title=app_name,
@@ -2020,6 +1950,8 @@ def recover_from_request_exception(config: dict) -> None:
 
 def main() -> None:
     bridge_started = time.monotonic()
+    for moved in pc_games_paths.migrate_old_names():
+        print(f"[bridge] renamed {moved}")
     # Every line in bridge.log gets the time it was written (not in a
     # visible debug console, see shared/log_stamp.py).
     log_stamp.stamp_stdout()
