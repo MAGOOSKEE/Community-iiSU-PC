@@ -15,7 +15,7 @@ import math
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QImage, QLinearGradient, QPainter
+from PySide6.QtGui import QColor, QImage, QLinearGradient, QPainter
 from PySide6.QtWidgets import QWidget
 
 from shared.qt_theme import GRADIENT_STOPS
@@ -30,9 +30,14 @@ _CYCLE_SECONDS = 7.0
 
 
 class BrandMark(QWidget):
-    def __init__(self, height: int, animated: bool = False, parent=None, ink: str = "light"):
+    def __init__(self, height: int, animated: bool = False, parent=None, ink: str | None = None):
         """ink is "light" (the white mark, for dark backgrounds) or "dark"
-        (the black one, for light backgrounds)."""
+        (the black one, for light backgrounds); by default it suits the
+        Manager's theme."""
+        if ink is None:
+            from shared.qt_theme import IS_LIGHT
+
+            ink = "dark" if IS_LIGHT else "light"
         super().__init__(parent)
         self._animated = animated
         self._t = 0.0
@@ -165,13 +170,10 @@ class BrandTitle(QWidget):
         layout.setSpacing(round(mark_height * 0.3))
         self.mark = BrandMark(mark_height, animated=animated)
         label = QLabel(word.upper() if self.mark.is_available() else f"Community-iiSU-PC {word}")
-        # Bahnschrift, the face the mark's own "PC" is drawn in, so the word
-        # reads as part of the logo; light and spaced out beside the heavy mark.
-        font = Fonts.brand(11)
-        font.setWeight(QFont.Weight.Light)
-        font.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 112)
+        # The main UI font, like the sidebar's "MANAGER".
+        font = Fonts.ui(11)
         # The word's capitals stand as tall as the "PC" in the mark.
-        font.setPixelSize(round(mark_height * 0.78))
+        font.setPixelSize(round(mark_height * 0.75))
         label.setFont(font)
         label.setStyleSheet(f"color: {TEXT}; background: transparent;")
         if self.mark.is_available():

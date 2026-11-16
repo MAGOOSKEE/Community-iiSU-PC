@@ -16,10 +16,15 @@ Run from the repo root after a change to how the Manager looks:
 
 import argparse
 import json
+import os
 import sys
 import tempfile
 import unittest.mock
 from pathlib import Path
+
+# The docs show the dark theme whatever this PC is set to; IIPC_THEME=light
+# takes the light ones instead.
+os.environ.setdefault("IIPC_THEME", "dark")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))

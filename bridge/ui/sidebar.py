@@ -139,7 +139,7 @@ class Sidebar(QWidget):
         header.clicked.connect(self.toggle_clicked.emit)
         self._header_mark = BrandMark(_HEADER_MARK_HEIGHT)
         self._header_title = QLabel(_HEADER_TITLE)
-        title_font = Fonts.ui(11, semibold=True)
+        title_font = Fonts.ui(11)
         title_font.setPixelSize(_HEADER_TITLE_PIXEL_SIZE)
         self._header_title.setFont(title_font)
         # The padding above the letters is so that, centred beside the mark,

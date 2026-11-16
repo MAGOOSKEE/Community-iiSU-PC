@@ -4,10 +4,13 @@ Split out of the Advanced page, which keeps only the expert settings."""
 
 import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
-from PySide6.QtWidgets import QCheckBox, QHBoxLayout, QLabel, QSpinBox
+from PySide6.QtWidgets import QCheckBox, QComboBox, QHBoxLayout, QLabel, QSpinBox
 
 from bridge.ui.pages.base import PageBase
 from shared.qt_theme import TEXT_DIM
+
+
+THEME_CHOICES = [("Match Windows", "system"), ("Dark", "dark"), ("Light", "light")]
 
 
 class GeneralPage(PageBase):
@@ -15,7 +18,22 @@ class GeneralPage(PageBase):
         super().__init__(parent, scrollable_body=True)
         self.window = window
 
-        self.add_header("General", "How starting iiSU behaves.")
+        self.add_header("General", "How the Manager looks and how starting iiSU behaves.")
+
+        theme_row = QHBoxLayout()
+        theme_label = QLabel("Manager theme:")
+        theme_row.addWidget(theme_label)
+        self.theme_combo = QComboBox()
+        for label, value in THEME_CHOICES:
+            self.theme_combo.addItem(label, value)
+        self.theme_combo.setAccessibleName("Manager theme")
+        theme_label.setBuddy(self.theme_combo)
+        theme_row.addWidget(self.theme_combo)
+        theme_note = QLabel("Takes effect next time the Manager opens.")
+        theme_note.setStyleSheet(f"color: {TEXT_DIM};")
+        theme_row.addWidget(theme_note)
+        theme_row.addStretch(1)
+        self.body_layout.addLayout(theme_row)
 
         self.auto_rescan_check = QCheckBox("Rescan iiSU's library by itself when games are added or removed")
         self.auto_rescan_check.setToolTip(
@@ -71,6 +89,8 @@ class GeneralPage(PageBase):
     def reload_from_config(self) -> None:
         config = self.window.config_data
         self.auto_rescan_check.setChecked(bool(config.get("auto_rescan_library", True)))
+        index = self.theme_combo.findData(str(config.get("manager_theme", "system")))
+        self.theme_combo.setCurrentIndex(max(0, index))
         self.theme_sync_check.setChecked(bool(config.get("sync_android_theme", False)))
         self.show_overlay_check.setChecked(bool(config.get("show_boot_overlay", True)))
         self.overlay_details_check.setChecked(bool(config.get("boot_overlay_details", False)))
@@ -82,6 +102,9 @@ class GeneralPage(PageBase):
 
     def get_auto_rescan_library(self) -> bool:
         return self.auto_rescan_check.isChecked()
+
+    def get_manager_theme(self) -> str:
+        return self.theme_combo.currentData()
 
     def get_sync_android_theme(self) -> bool:
         return self.theme_sync_check.isChecked()

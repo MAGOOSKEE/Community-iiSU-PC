@@ -120,13 +120,9 @@ class HomePage(PageBase):
         # button: what the next start will be is its tooltip, and the log
         # drawer is a tick box in it, so the page reads as one big button
         # rather than a control panel.
-        # A translucent panel behind the column, so it reads clearly over the
-        # moving glow (#HomePanel in shared/qt_theme.py).
-        center_col = QFrame()
-        center_col.setObjectName("HomePanel")
-        center_col.setAttribute(Qt.WidgetAttribute.WA_StyledBackground)
+        center_col = QWidget()
         center_layout = QVBoxLayout(center_col)
-        center_layout.setContentsMargins(44, 36, 44, 30)
+        center_layout.setContentsMargins(0, 0, 0, 0)
         center_layout.setSpacing(0)
         center_layout.setAlignment(Qt.AlignmentFlag.AlignHCenter)
 

@@ -322,6 +322,9 @@ class ManagerWindow(QMainWindow):
             settings["boot_overlay_details"] = self.general_page.get_boot_overlay_details()
             # Only written once it's been changed from its default (on), so a
             # config from before the setting existed doesn't read as unsaved.
+            manager_theme = self.general_page.get_manager_theme()
+            if manager_theme != "system" or "manager_theme" in self.config_data:
+                settings["manager_theme"] = manager_theme
             # Same for the theme sync, which defaults to off.
             theme_sync = self.general_page.get_sync_android_theme()
             if theme_sync or "sync_android_theme" in self.config_data:

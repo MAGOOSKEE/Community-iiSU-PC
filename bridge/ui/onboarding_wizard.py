@@ -51,7 +51,7 @@ from bridge.ui.widgets.display_preview import DisplayPreview
 from bridge.ui.widgets.emulator_overview import EmulatorOverview
 from bridge.ui.widgets.gradient_divider import GradientDivider
 from bridge.ui.workers.task_runner import run_in_background
-from shared.qt_theme import GREEN, GRADIENT_STOPS, RED, SPACING_LG, SPACING_MD, SPACING_SM, Fonts, apply_theme
+from shared.qt_theme import INPUT_BG, GREEN, GRADIENT_STOPS, RED, SPACING_LG, SPACING_MD, SPACING_SM, Fonts, apply_theme
 
 MODIFIER_NAMES = ["ctrl", "alt", "shift", "win"]
 
@@ -186,7 +186,7 @@ class HotkeyEditor(QWidget):
         self._key = str(initial.get("key", default_key))
         self.key_label = QLabel(self._key.upper())
         self.key_label.setFixedWidth(60)
-        self.key_label.setStyleSheet("background-color: #0e0e10; padding: 4px; border-radius: 4px;")
+        self.key_label.setStyleSheet(f"background-color: {INPUT_BG}; padding: 4px; border-radius: 4px;")
         key_row.addWidget(self.key_label)
         map_button = QPushButton("Map")
         map_button.clicked.connect(self._capture)
