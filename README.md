@@ -24,6 +24,15 @@
 
 [iiSU](https://github.com/iisu-network/iiSU) is an Android emulation frontend. Community-iiSU-PC runs it inside a hardware-accelerated Android VM on Windows or Linux and patches it so that picking a game hands off to a real PC emulator (DuckStation, Dolphin, PCSX2 and so on) instead of an Android one. You get iiSU's interface with PC performance.
 
+<div align="center">
+
+<img src="docs/images/demo.gif" width="800" alt="Picking a PlayStation game in iiSU opens it in DuckStation on the PC.">
+
+<sub>Pick a game in iiSU, and it opens in the PC emulator.</sub>
+
+</div>
+
+
 > [!IMPORTANT]
 > **iiSU is not included.** iiSU is closed-source, third-party software, and this project has no affiliation with it. You supply your own copy of its APK, and Setup patches that copy on your PC. Nothing from iiSU is bundled or redistributed.
 
