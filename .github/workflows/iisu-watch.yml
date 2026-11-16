@@ -1,0 +1,47 @@
+name: iiSU compatibility
+
+# Every Monday, checks that the newest iiSU release and pre-release still
+# take the patch (scripts/check_latest_iisu.py: downloads each APK into the
+# runner's temp folder, runs the read-only patch_check report, deletes it).
+# When a required hook is missing, it opens an issue, once, so a breaking
+# iiSU update is found here instead of by someone's Setup failing. Nothing
+# from iiSU is kept, committed or published.
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      # apktool (installer/tools/apktool.jar) decompiles the APK.
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Check the newest iiSU builds
+        run: python scripts/check_latest_iisu.py --summary "$GITHUB_STEP_SUMMARY"
+
+      - name: Open an issue when the patch no longer fits
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          title="A new iiSU build no longer takes the patch"
+          if gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number' | grep -q .; then
+            echo "An issue is already open."
+            exit 0
+          fi
+          gh issue create --title "$title" --body "The scheduled compatibility check found a required hook missing in the newest iiSU build. See the run's summary for which hook: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"

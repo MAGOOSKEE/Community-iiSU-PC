@@ -142,7 +142,8 @@ The same tests run on every push and pull request to `dev` and `master` (`.githu
 | Script | What it does |
 |---|---|
 | `scripts/try_launch_args.py` | Launches each configured PC emulator with a real ROM from your library and checks it stays up, to catch a wrong argument order in `shared/emulator_defaults.py`. Run it before committing a change to that file. `--list` shows what it would do without launching anything. |
-| `scripts/capture_screenshots.py` | Regenerates the Manager screenshots in `docs/images/` against a throwaway config and an invented ROM library. Run it after changing how the Manager looks. |
+| `scripts/check_latest_iisu.py` | Downloads the newest iiSU release and pre-release into a temp folder, runs the `patch_check` report on each and deletes them. Exit code 1 when a required hook is missing. `.github/workflows/iisu-watch.yml` runs it every Monday and opens an issue when the patch no longer fits. |
+| `scripts/capture_screenshots.py` | Regenerates the Manager screenshots in `docs/images/` against a throwaway config and an invented ROM library. Run it after changing how the Manager looks. `--out DIR --only manager-home` renders just one, elsewhere, for a quick look. |
 | `scripts/render_brand_assets.py` | Renders everything drawn from the SVG sources in `docs/images/brand/`: the README banner, the social preview, the app icon (`bridge/assets/iisu_launch.png` and `.ico`), the Manager's icon (`manager.png` and `.ico`) and the bare iiPC mark the Home page and sidebar show. Run it on Windows after editing an SVG, since the artwork uses Bahnschrift. |
 
 ## Building the Windows installer
