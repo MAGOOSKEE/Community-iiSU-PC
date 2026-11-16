@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 )
 
 import winapi
+from bridge.ui.widgets.brand_mark import BrandTitle
 from bridge.ui.widgets.card import Card
 from bridge.ui.widgets.gradient_divider import GradientDivider
 from bridge.ui.widgets.step_checklist import StepChecklist
@@ -99,9 +100,10 @@ class SetupWindow(QMainWindow):
         root.setContentsMargins(SPACING_LG - 4, 18, SPACING_LG - 4, SPACING_SM)
         root.setSpacing(SPACING_SM)
 
-        title = QLabel("Community-iiSU-PC Setup")
-        title.setFont(Fonts.title())
-        root.addWidget(title)
+        # The iiPC mark in place of the product's full name, like the
+        # Manager's sidebar ("iiPC MANAGER").
+        root.addWidget(BrandTitle("Setup", mark_height=38))
+        root.addSpacing(4)
 
         subtitle = QLabel(
             "Patches your copy of iiSU to hand game launches to PC emulators,\n"

@@ -44,6 +44,7 @@ from bridge_config import CONFIG_PATH, ConfigMissingError, load_config, save_con
 from console_names import load_console_lookup, resolve_console_shortname, suggest_folder_name
 
 from bridge.ui.dialogs.icon_choice_dialog import IconChoiceDialog
+from bridge.ui.widgets.brand_mark import BrandMark
 from bridge.ui.widgets.card import Card
 from bridge.ui.pages.settings.display import REFRESH_RATE_PRESETS, RESOLUTION_CUSTOM, RESOLUTION_PRESETS, field_width
 from bridge.ui.widgets.display_preview import DisplayPreview
@@ -707,9 +708,17 @@ class OnboardingWizard(QMainWindow):
         root.setContentsMargins(SPACING_LG, 20, SPACING_LG, 20)
         root.setSpacing(6)
 
+        title_row = QHBoxLayout()
+        title_row.setSpacing(14)
         self.title_label = QLabel("")
         self.title_label.setFont(Fonts.title())
-        root.addWidget(self.title_label)
+        title_row.addWidget(self.title_label, 0, Qt.AlignmentFlag.AlignBottom)
+        # "Welcome to" and the iiPC mark on the first step, in place of the
+        # product's full name.
+        self.welcome_mark = BrandMark(34, animated=True)
+        title_row.addWidget(self.welcome_mark, 0, Qt.AlignmentFlag.AlignBottom)
+        title_row.addStretch(1)
+        root.addLayout(title_row)
         self.step_label = QLabel("")
         self.step_label.setProperty("role", "dim")
         root.addWidget(self.step_label)
@@ -754,7 +763,11 @@ class OnboardingWizard(QMainWindow):
         self.stack.setCurrentIndex(index)
 
         is_welcome, is_last = index == 0, index == len(STEP_TITLES) - 1
-        self.title_label.setText("Welcome to Community-iiSU-PC" if is_welcome else STEP_TITLES[index])
+        show_mark = is_welcome and self.welcome_mark.is_available()
+        self.welcome_mark.setVisible(show_mark)
+        self.title_label.setText(
+            ("Welcome to" if show_mark else "Welcome to Community-iiSU-PC") if is_welcome else STEP_TITLES[index]
+        )
         self.step_label.setText("" if is_welcome or is_last else f"Step {index} of {len(STEP_TITLES) - 2}")
 
         if self._steps[index] is self.mappings_step:

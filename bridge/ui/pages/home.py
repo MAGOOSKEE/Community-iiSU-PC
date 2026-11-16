@@ -130,13 +130,14 @@ class HomePage(PageBase):
         self.brand_mark = BrandMark(HERO_LOGO_HEIGHT, animated=True)
         if self.brand_mark.is_available():
             center_layout.addWidget(self.brand_mark, 0, Qt.AlignmentFlag.AlignHCenter)
-            center_layout.addSpacing(20)
-
-        name_label = QLabel("Community-iiSU-PC")
-        name_label.setFont(Fonts.brand(28))
-        name_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        center_layout.addWidget(name_label)
-        center_layout.addSpacing(4)
+            center_layout.addSpacing(18)
+        else:
+            # Without the picture, the name stands in for it.
+            name_label = QLabel("Community-iiSU-PC")
+            name_label.setFont(Fonts.brand(28))
+            name_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+            center_layout.addWidget(name_label)
+            center_layout.addSpacing(4)
 
         self.tagline_label = QLabel(random.choice(TAGLINES))
         self.tagline_label.setFont(Fonts.ui(11))

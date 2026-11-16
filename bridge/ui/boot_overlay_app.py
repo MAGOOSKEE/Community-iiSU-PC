@@ -290,7 +290,7 @@ LOG_LINES_SHOWN = 14
 
 
 class OverlayWindow(QWidget):
-    _TITLE_TEXT = "iiSU-PC Starting"
+    _TITLE_TEXT = "Starting"
 
     def __init__(
         self, context: str, flavor: str, status_path: Path | None = None,
@@ -338,6 +338,17 @@ class OverlayWindow(QWidget):
         # project's usual UI font, a blockier, more technical/console-ish
         # face echoing iiSU's own branding without using any of iiSU's
         # actual (copyrighted, not ours to include) font files.
+        # The iiPC mark above the title, in place of the product's name.
+        # Its "PC" is white, so it's left out on the light theme and the
+        # problem card.
+        if not problem and theme is _THEMES["dark"]:
+            from bridge.ui.widgets.brand_mark import BrandMark
+
+            mark = BrandMark(64, animated=True)
+            if mark.is_available():
+                layout.addWidget(mark, 0, Qt.AlignmentFlag.AlignHCenter)
+                layout.addSpacing(6)
+
         self._title = QLabel(self._TITLE_TEXT)
         self._title.setFont(Fonts.brand(32))
         self._title.setStyleSheet(f"color: {PROBLEM_COLOR if problem else theme['title'].name()};")

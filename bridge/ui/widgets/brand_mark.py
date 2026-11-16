@@ -133,3 +133,32 @@ class BrandMark(QWidget):
         composer.end()
         frame.setDevicePixelRatio(self._mark.devicePixelRatio())
         painter.drawImage(0, 0, frame)
+
+
+class BrandTitle(QWidget):
+    """The iiPC mark with a word beside it ("SETUP"), in the style of the
+    sidebar's "iiPC MANAGER", for a window's heading in place of the
+    product's full name. Falls back to the full name as text when the
+    picture is missing."""
+
+    def __init__(self, word: str, mark_height: int = 36, animated: bool = True, parent=None):
+        super().__init__(parent)
+        from PySide6.QtWidgets import QHBoxLayout, QLabel
+
+        from shared.qt_theme import TEXT, Fonts
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(round(mark_height * 0.3))
+        self.mark = BrandMark(mark_height, animated=animated)
+        label = QLabel(word.upper() if self.mark.is_available() else f"Community-iiSU-PC {word}")
+        font = Fonts.ui(11, semibold=True)
+        # The word's capitals stand as tall as the "PC" in the mark.
+        font.setPixelSize(round(mark_height * 0.75))
+        label.setFont(font)
+        label.setStyleSheet(f"color: {TEXT}; background: transparent;")
+        if self.mark.is_available():
+            layout.addWidget(self.mark, 0, Qt.AlignmentFlag.AlignBottom)
+        layout.addWidget(label, 0, Qt.AlignmentFlag.AlignBottom)
+        layout.addStretch(1)
+        self.label = label
