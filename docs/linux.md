@@ -9,6 +9,7 @@ Linux support was contributed by [jacksterson](https://github.com/jacksterson). 
 - [Waydroid on Wayland](#waydroid-on-wayland)
 - [Steam Deck](#steam-deck)
 - [How emulators are found](#how-emulators-are-found)
+- [Help test it](#help-test-it)
 
 ## Which Android runtime you get
 
@@ -61,3 +62,14 @@ The emulator mappings name each emulator by its Windows program (`pcsx2-qt.exe`)
 Flatpak's launcher folders, `~/Emulation/tools/launchers`, `~/Applications` and `~/.local/bin` are searched without being added, after your own search folders. An AppImage or script has to be marked executable. A mapping can also name a Linux program directly.
 
 RetroArch cores come from RetroArch's own Online Updater on Linux.
+
+## Help test it
+
+Waydroid and the Steam Deck haven't been run end to end on real hardware yet. If you have either, a report is the most useful thing you can send:
+
+1. Run Setup, then Start, and try one game from one console.
+2. In the Manager, open **Backup & Tools > Diagnostics**, press **Run Diagnostics**, then **Copy Report**.
+3. [Open an issue](https://github.com/MAGOOSKEE/Community-iiSU-PC/issues/new/choose) saying how far it got, and paste the report with `setup.log` and `start.log`.
+
+A report that it all worked is just as welcome as one that something broke.
+
