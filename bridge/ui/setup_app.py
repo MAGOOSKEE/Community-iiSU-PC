@@ -44,6 +44,9 @@ BRIDGE_DIR = setup_wizard.BRIDGE_DIR
 
 DOWNLOAD_STAGE = "Downloading the latest iiSU release"
 
+# How much taller the window grows while the log is shown.
+LOG_HEIGHT = 280
+
 # What to expect from the slow steps, shown beside them while they run.
 # Keyed by the names shown (STAGE_NAMES' values).
 STAGE_HINTS = {
@@ -71,8 +74,7 @@ class SetupWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Community-iiSU-PC Setup")
-        self.resize(760, 720)
-        self.setMinimumSize(640, 600)
+        self.setMinimumWidth(640)
 
         self.apk_path: Path | None = None
         self.running = False
@@ -84,6 +86,8 @@ class SetupWindow(QMainWindow):
         self.stage_changed.connect(self._apply_stage)
 
         self._build_ui()
+        # Just tall enough for what's on screen; Show details adds room for the log.
+        self.resize(760, self._compact_height())
         self._autodetect_apk()
 
     # == UI ==
@@ -179,9 +183,9 @@ class SetupWindow(QMainWindow):
         self.log_text.setReadOnly(True)
         self.log_text.setFont(Fonts.mono())
         log_layout.addWidget(self.log_text)
+        self.log_text.setMinimumHeight(LOG_HEIGHT - 40)
         root.addWidget(self.log_card, stretch=1)
         self.log_card.setVisible(False)
-        root.addStretch(0)
 
         self._update_mode()
         self.status_label = QLabel("Ready.")
@@ -198,8 +202,28 @@ class SetupWindow(QMainWindow):
             names.insert(0, STAGE_NAMES.get(DOWNLOAD_STAGE, DOWNLOAD_STAGE))
         return names
 
+    def _compact_height(self) -> int:
+        """The window height that fits everything but the log."""
+        layout = self.centralWidget().layout()
+        layout.activate()
+        hidden = self.log_card.isHidden()
+        self.log_card.hide()
+        layout.activate()
+        height = self.centralWidget().sizeHint().height()
+        self.log_card.setHidden(hidden)
+        return height
+
+    def _fit_height(self) -> None:
+        """Grows the window for the log while it's shown, and shrinks it back
+        to fit when it's hidden, so there's never an empty band at the bottom."""
+        target = self._compact_height() + (LOG_HEIGHT if self.log_card.isVisible() else 0)
+        self.setMinimumHeight(self._compact_height())
+        self.resize(self.width(), target)
+
     def _set_details_shown(self, shown: bool) -> None:
         self.log_card.setVisible(shown)
+        # After the layout has taken the change in.
+        QTimer.singleShot(0, self._fit_height)
         self.details_button.setText("Hide details" if shown else "Show details")
 
     def _set_status(self, text: str, color: str | None = None) -> None:
@@ -225,6 +249,8 @@ class SetupWindow(QMainWindow):
         # that run went (which step failed) until Setup starts again.
         if not self.running and not self._has_run and hasattr(self, "checklist"):
             self.checklist.set_labels(self._planned_steps())
+            # The download step comes and goes with the APK choice.
+            QTimer.singleShot(0, self._fit_height)
         self.browse_button.setEnabled(not use_latest and not self.running)
         self.apk_label.setEnabled(not use_latest)
         if not self.running:
