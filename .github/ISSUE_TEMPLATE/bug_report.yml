@@ -54,12 +54,18 @@ body:
     validations:
       required: true
   - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics report
+      description: In the Manager, open Backup & Tools > Diagnostics, press Run Diagnostics, then Copy Report, and paste it here. Your user folder and account name are already taken out.
+      render: text
+  - type: textarea
     id: logs
     attributes:
       label: Logs
       description: |
         Drag the log files in, or paste the relevant part. They are in the `bridge` folder (Home > the arrow next to Start > Open Logs Folder).
-        `setup.log` for a Setup problem, `start.log` for a start problem, `bridge.log` for a game that won't launch.
+        `setup.log` for a Setup problem, `start.log` for a start problem, `launch_history.log` and `bridge.log` for a game that won't launch.
         They include folder paths from your PC, so glance through them first.
       render: text
   - type: textarea

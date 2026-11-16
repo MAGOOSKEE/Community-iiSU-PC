@@ -53,11 +53,18 @@ git clone https://github.com/MAGOOSKEE/Community-iiSU-PC.git
    - From source on Windows: run **`Community-iiSU-PC Manager.bat`**.
    - Linux: run **`./Community-iiSU-PC\ Manager.sh`**.
 2. Click **Run Setup** on its Home page.
-3. Point Setup at your iiSU APK with Browse (or drop the APK into `installer/input/` beforehand).
+3. Choose **Download the latest official release** (Setup fetches iiSU from its GitHub releases and checks it), or **Use my own APK** and Browse to it (or drop the APK into `installer/input/` beforehand).
 
-Setup checks your APK is actually iiSU and that you have enough disk space, then downloads and sets up a self-contained Android SDK and virtual device, patches your APK, installs it, installs a redirector app for every console it knows about, and creates a desktop shortcut. It shows which step it's on, since a first run can take a while and several GB.
+Setup checks your APK is actually iiSU and that you have enough disk space, then downloads and sets up a self-contained Android VM, patches your APK, installs it, installs a placeholder emulator app for every console it knows about, and creates a desktop shortcut. It lists its steps and ticks each off, with how long the current one has taken and what to expect from the slow ones; a first run takes a while and downloads several GB. **Show details** opens its log, and if a step fails the log opens by itself.
 
-Once it's done, a short onboarding wizard walks you through your ROM directory, emulator search folders (or downloading emulators directly), display resolution, and hotkeys. The Manager's settings pages are there afterward for anything the wizard doesn't cover, and its Home page switches from "Run Setup" to "Start iiSU" once setup finishes.
+Once it's done, a short onboarding wizard walks you through:
+
+- **Your ROM folder.** It says which console folders iiSU will recognize, suggests a name for any it won't, and can rename them for you.
+- **Where you install PC emulators.** Fine to leave as it is if you haven't installed any yet.
+- **Your emulators.** The consoles in your ROM folder come first, with **Download What's Missing...** for the emulators they need.
+- **Display and hotkeys.**
+
+The Manager's settings pages are there afterward for anything the wizard doesn't cover, and its Home page switches from "Run Setup" to "Start iiSU" once setup finishes.
 
 Re-running Setup is safe: it skips anything already done and won't overwrite an existing `config.json`'s settings.
 

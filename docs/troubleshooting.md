@@ -13,7 +13,9 @@
 
 ## Start here: Diagnostics
 
-Run the Manager's **Backup & Tools > Diagnostics** page first. It is a non-destructive check of the installation, configuration, Android VM/ADB, bridge, PC apps, Steam integration, and logs, and its findings usually say what to do next.
+Run the Manager's **Backup & Tools > Diagnostics** page first. It checks your install without changing anything: settings, Android, the launch bridge, your emulators against the consoles in your ROM folder, PC games, Steam, logs, and the last game that failed to open.
+
+It lists only what needs looking at, each with a button that does something about it (open the page that fixes it, repair the settings, copy an install command). The checks that passed are under **Show passing checks**. **Copy Report** puts the results on the clipboard for a bug report, with your user folder and account name taken out.
 
 ## Logs
 
@@ -24,6 +26,7 @@ Open them from the ▾ next to Start on the Manager's Home page: tick **Show Log
 | `start.log` | The last start, however it was begun (including from the desktop shortcut, which has no window to show it in) |
 | `emulator.log` | The Android VM |
 | `bridge.log` | The launch bridge |
+| `launch_history.log` | Every game launch and how it went, one line each |
 | `stop.log` | The last shutdown |
 | `setup.log` | Setup, kept even if the window is closed partway |
 | `manager_debug.log`, `bridge_debug.log` | Manager and launch-bridge diagnostics, including uncaught Python exceptions that might otherwise disappear when a console closes |
@@ -35,9 +38,11 @@ The start and Setup logs open with the PC's details (Windows or Linux version, p
 | Symptom | Try |
 |---|---|
 | Setup fails early, or the VM never boots | Check CPU virtualization is turned on (see [Requirements](installing.md#requirements)); `setup.log` and `start.log` report what acceleration they found |
-| A game doesn't launch | Check the console's mapping in **Settings > PC Emulators** and that the emulator is inside one of your search folders; `bridge.log` shows what the bridge looked for |
-| New games don't show up in iiSU | Stop and Start (the library syncs on every start), then "Rescan full library" in iiSU's Library settings |
-| Crackling or missing audio | Try other audio and GPU options in a duplicate [VM profile](using.md#vm-profiles) |
+| A game doesn't launch | The card that appears, and the Home page, say why. **Settings > PC Emulators** shows whether each console's emulator is installed; `launch_history.log` has the details |
+| New games don't show up in iiSU | Use **Sync Library Now** in the ▾ menu next to Stop, or Stop and Start. iiSU rescans by itself unless that's turned off in **Settings > General**; otherwise use "Rescan full library" in iiSU's Library settings |
+| A console's games are missing from iiSU | Its folder name isn't one iiSU knows. **Library > ROM Directory** says what to rename it to |
+| Crackling or missing audio | Try other sound and graphics options in a duplicate [VM profile](using.md#vm-profiles) |
+| iiSU seems stuck after starting | **Make Next Start a Full Restart** in the ▾ menu next to Start, then Start again |
 | iiSU crashes at startup or while scanning | See [If the VM runs out of internal storage](#if-the-vm-runs-out-of-internal-storage) |
 | The Manager says the settings are damaged | See [If the settings file is damaged](#if-the-settings-file-is-damaged) |
 
@@ -94,6 +99,7 @@ Freeing space without rebuilding is rarely enough: clearing Android's caches fre
 
 - what you did and what happened instead
 - your Community-iiSU-PC version (bottom of the Manager's sidebar) and your iiSU version
-- `start.log` or `setup.log`, whichever covers the failure, plus `bridge.log` for a game that won't launch
+- **Copy Report** from Diagnostics
+- `start.log` or `setup.log`, whichever covers the failure, plus `launch_history.log` and `bridge.log` for a game that won't launch
 
 The logs start with your PC's details, so you don't need to describe your hardware separately. They include folder paths from your PC, such as your ROM folder, so glance through them before posting.
