@@ -34,7 +34,7 @@ Measured on a default install (16 GB VM storage, Lean VM on), not counting your 
 | Quick-resume snapshot, saved after the first run | +2.5 GB |
 | **After the first run** | **about 9 GB** |
 
-The VM storage file then grows as you use it: iiSU's downloaded artwork is about 1 MB per game (a 2,000-game library is about 2 GB). The 8 to 128 GB size you pick in Setup is a limit, not space taken up front, and the file never shrinks by itself (see [VM storage](troubleshooting.md#seeing-and-changing-the-vms-storage)). Resizing or recreating the VM keeps the old storage until you delete it, which can add several GB temporarily. Waydroid installs skip the SDK, system image and snapshot, and need far less.
+The VM storage file then grows as you use it: iiSU's downloaded artwork is about 1 MB per game (a 2,000-game library is about 2 GB). Setup gives Android 16 GB of storage, a limit rather than space taken up front (**Settings > Storage** can change it later, from 8 to 128 GB), and the file never shrinks by itself (see [VM storage](troubleshooting.md#seeing-and-changing-the-vms-storage)). Resizing or recreating the VM keeps the old storage until you delete it, which can add several GB temporarily. Waydroid installs skip the SDK, system image and snapshot, and need far less.
 
 ## Getting it
 
@@ -70,7 +70,7 @@ Re-running Setup is safe: it skips anything already done and won't overwrite an 
 
 ### A leaner Android VM
 
-Setup's **Lean VM** option (on by default, under **Android VM**) removes the Play image's bundled apps that iiSU doesn't need, for less memory and disk use: everything except Files (iiSU's folder picker), Chrome, the Play Store with Google Play services, and the core system. It also installs LeanKeyboard as the keyboard. Each step is checked across a reboot, a step that leaves the VM unhealthy is undone, and if the VM stops booting Setup rebuilds it and installs without the trim. Untick it for a stock VM. The full removal list is only applied to image builds it was verified on; other builds get just the user-facing apps.
+Setup always makes a lean VM: it removes the Play image's bundled apps that iiSU doesn't need, for less memory and disk use: everything except Files (iiSU's folder picker), Chrome, the Play Store with Google Play services, and the core system. It also installs LeanKeyboard as the keyboard. Each step is checked across a reboot, a step that leaves the VM unhealthy is undone, and if the VM stops booting Setup rebuilds it and installs without the trim. The full removal list is only applied to image builds it was verified on; other builds get just the user-facing apps.
 
 ### Setup from a terminal
 

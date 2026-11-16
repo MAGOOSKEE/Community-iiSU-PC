@@ -35,7 +35,7 @@ setup_wizard.ensure_pyside6()
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QFileDialog, QGridLayout, QHBoxLayout, QLabel, QLineEdit,
-    QListWidget, QMainWindow, QMessageBox, QProgressBar, QPushButton, QStackedWidget,
+    QListWidget, QMainWindow, QMessageBox, QPushButton, QStackedWidget,
     QVBoxLayout, QWidget,
 )
 
@@ -45,7 +45,7 @@ from console_names import load_console_lookup, resolve_console_shortname, sugges
 
 from bridge.ui.dialogs.icon_choice_dialog import IconChoiceDialog
 from bridge.ui.widgets.card import Card
-from bridge.ui.pages.settings.display import REFRESH_RATE_PRESETS, RESOLUTION_CUSTOM, RESOLUTION_PRESETS
+from bridge.ui.pages.settings.display import REFRESH_RATE_PRESETS, RESOLUTION_CUSTOM, RESOLUTION_PRESETS, field_width
 from bridge.ui.widgets.display_preview import DisplayPreview
 from bridge.ui.widgets.emulator_overview import EmulatorOverview
 from bridge.ui.widgets.gradient_divider import GradientDivider
@@ -498,11 +498,11 @@ class DisplayStep(QWidget):
         self.resolution_combo.currentTextChanged.connect(self._apply_resolution_preset)
         resolution_row.addWidget(self.resolution_combo)
         self.width_edit = QLineEdit(str(display.get("width", 1920)))
-        self.width_edit.setFixedWidth(60)
+        self.width_edit.setFixedWidth(field_width(self.width_edit, "00000"))
         resolution_row.addWidget(self.width_edit)
         resolution_row.addWidget(QLabel("x"))
         self.height_edit = QLineEdit(str(display.get("height", 1080)))
-        self.height_edit.setFixedWidth(60)
+        self.height_edit.setFixedWidth(field_width(self.height_edit, "00000"))
         resolution_row.addWidget(self.height_edit)
         resolution_row.addStretch(1)
         grid.addLayout(resolution_row, 0, 1)
@@ -512,7 +512,7 @@ class DisplayStep(QWidget):
         refresh_combo.setEditable(True)
         refresh_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
         refresh_combo.addItems(REFRESH_RATE_PRESETS)
-        refresh_combo.setFixedWidth(90)
+        refresh_combo.setFixedWidth(field_width(refresh_combo, "0000") + 28)
         self.refresh_edit = refresh_combo.lineEdit()
         self.refresh_edit.setText(str(display.get("refresh_rate", 60)))
         grid.addWidget(refresh_combo, 1, 1, Qt.AlignmentFlag.AlignLeft)
@@ -715,15 +715,10 @@ class OnboardingWizard(QMainWindow):
         root.addWidget(self.step_label)
 
         root.addSpacing(4)
-        root.addWidget(GradientDivider())
-        root.addSpacing(SPACING_SM)
-
-        self.progress = QProgressBar()
-        self.progress.setRange(0, len(STEP_TITLES) - 1)
-        self.progress.setTextVisible(False)
-        self.progress.setFixedHeight(6)
+        # The line under the title is also the progress through the steps.
+        self.progress = GradientDivider(height=4)
         root.addWidget(self.progress)
-        root.addSpacing(SPACING_SM)
+        root.addSpacing(SPACING_MD)
 
         content_card = Card()
         card_layout = QVBoxLayout(content_card)
@@ -755,7 +750,7 @@ class OnboardingWizard(QMainWindow):
     def _show_step(self, index: int) -> None:
         self.step_index = index
         self.hint_label.setText("")
-        self.progress.setValue(index)
+        self.progress.set_fraction(index / (len(STEP_TITLES) - 1))
         self.stack.setCurrentIndex(index)
 
         is_welcome, is_last = index == 0, index == len(STEP_TITLES) - 1

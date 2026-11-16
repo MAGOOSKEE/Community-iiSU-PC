@@ -76,7 +76,7 @@ iiSU's own settings and favorites, and the folder access you granted it, are not
 
 **Symptom:** iiSU crashes at startup or while scanning, and the system log shows `SQLiteFullException: database or disk is full` or `ENOSPC (No space left on device)`. Diagnostics shows **Android VM storage** as an error.
 
-**Cause:** the Android data partition, which AVDs created before v0.5.5 size at 6 GB. A Play-image Android plus iiSU's downloaded artwork (about 2 GB for a 2,000-game library) fills it. New installs get 16 GB by default, and Setup's **Android VM** card lets you choose 8 to 128 GB (a maximum: the file on your drive only grows as the VM fills).
+**Cause:** the Android data partition, which AVDs created before v0.5.5 size at 6 GB. A Play-image Android plus iiSU's downloaded artwork (about 2 GB for a 2,000-game library) fills it. New installs get 16 GB, a maximum: the file on your drive only grows as the VM fills. **Settings > Storage** can change it from 8 to 128 GB.
 
 **Fix:** Android can't grow an existing data partition, so the VM's data image has to be recreated. The easy way is **Settings > Storage > Recreate VM at this size**, described above.
 

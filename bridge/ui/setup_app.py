@@ -27,8 +27,8 @@ setup_wizard.ensure_pyside6()
 
 from PySide6.QtCore import QTimer, Signal
 from PySide6.QtWidgets import (
-    QButtonGroup, QCheckBox, QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QProgressBar, QPlainTextEdit, QPushButton, QRadioButton,
-    QSizePolicy, QSpinBox, QVBoxLayout, QWidget,
+    QButtonGroup, QFileDialog, QHBoxLayout, QLabel, QMainWindow, QMessageBox, QPlainTextEdit, QPushButton, QRadioButton,
+    QSizePolicy, QVBoxLayout, QWidget,
 )
 
 import winapi
@@ -71,8 +71,8 @@ class SetupWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Community-iiSU-PC Setup")
-        self.resize(760, 860)
-        self.setMinimumSize(640, 720)
+        self.resize(760, 720)
+        self.setMinimumSize(640, 600)
 
         self.apk_path: Path | None = None
         self.running = False
@@ -108,7 +108,9 @@ class SetupWindow(QMainWindow):
         root.addWidget(subtitle)
 
         root.addSpacing(6)
-        root.addWidget(GradientDivider())
+        # Also the progress bar: it fills step by step once Setup starts.
+        self.progress_line = GradientDivider(height=4)
+        root.addWidget(self.progress_line)
         root.addSpacing(10)
 
         apk_card = Card()
@@ -143,51 +145,13 @@ class SetupWindow(QMainWindow):
         apk_layout.addLayout(apk_row)
         root.addWidget(apk_card)
 
-        vm_card = Card()
-        vm_layout = QVBoxLayout(vm_card)
-        vm_layout.setContentsMargins(SPACING_MD, SPACING_MD - 2, SPACING_MD, SPACING_MD - 2)
-        vm_heading = QLabel("Android VM")
-        vm_heading.setFont(Fonts.heading())
-        vm_layout.addWidget(vm_heading)
-
-        storage_row = QHBoxLayout()
-        storage_label = QLabel("Internal storage")
-        storage_row.addWidget(storage_label)
-        self.storage_spin = QSpinBox()
-        self.storage_spin.setRange(vm_storage.MIN_DATA_PARTITION_GB, vm_storage.MAX_DATA_PARTITION_GB)
-        self.storage_spin.setValue(vm_storage.DEFAULT_DATA_PARTITION_GB)
-        self.storage_spin.setSuffix(" GB")
-        self.storage_spin.setToolTip(
-            "The most the VM can hold. The file on your drive only grows as the VM fills, "
-            "so a bigger number costs nothing until used. Changeable later in Settings, "
-            "but that recreates the VM."
-        )
-        storage_row.addWidget(self.storage_spin)
-        storage_hint = QLabel("A maximum, not a reservation.")
-        storage_hint.setProperty("role", "dim")
-        storage_row.addWidget(storage_hint, stretch=1)
-        vm_layout.addLayout(storage_row)
-
-        self.lean_check = QCheckBox("Lean VM: remove apps iiSU doesn't need (keeps Files, Chrome, Play Store)")
-        self.lean_check.setChecked(True)
-        self.lean_check.setToolTip(
-            "Removes Maps, Photos, YouTube, Gmail and other bundled apps, installs LeanKeyboard, "
-            "and checks the VM still boots. Uses less memory and disk. Untick for a stock VM."
-        )
-        vm_layout.addWidget(self.lean_check)
-        root.addWidget(vm_card)
-
         action_row = QHBoxLayout()
         self.start_button = QPushButton("Start Setup")
         self.start_button.setObjectName("accent")
         self.start_button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.start_button.clicked.connect(self._start_setup)
         action_row.addWidget(self.start_button)
-        self.progress = QProgressBar()
-        self.progress.setRange(0, 100)
-        self.progress.setValue(0)
-        self.progress.setTextVisible(False)
-        action_row.addWidget(self.progress, stretch=1)
+        action_row.addStretch(1)
         root.addLayout(action_row)
 
         self.steps_card = Card()
@@ -297,21 +261,18 @@ class SetupWindow(QMainWindow):
         self.browse_button.setEnabled(False)
         self.latest_radio.setEnabled(False)
         self.custom_radio.setEnabled(False)
-        self.storage_spin.setEnabled(False)
-        self.lean_check.setEnabled(False)
         self._has_run = True
         self._set_status("Setting up. The first run takes a while; you can leave it running.")
 
         self.checklist.set_labels(self._planned_steps())
-        self.progress.setRange(0, len(self.checklist.labels()))
-        self.progress.setValue(0)
+        self.progress_line.set_fraction(0)
 
         self._setup_signals = run_in_background(
             self._run_setup_thread, self._on_setup_finished,
-            apk_path=None if use_latest else self.apk_path, storage_gb=self.storage_spin.value(), lean=self.lean_check.isChecked(),
+            apk_path=None if use_latest else self.apk_path,
         )
 
-    def _run_setup_thread(self, apk_path: Path | None, storage_gb: int, lean: bool) -> Exception | None:
+    def _run_setup_thread(self, apk_path: Path | None) -> Exception | None:
         old_stdout = sys.stdout
         sys.stdout = self._log_stream
         error: Exception | None = None
@@ -321,7 +282,12 @@ class SetupWindow(QMainWindow):
                     if apk_path is None:
                         self._on_stage("Downloading the latest iiSU release", 1, 1)
                         apk_path = iisu_release.download_latest(setup_wizard.INPUT_DIR)
-                    setup_wizard.run_setup(apk_path, on_stage=self._on_stage, storage_gb=storage_gb, lean=lean)
+                    # Every install gets the lean VM with 16 GB of storage; Settings >
+                    # Storage can resize it later.
+                    setup_wizard.run_setup(
+                        apk_path, on_stage=self._on_stage,
+                        storage_gb=vm_storage.DEFAULT_DATA_PARTITION_GB, lean=True,
+                    )
                 except Exception as e:  # noqa: BLE001; surfaced to the user below, not swallowed
                     error = e
                     print(f"\n[setup] FAILED: {e}\n")
@@ -344,14 +310,14 @@ class SetupWindow(QMainWindow):
         row = labels.index(name) if name in labels else min(index - 1, len(labels) - 1)
         self.checklist.start(row)
 
-        self.progress.setValue(self.checklist.done_count())
+        self.progress_line.set_fraction(self.checklist.done_count() / max(1, len(labels)))
         self._set_status(f"Step {row + 1} of {len(labels)}: {name}...")
 
     def _on_setup_finished(self, error: Exception | None) -> None:
         self.running = False
         if error is None:
             self.checklist.finish_all()
-            self.progress.setValue(self.progress.maximum())
+            self.progress_line.set_fraction(1.0)
         else:
             self.checklist.fail_current()
             # What went wrong is in the log, so open it.
@@ -361,8 +327,6 @@ class SetupWindow(QMainWindow):
         self.latest_radio.setEnabled(True)
         self.custom_radio.setEnabled(True)
         self._update_mode()
-        self.storage_spin.setEnabled(True)
-        self.lean_check.setEnabled(True)
 
         if error is None:
             self._set_status("Setup complete, opening the setup wizard...", GREEN)

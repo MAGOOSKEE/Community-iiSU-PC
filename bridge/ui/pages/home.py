@@ -11,7 +11,7 @@ from pathlib import Path
 
 import bridge.ui  # noqa: F401; import-time side effect: puts root/bridge/installer on sys.path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QColor, QTextCursor
 from PySide6.QtWidgets import (
     QDialog,
@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
 
 import start_iisu_pc
 import stop_iisu_pc
+from bridge.ui import icon_font
 from bridge.ui.pages.base import PageBase
 from bridge.ui.widgets.brand_mark import BrandMark
 from bridge.ui.widgets.card import Card
@@ -44,7 +45,7 @@ from bridge.ui.workers.task_runner import run_in_background
 import bridge_config
 import launch_problems
 from bridge_config import CONFIG_PATH
-from shared.qt_theme import Fonts, INPUT_BG, LOG_TEXT, RED, TEXT_DIM
+from shared.qt_theme import Fonts, INPUT_BG, LOG_TEXT, RED, TEXT, TEXT_DIM
 
 
 STATUS_POLL_INTERVAL_MS = 2000
@@ -181,7 +182,11 @@ class HomePage(PageBase):
         self.primary_button.setGraphicsEffect(self._primary_glow)
         button_layout.addWidget(self.primary_button)
 
-        self.advanced_button = QPushButton("▾")  # small dropdown caret
+        # Material Icons' expand_more, like the sidebar's icons (a text "▾"
+        # rendered as a missing-glyph box where the font lacked it).
+        self.advanced_button = QPushButton()
+        self.advanced_button.setIcon(icon_font.icon("expand_more", TEXT, 28))
+        self.advanced_button.setIconSize(QSize(28, 28))
         self.advanced_button.setObjectName("HomeCaret")
         self.advanced_button.setFixedSize(44, 58)
         # Says what the next start will be (see _refresh_resume_reason).
