@@ -4,6 +4,7 @@ one kept for the Home page; and which emulator exits count as failures."""
 import sys
 import tempfile
 import time
+import importlib.util
 import unittest
 from pathlib import Path
 
@@ -13,6 +14,9 @@ for p in (PROJECT_ROOT, PROJECT_ROOT / "bridge"):
         sys.path.insert(0, str(p))
 
 import launch_problems  # noqa: E402
+
+
+HAVE_QT = importlib.util.find_spec("PySide6") is not None
 
 
 class LastProblemTests(unittest.TestCase):
@@ -86,6 +90,7 @@ class OverlayReadyFileTests(unittest.TestCase):
             self.assertTrue(boot_overlay_qt.wait_for_file(ready, 0.1))
             self.assertFalse(ready.exists())
 
+    @unittest.skipUnless(HAVE_QT, "PySide6 is not installed")
     def test_parse_args_takes_ready_file_and_title(self):
         from bridge.ui import boot_overlay_app
 

@@ -4,6 +4,7 @@ quietly break a page's help."""
 
 import re
 import sys
+import importlib.util
 import unittest
 from pathlib import Path
 
@@ -26,6 +27,9 @@ def anchors(markdown: str) -> set[str]:
     return {github_anchor(m.group(1)) for m in re.finditer(r"^#{1,6}\s+(.+)$", markdown, re.MULTILINE)}
 
 
+HAVE_QT = importlib.util.find_spec("PySide6") is not None
+
+
 class HelpLinkTests(unittest.TestCase):
     def test_anchor_rules(self):
         self.assertEqual(github_anchor("Backup & Restore"), "backup--restore")
@@ -39,6 +43,7 @@ class HelpLinkTests(unittest.TestCase):
             self.assertTrue(path.is_file(), f"{key}: {file_name} doesn't exist")
             self.assertIn(anchor, anchors(path.read_text(encoding="utf-8")), f"{key}: no heading for #{anchor} in {file_name}")
 
+    @unittest.skipUnless(HAVE_QT, "PySide6 is not installed")
     def test_every_settings_page_has_help(self):
         from bridge.ui.sidebar import NAV_GROUPS
 
