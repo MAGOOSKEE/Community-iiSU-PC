@@ -80,7 +80,9 @@ NAV_GROUPS: dict[str, list[tuple[str, str]]] = {
         ("windows_apps", "PC"),
     ],
     "settings": [
+        ("general", "General"),
         ("settings", "Display"),
+        ("controls", "Controls"),
         ("emulator", "VM Profiles"),
         ("emulators", "PC Emulators"),
         ("storage", "Storage"),

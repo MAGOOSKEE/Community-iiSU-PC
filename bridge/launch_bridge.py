@@ -646,7 +646,7 @@ def volume_step_for(percent: int, highest_step: int) -> int:
 def set_startup_volume(config: dict) -> None:
     """A fresh Android VM comes up with its media volume at about half, so
     everything iiSU plays is quiet until someone raises it inside the VM. This sets it to the level
-    chosen in Settings > Advanced (100% unless changed) by asking Android's
+    chosen in Settings > General (100% unless changed) by asking Android's
     audio service for that exact step.
 
     It used to press the volume-up key 20 times instead. That could only ever

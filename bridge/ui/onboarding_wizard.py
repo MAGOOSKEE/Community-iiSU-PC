@@ -155,7 +155,7 @@ class KeyCaptureDialog(QDialog):
 
 class HotkeyEditor(QWidget):
     """One "modifiers + key" row (quit hotkey, shutdown hotkey), used
-    twice by HotkeysStep, and reused as-is by the Manager's Advanced
+    twice by HotkeysStep, and reused as-is by the Manager's Controls
     page."""
 
     def __init__(self, title: str, initial: dict, default_key: str, parent=None):
@@ -603,7 +603,7 @@ class HotkeysStep(QWidget):
 
         note = QLabel(
             "On a controller, press Select+Start together for the same quit action.\n"
-            "Remappable later in Advanced."
+            "Remappable later in Settings > Controls."
         )
         note.setProperty("role", "dim")
         layout.addWidget(note)

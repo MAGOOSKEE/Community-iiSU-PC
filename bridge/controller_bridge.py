@@ -26,7 +26,7 @@ tap of the keyboard quit hotkey does (see launch_bridge.quit_tap_action):
 force-quit the running game and return to iiSU, or close iiSU and shut
 down the VM entirely if nothing's running. Fires once per press, not on
 a hold, and the chord can be remapped to any combination of buttons from
-BUTTON_NAME_TO_BIT via the Manager's Advanced page.
+BUTTON_NAME_TO_BIT via the Manager's Settings > Controls page.
 
 Also separately watches (via the legacy winmm joystick API, not XInput,
 see detect_unmapped_sony_controller) for a DualSense/DS4 that's plugged in

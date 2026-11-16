@@ -39,6 +39,8 @@ from bridge.ui.pages.library.android_storage import AndroidStoragePage
 from bridge.ui.pages.library.media_library import MediaLibraryPage
 from bridge.ui.pages.library.roms import RomsPage
 from bridge.ui.pages.settings.advanced import AdvancedPage
+from bridge.ui.pages.settings.controls import ControlsPage
+from bridge.ui.pages.settings.general import GeneralPage
 from bridge.ui.pages.settings.storage import StoragePage
 from bridge.ui.pages.settings.display import DisplayPage
 from bridge.ui.pages.settings.emulator import EmulatorPage
@@ -54,7 +56,7 @@ from shared.qt_theme import GREEN, PANEL_BG_HOVER, RED
 
 # Sub-page keys (or top-level keys with no group) that use the shared
 # bottom Save bar to commit straight to config.json.
-SAVE_BAR_PAGES = {"roms", "emulators", "settings", "advanced"}
+SAVE_BAR_PAGES = {"roms", "emulators", "settings", "general", "controls", "advanced"}
 
 
 class ManagerWindow(QMainWindow):
@@ -115,6 +117,13 @@ class ManagerWindow(QMainWindow):
         self.save_status_label.setStyleSheet(f"color: {GREEN};")
         save_bar_layout.addWidget(self.save_status_label)
         save_bar_layout.addStretch(1)
+        # Settings can't be saved while iiSU runs; this is the way out,
+        # instead of a message that says to go and stop it somewhere else.
+        self.stop_to_save_button = QPushButton("Stop iiSU")
+        self.stop_to_save_button.setObjectName("ghost")
+        self.stop_to_save_button.clicked.connect(lambda: self.home_page._stop())
+        self.stop_to_save_button.setVisible(False)
+        save_bar_layout.addWidget(self.stop_to_save_button)
         self.save_button = QPushButton("Save")
         self.save_button.setObjectName("accent")
         self.save_button.clicked.connect(self._on_save_clicked)
@@ -158,6 +167,10 @@ class ManagerWindow(QMainWindow):
         self.emulator_page = EmulatorPage(self)
         self.register_subpage("emulator", self.emulator_page)
         self.register_subpage("storage", StoragePage(self))
+        self.general_page = GeneralPage(self)
+        self.register_subpage("general", self.general_page)
+        self.controls_page = ControlsPage(self)
+        self.register_subpage("controls", self.controls_page)
         self.advanced_page = AdvancedPage(self)
         self.register_subpage("advanced", self.advanced_page)
         self.register_subpage("backup_restore", BackupRestorePage(self))
@@ -172,8 +185,10 @@ class ManagerWindow(QMainWindow):
             self.display_page.reload_from_config,
             self.emulator_page.reload_from_config,
             self.advanced_page.reload_from_config,
+            self.general_page.reload_from_config,
+            self.controls_page.reload_from_config,
         ]
-        for key in ("roms", "emulators", "settings", "emulator", "advanced"):
+        for key in ("roms", "emulators", "settings", "emulator", "general", "controls", "advanced"):
             self.dirty_checkers[key] = self._is_settings_dirty
             self.save_handlers[key] = self._save_settings
 
@@ -288,16 +303,18 @@ class ManagerWindow(QMainWindow):
             settings["bridge_port"] = port
             settings["avd_name"] = self.advanced_page.get_avd_name()
             settings["iisu_window_title"] = self.advanced_page.get_window_title()
-            settings["quit_hotkey"] = self.advanced_page.get_quit_hotkey()
-            settings["shutdown_hotkey"] = self.advanced_page.get_shutdown_hotkey()
-            settings["controller_quit_chord"] = self.advanced_page.get_controller_quit_chord()
-            settings["show_boot_overlay"] = self.advanced_page.get_show_boot_overlay()
             settings["debug_show_console_windows"] = self.advanced_page.get_debug_show_console_windows()
-            settings["startup_volume"] = self.advanced_page.get_startup_volume()
-            settings["boot_overlay_details"] = self.advanced_page.get_boot_overlay_details()
+        if hasattr(self, "controls_page"):
+            settings["quit_hotkey"] = self.controls_page.get_quit_hotkey()
+            settings["shutdown_hotkey"] = self.controls_page.get_shutdown_hotkey()
+            settings["controller_quit_chord"] = self.controls_page.get_controller_quit_chord()
+        if hasattr(self, "general_page"):
+            settings["show_boot_overlay"] = self.general_page.get_show_boot_overlay()
+            settings["startup_volume"] = self.general_page.get_startup_volume()
+            settings["boot_overlay_details"] = self.general_page.get_boot_overlay_details()
             # Only written once it's been changed from its default (on), so a
             # config from before the setting existed doesn't read as unsaved.
-            auto_rescan = self.advanced_page.get_auto_rescan_library()
+            auto_rescan = self.general_page.get_auto_rescan_library()
             if not auto_rescan or "auto_rescan_library" in self.config_data:
                 settings["auto_rescan_library"] = auto_rescan
 
@@ -329,6 +346,7 @@ class ManagerWindow(QMainWindow):
         settings = self._gather_settings()
         if settings is None:
             return False
+
         self.config_data = settings
         save_config(self.config_data)
         self._write_avd_display_profile(self.config_data)
@@ -534,6 +552,7 @@ class ManagerWindow(QMainWindow):
     def refresh_save_lock(self, avd_up: bool | None, bridge_up: bool | None) -> None:
         running = bool(avd_up) or bool(bridge_up)
         self.save_button.setEnabled(not running)
+        self.stop_to_save_button.setVisible(running)
         if running:
             self.save_status_label.setText("Stop Community-iiSU-PC to change settings")
             self.save_status_label.setStyleSheet(f"color: {RED};")
