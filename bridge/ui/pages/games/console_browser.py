@@ -84,18 +84,33 @@ class ConsoleBrowserPage(PageBase):
         rescan_button.setObjectName("accent")
         rescan_button.clicked.connect(self.refresh)
         action_row_layout.addWidget(rescan_button)
+        # Always on screen and greyed out until they apply, rather than
+        # appearing when rows are selected, so the row of buttons never
+        # jumps. The same actions are in the right-click menu.
+        self.settings_button = QPushButton("Game Settings...")
+        self.settings_button.setObjectName("ghost")
+        self.settings_button.setToolTip("Use another emulator, flags or a program before launch, for the selected game.")
+        self.settings_button.clicked.connect(lambda: self._edit_game_settings(self._selected_rows()[0]))
+        action_row_layout.addWidget(self.settings_button)
+        self.keep_button = QPushButton("Keep Discs Separate")
+        self.keep_button.setObjectName("ghost")
+        self.keep_button.setToolTip("Shows each disc of the selected playlist in iiSU as its own game.")
+        self.keep_button.clicked.connect(self._add_exceptions)
+        action_row_layout.addWidget(self.keep_button)
+        self.merge_button = QPushButton("Merge Discs Together")
+        self.merge_button.setObjectName("ghost")
+        self.merge_button.setToolTip("Shows the selected playlist in iiSU as one game again.")
+        self.merge_button.clicked.connect(self._remove_exceptions)
+        action_row_layout.addWidget(self.merge_button)
         action_row_layout.addStretch(1)
-        # Left-click never reveals the bulk actions themselves (see
-        # _update_selection_hint), this is purely a status/discoverability
-        # line pointing at right-click, not a button.
-        self.selection_hint = QLabel("Select rows, then right-click for bulk actions.")
+        self.selection_hint = QLabel("")
         self.selection_hint.setStyleSheet(f"color: {TEXT_DIM};")
         action_row_layout.addWidget(self.selection_hint)
         self.body_layout.addWidget(action_row)
 
         note = QLabel(
-            "Multi-disc playlists sync as one entry. Right-click a selection for "
-            "\"Keep Discs Separate\" or \"Merge Discs Together\"."
+            "A multi-disc game shows in iiSU as one entry. Keep Discs Separate is for the rare "
+            "playlist whose discs are really separate games."
         )
         note.setWordWrap(True)
         note.setStyleSheet(f"color: {TEXT_DIM};")
@@ -112,9 +127,15 @@ class ConsoleBrowserPage(PageBase):
         self.tree.itemSelectionChanged.connect(self._update_selection_hint)
         self.tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.tree.customContextMenuRequested.connect(self._show_context_menu)
+        self.tree.itemDoubleClicked.connect(self._on_double_click)
         self.body_layout.addWidget(self.tree, 1)
 
         self._scan_signals = None
+        self._update_selection_hint()
+
+    def _on_double_click(self, *_args) -> None:
+        if self.settings_button.isEnabled():
+            self._edit_game_settings(self._selected_rows()[0])
 
     def on_shown(self) -> None:
         self.refresh()
@@ -233,14 +254,13 @@ class ConsoleBrowserPage(PageBase):
         return [row for row in self._rows if row["exception_key"] in selected_keys]
 
     def _update_selection_hint(self) -> None:
-        """Status text only, never a button. Left-clicking to select rows
-        must not surface the bulk actions themselves; right-click is the
-        only path to them (see _show_context_menu)."""
+        """Enables the action buttons that apply to the selection."""
         selected = self._selected_rows()
-        if selected:
-            self.selection_hint.setText(f"{len(selected)} selected, right-click for bulk actions.")
-        else:
-            self.selection_hint.setText("Select rows, then right-click for bulk actions.")
+        self.settings_button.setEnabled(len(selected) == 1 and not selected[0]["hidden_from_iisu"])
+        self.keep_button.setEnabled(any(row["is_playlist"] for row in selected))
+        self.merge_button.setEnabled(any(row["excepted"] for row in selected))
+        self.selection_hint.setText(f"{len(selected)} selected" if selected else "Select a game for its settings.")
+
 
     def _show_context_menu(self, pos) -> None:
         item = self.tree.itemAt(pos)

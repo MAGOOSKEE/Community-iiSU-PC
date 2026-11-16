@@ -107,12 +107,24 @@ class WindowsAppsPage(PageBase):
         more_button.setObjectName("ghost")
         more_button.clicked.connect(lambda: self._show_more_menu(more_button))
         action_row_layout.addWidget(more_button)
+        # The everyday actions on the selection, always on screen and greyed
+        # out until something is selected; the right-click menu has them too.
+        self.test_button = QPushButton("Test")
+        self.test_button.setObjectName("ghost")
+        self.test_button.setToolTip("Launches the selected game here, as iiSU would.")
+        self.test_button.clicked.connect(self._test_windows_app)
+        action_row_layout.addWidget(self.test_button)
+        self.edit_button = QPushButton("Edit...")
+        self.edit_button.setObjectName("ghost")
+        self.edit_button.clicked.connect(self._edit_windows_app)
+        action_row_layout.addWidget(self.edit_button)
+        self.remove_button = QPushButton("Remove")
+        self.remove_button.setObjectName("ghost")
+        self.remove_button.clicked.connect(self._remove_windows_app)
+        action_row_layout.addWidget(self.remove_button)
         action_row_layout.addStretch(1)
-        # Edit/Remove Selected/Test used to duplicate the right-click menu
-        # below as always-visible buttons, same convention as every other
-        # list page now: those actions live only in the context menu, this
-        # is just a status hint.
         self.selection_hint = QLabel("")
+
         self.selection_hint.setStyleSheet(f"color: {TEXT_DIM};")
         action_row_layout.addWidget(self.selection_hint)
         self.body_layout.addWidget(action_row)
@@ -139,10 +151,11 @@ class WindowsAppsPage(PageBase):
 
     def _update_selection_hint(self) -> None:
         count = len(self.tree.selectedItems())
-        if count:
-            self.selection_hint.setText(f"{count} selected, right-click for actions.")
-        else:
-            self.selection_hint.setText("Select row(s), then right-click for actions.")
+        self.test_button.setEnabled(count == 1)
+        self.edit_button.setEnabled(count == 1)
+        self.remove_button.setEnabled(count > 0)
+        self.selection_hint.setText(f"{count} selected" if count else "")
+
 
     # == Data ==
 

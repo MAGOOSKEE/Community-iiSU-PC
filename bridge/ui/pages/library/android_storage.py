@@ -92,10 +92,21 @@ class AndroidStoragePage(PageBase):
             button.setObjectName("ghost")
             button.clicked.connect(handler)
             buttons_layout.addWidget(button)
+        # The actions on the selection, always on screen and greyed out until
+        # they apply; the right-click menu has them too.
+        self.download_button = QPushButton("Download...")
+        self.download_button.setObjectName("ghost")
+        self.download_button.clicked.connect(self._download)
+        buttons_layout.addWidget(self.download_button)
+        self.rename_button = QPushButton("Rename...")
+        self.rename_button.setObjectName("ghost")
+        self.rename_button.clicked.connect(self._rename)
+        buttons_layout.addWidget(self.rename_button)
+        self.delete_button = QPushButton("Delete")
+        self.delete_button.setObjectName("ghost")
+        self.delete_button.clicked.connect(self._delete)
+        buttons_layout.addWidget(self.delete_button)
         buttons_layout.addStretch(1)
-        # Download/Edit Text/Rename/Delete act on the current selection,
-        # same convention as Console Games and Emulators: no always-visible
-        # buttons for those, just this hint plus the right-click menu.
         self.selection_hint = QLabel("")
         self.selection_hint.setStyleSheet(f"color: {TEXT_DIM};")
         buttons_layout.addWidget(self.selection_hint)
@@ -149,10 +160,11 @@ class AndroidStoragePage(PageBase):
 
     def _update_selection_hint(self) -> None:
         count = len(self.tree.selectedItems())
-        if count:
-            self.selection_hint.setText(f"{count} selected, right-click for actions.")
-        else:
-            self.selection_hint.setText("Select item(s), then right-click for actions.")
+        self.download_button.setEnabled(count > 0)
+        self.rename_button.setEnabled(count == 1)
+        self.delete_button.setEnabled(count > 0)
+        self.selection_hint.setText(f"{count} selected" if count else "")
+
 
     def _show_context_menu(self, pos) -> None:
         item = self.tree.itemAt(pos)

@@ -66,9 +66,11 @@ class RomsPage(PageBase):
         add_button.setObjectName("ghost")
         add_button.clicked.connect(self._add_search_root)
         btn_row_layout.addWidget(add_button)
+        self.remove_button = QPushButton("Remove")
+        self.remove_button.setObjectName("ghost")
+        self.remove_button.clicked.connect(self._remove_search_root)
+        btn_row_layout.addWidget(self.remove_button)
         btn_row_layout.addStretch(1)
-        # Remove selected lives only in the right-click menu, same
-        # convention as every other selection-driven list in the app.
         self.selection_hint = QLabel("")
         self.selection_hint.setStyleSheet(f"color: {TEXT_DIM};")
         btn_row_layout.addWidget(self.selection_hint)
@@ -79,10 +81,9 @@ class RomsPage(PageBase):
 
     def _update_selection_hint(self) -> None:
         count = len(self.search_roots_list.selectedItems())
-        if count:
-            self.selection_hint.setText(f"{count} selected, right-click to remove.")
-        else:
-            self.selection_hint.setText("Select folder(s), then right-click to remove.")
+        self.remove_button.setEnabled(count > 0)
+        self.selection_hint.setText(f"{count} selected" if count else "")
+
 
     def _show_context_menu(self, pos) -> None:
         item = self.search_roots_list.itemAt(pos)
