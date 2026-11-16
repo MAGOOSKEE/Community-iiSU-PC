@@ -257,7 +257,19 @@ QPushButton#HomeCaret {{
 QPushButton#HomeCaret:hover {{
     background: rgba(255, 255, 255, 0.14);
 }}
+QPushButton#HelpButton {{
+    background-color: {PANEL_BG};
+    color: {TEXT_DIM};
+    border-radius: 15px;
+    font-weight: 600;
+    padding: 0;
+}}
+QPushButton#HelpButton:hover {{
+    background-color: {PANEL_BG_HOVER};
+    color: {TEXT};
+}}
 QFrame#ProblemCard {{
+
     background-color: rgba(18, 18, 22, 0.82);
     border: 1px solid rgba(255, 107, 107, 0.45);
     border-radius: 14px;

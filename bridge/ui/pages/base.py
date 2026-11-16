@@ -13,7 +13,7 @@ argument below), not a default either way.
 """
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QFrame, QLabel, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea, QVBoxLayout, QWidget
 
 from bridge.ui.widgets.gradient_divider import GradientDivider
 from shared.qt_theme import Fonts, SPACING_LG, SPACING_MD, TEXT, TEXT_DIM
@@ -41,15 +41,41 @@ class PageBase(QWidget):
         self.body_layout.setSpacing(SPACING_MD)
 
     def add_header(self, title: str, subtitle: str = "") -> None:
+        title_row = QHBoxLayout()
         title_label = QLabel(title)
         title_label.setFont(Fonts.title())
         title_label.setStyleSheet(f"color: {TEXT};")
-        self.body_layout.addWidget(title_label)
+        title_row.addWidget(title_label)
+        title_row.addStretch(1)
+        # Shown once the window gives this page a docs topic (set_help_topic).
+        self._help_button = QPushButton("?")
+        self._help_button.setObjectName("HelpButton")
+        self._help_button.setFixedSize(30, 30)
+        self._help_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._help_button.setAccessibleName(f"Help for {title}")
+        self._help_button.setVisible(False)
+        title_row.addWidget(self._help_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.body_layout.addLayout(title_row)
 
         if subtitle:
             subtitle_label = QLabel(subtitle)
             subtitle_label.setFont(Fonts.body())
             subtitle_label.setStyleSheet(f"color: {TEXT_DIM};")
+            subtitle_label.setWordWrap(True)
+
             self.body_layout.addWidget(subtitle_label)
 
         self.body_layout.addWidget(GradientDivider())
+
+    def set_help_topic(self, topic: str) -> None:
+        """Shows the "?" by the title, opening this page's section of the
+        guides (see bridge/ui/help_links.py)."""
+        button = getattr(self, "_help_button", None)
+        if button is None:
+            return
+        from bridge.ui import help_links
+
+        button.setToolTip(f"Open the guide for this page ({help_links.url(topic)})")
+        button.clicked.connect(lambda: help_links.open_topic(topic))
+        button.setVisible(True)
+

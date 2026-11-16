@@ -38,7 +38,9 @@ from bridge.ui.pages.home import HomePage
 from bridge.ui.pages.library.android_storage import AndroidStoragePage
 from bridge.ui.pages.library.media_library import MediaLibraryPage
 from bridge.ui.pages.library.roms import RomsPage
+from bridge.ui import help_links
 from bridge.ui.pages.settings.advanced import AdvancedPage
+
 from bridge.ui.pages.settings.controls import ControlsPage
 from bridge.ui.pages.settings.general import GeneralPage
 from bridge.ui.pages.settings.storage import StoragePage
@@ -380,10 +382,17 @@ class ManagerWindow(QMainWindow):
     # == Chrome: sidebar + page container ==
 
     def _register_page(self, key: str, widget: QWidget) -> None:
+        self._attach_help(key, widget)
         self.pages[key] = widget
         self.page_stack.addWidget(widget)
 
+    def _attach_help(self, key: str, widget: QWidget) -> None:
+        topic = help_links.TOPICS.get(key)
+        if topic and hasattr(widget, "set_help_topic"):
+            widget.set_help_topic(topic)
+
     def register_subpage(self, sub_key: str, widget: QWidget) -> None:
+        self._attach_help(sub_key, widget)
         """Adds a sub-page to its group's stack, replacing one already
         registered under the same key."""
         stack = self.subpage_stacks[self._group_for_sub(sub_key)]
