@@ -448,3 +448,19 @@ class ManagerWindowSmokeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+def _test_step_page_walks_the_sidebar_and_wraps(self):
+    """LB/RB on a controller (bridge/ui/gamepad_nav.py) walk the sidebar."""
+    self.config_path.write_text(json.dumps(self.config), encoding="utf-8")
+    window = self._window()
+    window.show_page("home")
+    window.step_page(1)
+    self.assertEqual(window.current_page, "library")
+    window.step_page(-1)
+    window.step_page(-1)
+    self.assertEqual(window.current_page, "credits")
+
+
+ManagerWindowSmokeTests.test_step_page_walks_the_sidebar_and_wraps = _test_step_page_walks_the_sidebar_and_wraps

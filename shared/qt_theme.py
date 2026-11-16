@@ -257,7 +257,16 @@ QPushButton#HomeCaret {{
 QPushButton#HomeCaret:hover {{
     background: rgba(255, 255, 255, 0.14);
 }}
+QPushButton:focus {{
+    color: {GRADIENT_STOPS[0]};
+    background-color: {PANEL_BG_HOVER};
+}}
+QCheckBox:focus, QRadioButton:focus {{
+    color: {GRADIENT_STOPS[0]};
+}}
+
 QPushButton#HelpButton {{
+
     background-color: {PANEL_BG};
     color: {TEXT_DIM};
     border-radius: 15px;

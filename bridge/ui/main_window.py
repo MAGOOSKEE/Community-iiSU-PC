@@ -205,7 +205,13 @@ class ManagerWindow(QMainWindow):
         self._dirty_timer.timeout.connect(self._poll_settings_dirty)
         self._dirty_timer.start(500)
 
+        # A controller can drive the Manager too (bridge/ui/gamepad_nav.py).
+        from bridge.ui.gamepad_nav import ManagerGamepad
+
+        self._gamepad = ManagerGamepad(self)
+
         self._startup_update_signals = None
+
         QTimer.singleShot(500, self._run_startup_update_check)
         self._repatch_wizard = None
         QTimer.singleShot(700, self._prompt_repatch_if_needed)
@@ -466,6 +472,19 @@ class ManagerWindow(QMainWindow):
                 self._reload_config()
                 self.rebuild_settings_pages()
         self.show_page(key)
+
+    def step_page(self, delta: int) -> None:
+        """The previous (-1) or next (+1) page in the sidebar, skipping the
+        ones that need an install first; for a controller's LB and RB."""
+        keys = [key for key, _icon, _label in NAV_ITEMS]
+        if self.current_page not in keys:
+            return
+        index = keys.index(self.current_page)
+        for _ in range(len(keys)):
+            index = (index + delta) % len(keys)
+            if keys[index] not in LOCKED_NAV or self.configured:
+                self._on_nav_click(keys[index])
+                return
 
     def _on_subnav_click(self, group_key: str, sub_key: str) -> None:
         if group_key == self.current_page and sub_key == self.current_subpage:

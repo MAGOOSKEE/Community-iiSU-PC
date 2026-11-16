@@ -51,6 +51,8 @@ One window, navigated with the sidebar.
 
 Lists have their actions as buttons beside them (they grey out until you select something they apply to), and in a right-click menu too.
 
+A controller works in the Manager too: the d-pad or left stick moves between controls and through lists, **A** presses or ticks, **B** goes back (closes a dialog or menu), and **LB**/**RB** move to the previous or next page in the sidebar. It only acts while the Manager is the window in front. On Windows that's any XInput controller (Xbox, or a PlayStation pad through Steam Input); on Linux, any controller the kernel sees as a joystick.
+
 ### Home
 
 The ▾ next to Start has **Start in the Background**, **Sync Library Now**, shortcuts to your ROMs and logs folders, **Recreate Shortcut**, **Add to Steam** and **Remove from Steam**, a **Show Logs** tick box and **Make Next Start a Full Restart**.
