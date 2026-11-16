@@ -11,10 +11,13 @@ in-process widget would reintroduce the "second GUI root from a non-owning
 thread" problem a separate process avoids.
 """
 
+import itertools
 import os
 import random
 import subprocess
 import sys
+import tempfile
+import time
 from pathlib import Path
 
 from shared.platform_compat import subprocess_creationflags
@@ -91,9 +94,18 @@ _FLAVOR_LINES = [
 DEFAULT_MAX_SECONDS = 120
 START_MAX_SECONDS = 300
 
+# How long show(wait_until_visible=True) waits for the overlay to be on
+# screen. Its process imports Qt first, which takes most of a second.
+VISIBLE_WAIT_SECONDS = 2.0
+# How long close_after_settle() leaves the overlay up once the game's window
+# exists, so a game switching itself to fullscreen does it behind the overlay.
+SETTLE_SECONDS = 0.8
+_ready_counter = itertools.count()
+
 
 def show(
     context: str, status_path: Path | None = None, max_seconds: float = DEFAULT_MAX_SECONDS,
+    wait_until_visible: bool = False, title: str | None = None,
 ) -> subprocess.Popen | None:
     """Best-effort: returns None instead of raising if the overlay process
     can't be started for any reason, a missing overlay is a cosmetic
@@ -111,13 +123,25 @@ def show(
     overlay shows the bouncing bar, for waits nothing can measure.
 
     The overlay watches this process and closes when it exits, and also
-    closes after max_seconds, or when the user clicks it or presses Escape."""
+    closes after max_seconds, or when the user clicks it or presses Escape.
+
+    wait_until_visible returns only once the overlay is on screen (or after
+    VISIBLE_WAIT_SECONDS). A game launch needs that before it minimizes iiSU:
+    otherwise the desktop shows for the half second the overlay takes to
+    start (seen in a screen recording of a DuckStation launch)."""
     flavor = random.choice(_FLAVOR_LINES)
     arguments = [context, flavor, "--parent-pid", str(os.getpid()), "--max-seconds", str(max_seconds)]
     if status_path:
         arguments += ["--status", str(status_path)]
+    if title:
+        arguments += ["--title", title]
+    ready_file = None
+    if wait_until_visible:
+        ready_file = Path(tempfile.gettempdir()) / f"iisupc-overlay-{os.getpid()}-{next(_ready_counter)}.ready"
+        ready_file.unlink(missing_ok=True)
+        arguments += ["--ready-file", str(ready_file)]
     try:
-        return subprocess.Popen(
+        process = subprocess.Popen(
             [sys.executable, "-m", "bridge.ui.boot_overlay_app", *arguments],
             cwd=str(_PROJECT_ROOT),
             creationflags=subprocess_creationflags(),
@@ -127,9 +151,41 @@ def show(
         )
     except OSError:
         return None
+    if ready_file is not None:
+        wait_for_file(ready_file, VISIBLE_WAIT_SECONDS, process)
+    return process
+
+
+def wait_for_file(path: Path, timeout: float, process: subprocess.Popen | None = None) -> bool:
+    """Waits for the overlay's ready file, then removes it. Gives up early if
+    the overlay process has already exited."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if path.exists():
+            path.unlink(missing_ok=True)
+            return True
+        if process is not None and process.poll() is not None:
+            return False
+        time.sleep(0.03)
+    return False
+
+
+def close_after_settle(overlay: subprocess.Popen | None, seconds: float = SETTLE_SECONDS) -> None:
+    """Closes the overlay a moment from now, on a thread, so a game that goes
+    fullscreen just after its window appears does it behind the overlay."""
+    if overlay is None:
+        return
+    import threading
+
+    def later() -> None:
+        time.sleep(seconds)
+        close(overlay)
+
+    threading.Thread(target=later, daemon=True).start()
 
 
 PROBLEM_MAX_SECONDS = 15
+
 
 
 def show_problem(title: str, message: str) -> subprocess.Popen | None:

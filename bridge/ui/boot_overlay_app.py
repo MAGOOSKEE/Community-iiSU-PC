@@ -295,14 +295,15 @@ class OverlayWindow(QWidget):
     def __init__(
         self, context: str, flavor: str, status_path: Path | None = None,
         parent_pid: int | None = None, max_seconds: float = 0, problem: str | None = None,
+        title: str | None = None,
     ):
         """problem, when given, is the title of a card saying a launch
         failed ("Couldn't open that game"), with context as the sentence
         saying why and what to do: no bar, no animated dots."""
         super().__init__()
         self._problem = problem
-        if problem:
-            self._TITLE_TEXT = problem
+        if problem or title:
+            self._TITLE_TEXT = problem or title
         self._status_path = status_path
         self._shown_percent = 0.0
         self._shown_log: list[str] = []
@@ -521,6 +522,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--parent-pid", type=int, default=None)
     parser.add_argument("--max-seconds", type=float, default=0)
     parser.add_argument("--problem", default=None)
+    parser.add_argument("--ready-file", type=Path, default=None)
+    parser.add_argument("--title", default=None)
     args, _unknown = parser.parse_known_args(argv)
     return args
 
@@ -528,7 +531,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 def main() -> None:
     args = parse_args(sys.argv[1:])
     app = QApplication(sys.argv[:1])
-    window = OverlayWindow(args.context, args.flavor, args.status, args.parent_pid, args.max_seconds, args.problem)
+    window = OverlayWindow(args.context, args.flavor, args.status, args.parent_pid, args.max_seconds, args.problem, args.title)
 
     if IS_WINDOWS:
         window.show()
@@ -543,7 +546,18 @@ def main() -> None:
         # a true fullscreen window on Linux regardless of display server.
         window.showFullScreen()
     window.activateWindow()
+    if args.ready_file is not None:
+        # Once the first frame is painted, tell the bridge it can hide iiSU.
+        QTimer.singleShot(60, lambda: _write_ready(args.ready_file))
     sys.exit(app.exec())
+
+
+def _write_ready(path: Path) -> None:
+    try:
+        path.write_text("ready", encoding="utf-8")
+    except OSError:
+        pass
+
 
 
 if __name__ == "__main__":

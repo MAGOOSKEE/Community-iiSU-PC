@@ -425,10 +425,11 @@ def end_game_handoff() -> None:
 
 
 PROBLEM_TITLE = "Couldn't open that game"
+GAME_OVERLAY_TITLE = "Starting your game"
 
 # An emulator that exits with an error after running this long was played
 # and then closed, not a launch that failed, so it's only logged.
-FAILED_LAUNCH_SECONDS = 60
+FAILED_LAUNCH_SECONDS = 20
 # When the quit hotkey or chord last asked a game to close (time.monotonic()).
 # A forced quit ends the emulator with a non-zero code, which isn't a failure.
 last_quit_request = 0.0
@@ -1414,7 +1415,7 @@ def launch_windows_app(app_name: str, config: dict) -> bool:
 
     existing_windows = list_visible_windows()
     show_overlay = config.get("show_boot_overlay", True) and not config.get("debug_show_console_windows", False)
-    overlay = boot_overlay.show(f"Waiting on {app_name}...") if show_overlay else None
+    overlay = boot_overlay.show(f"Waiting on {app_name}...", title=GAME_OVERLAY_TITLE, wait_until_visible=True) if show_overlay else None
     process = None
     hwnd = None
     try:
@@ -1527,7 +1528,7 @@ def launch_windows_app(app_name: str, config: dict) -> bool:
         recover_from_request_exception(config)
         return True
     finally:
-        boot_overlay.close(overlay)
+        boot_overlay.close_after_settle(overlay)
 
     return True
 
@@ -1543,7 +1544,7 @@ def launch_steam_game(app_id: str, config: dict) -> None:
 
     existing_windows = list_visible_windows()
     show_overlay = config.get("show_boot_overlay", True) and not config.get("debug_show_console_windows", False)
-    overlay = boot_overlay.show(f"Waiting on Steam app {app_id}...") if show_overlay else None
+    overlay = boot_overlay.show(f"Waiting on Steam app {app_id}...", title=GAME_OVERLAY_TITLE, wait_until_visible=True) if show_overlay else None
     hwnd = None
 
     try:
@@ -1627,7 +1628,7 @@ def launch_steam_game(app_id: str, config: dict) -> None:
         recover_from_request_exception(config)
         return
     finally:
-        boot_overlay.close(overlay)
+        boot_overlay.close_after_settle(overlay)
 
 
 def read_request(conn) -> str:
@@ -1897,7 +1898,7 @@ def handle_request(raw_intent: str) -> None:
     # windows is on, since a fullscreen overlay would just hide the
     # console windows that setting exists to show.
     show_overlay = config.get("show_boot_overlay", True) and not config.get("debug_show_console_windows", False)
-    overlay = boot_overlay.show(f"Waiting on {friendly_emulator_name(executable)}...") if show_overlay else None
+    overlay = boot_overlay.show(f"Waiting on {friendly_emulator_name(executable)}...", title=GAME_OVERLAY_TITLE, wait_until_visible=True) if show_overlay else None
     try:
         iisu_hwnd = find_window_by_title(config["iisu_window_title"])
         if iisu_hwnd is not None:
@@ -1932,7 +1933,7 @@ def handle_request(raw_intent: str) -> None:
         if bring_emulator_to_foreground(process.pid):
             log_launch(f"ON SCREEN: {friendly_emulator_name(executable)} {time.monotonic() - request_started:.1f}s after iiSU asked")
     finally:
-        boot_overlay.close(overlay)
+        boot_overlay.close_after_settle(overlay)
 
 
 def is_game_running() -> bool:

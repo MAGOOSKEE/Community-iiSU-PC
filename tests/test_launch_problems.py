@@ -72,3 +72,23 @@ class ExitLooksLikeFailureTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OverlayReadyFileTests(unittest.TestCase):
+    def test_wait_for_file_sees_and_removes_it(self):
+        sys.path.insert(0, str(PROJECT_ROOT))
+        from bridge.ui import boot_overlay_qt
+
+        with tempfile.TemporaryDirectory() as tmp:
+            ready = Path(tmp) / "x.ready"
+            self.assertFalse(boot_overlay_qt.wait_for_file(ready, 0.1))
+            ready.write_text("ready", encoding="utf-8")
+            self.assertTrue(boot_overlay_qt.wait_for_file(ready, 0.1))
+            self.assertFalse(ready.exists())
+
+    def test_parse_args_takes_ready_file_and_title(self):
+        from bridge.ui import boot_overlay_app
+
+        args = boot_overlay_app.parse_args(["ctx", "flavor", "--ready-file", "r.ready", "--title", "Starting your game"])
+        self.assertEqual(args.title, "Starting your game")
+        self.assertEqual(args.ready_file.name, "r.ready")

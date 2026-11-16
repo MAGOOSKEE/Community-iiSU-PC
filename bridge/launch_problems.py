@@ -42,7 +42,11 @@ def rom_missing(rom: str) -> str:
 
 
 def emulator_exited(emulator: str, code: int) -> str:
+    # Windows reports -1 as 4294967295; show the number the program meant.
+    if code is not None and code >= 2**31:
+        code -= 2**32
     return (
+
         f"{emulator} closed with an error (code {code}). If the game didn't start, "
         f"open it in {emulator} directly to see why: often a missing BIOS or setting."
     )
